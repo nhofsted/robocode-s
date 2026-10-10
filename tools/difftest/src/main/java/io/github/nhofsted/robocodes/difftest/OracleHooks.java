@@ -39,6 +39,7 @@ public final class OracleHooks {
 
     private static volatile boolean enabled;
     private static Turn current;
+    private static String[] robotInfo;
 
     private OracleHooks() {
     }
@@ -61,7 +62,45 @@ public final class OracleHooks {
     /** Starts collecting for a battle with {@code robots} robots. */
     static synchronized void enable(int robots) {
         current = new Turn(robots);
+        robotInfo = new String[robots];
         enabled = true;
+    }
+
+    /** The robots' types and teams, by robot index (known once the first round started). */
+    static synchronized String[] robotInfo() {
+        return robotInfo.clone();
+    }
+
+    /** Entry of {@code RobotPeer.startRound(long, int)}: records the robot's type once. */
+    public static void robotStarted(Object peer) {
+        if (!enabled) {
+            return;
+        }
+        try {
+            int index = index(peer);
+            synchronized (OracleHooks.class) {
+                if (robotInfo[index] != null) {
+                    return;
+                }
+            }
+            Object statics = field(peer, "statics");
+            Object teamName = call(statics, "getTeamName");
+            String json = new Oracle.Json().begin()
+                    .field("name", String.valueOf(call(statics, "getName")))
+                    .field("advanced", (boolean) call(statics, "isAdvancedRobot"))
+                    .field("teamRobot", (boolean) call(statics, "isTeamRobot"))
+                    .field("droid", (boolean) call(statics, "isDroid"))
+                    .field("sentry", (boolean) call(statics, "isSentryRobot"))
+                    .field("leader", (boolean) call(statics, "isTeamLeader"))
+                    .field("team", teamName == null ? "" : teamName.toString())
+                    .field("teamIndex", (int) call(statics, "getTeamIndex"))
+                    .end().toString();
+            synchronized (OracleHooks.class) {
+                robotInfo[index] = json;
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot read classic's robot statics", e);
+        }
     }
 
     /** Returns what was collected since the last call and starts a new turn. */

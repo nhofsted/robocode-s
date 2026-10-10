@@ -44,3 +44,23 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew build
+
+  difftest:
+    name: Engine replay against classic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: ./gradlew :tools:difftest:installDist :robots:samples:jar :clients:java-determinism:jar
+      - name: Record classic battles (sample robots)
+        run: tools/difftest/record-samples.sh "$RUNNER_TEMP/recordings"
+      - name: Replay them in the engine
+        run: cargo test --locked -p robocode-s-difftest
+        env:
+          ROBOCODES_RECORDINGS: ${{ runner.temp }}/recordings

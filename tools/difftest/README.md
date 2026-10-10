@@ -59,3 +59,15 @@ Recording costs about 1% of the battle time.
 
 - Robots that read the clock (`System.nanoTime`, `currentTimeMillis`) to budget their own computation can still behave differently between runs. None of the tested top bots did, but four of the six read the clock.
 - Robot console output is buffered by the robot threads, so the turn in which it appears varies. That's why it's opt-in.
+
+## Engine replay
+
+`crates/difftest` replays recordings in the robocode-s engine: it feeds each turn's recorded commands into the engine and compares robot states, bullets, remaining values and events bit for bit, reporting the first difference.
+
+```sh
+tools/difftest/record-samples.sh /tmp/recordings          # 9 sample battles, ~12 s
+cargo run --release -p robocode-s-difftest --bin replay -- /tmp/recordings/*.jsonl.gz
+ROBOCODES_RECORDINGS=/tmp/recordings cargo test -p robocode-s-difftest
+```
+
+CI records the sample corpus and replays it on every push (job "Engine replay against classic"). Top RoboRumble bots are not in CI: their jars belong to other authors. Pass them as the second argument of `record-samples.sh`, or record by hand with `--jars`.

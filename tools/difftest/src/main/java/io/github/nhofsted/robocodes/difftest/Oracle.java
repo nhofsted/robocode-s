@@ -63,7 +63,7 @@ import java.util.zip.GZIPOutputStream;
 public final class Oracle {
 
     /** Version of the recording format; bump on incompatible changes. */
-    public static final int FORMAT_VERSION = 2;
+    public static final int FORMAT_VERSION = 3;
 
     public static void main(String[] args) throws Exception {
         Options options = Options.parse(args);
@@ -115,7 +115,8 @@ public final class Oracle {
                     recorder.classicVersion = engine.getVersion();
                     engine.addBattleListener(recorder);
                     RobotSpecification[] robots = engine.getLocalRepository(String.join(",", options.robots));
-                    if (robots.length != options.robots.size()) {
+                    // Teams expand into their members, so there can be more robots than names.
+                    if (robots.length < options.robots.size()) {
                         throw new IllegalArgumentException("Found " + robots.length + " of " + options.robots.size()
                                 + " robots " + options.robots + " in " + options.robotJars);
                     }
@@ -238,9 +239,15 @@ public final class Oracle {
                     .field("height", options.height)
                     .field("inactivityTime", 450)
                     .field("gunCoolingRate", 0.1)
+                    .field("sentryBorderSize", 100)
+                    .field("hideEnemyNames", false)
                     .name("robots").beginArray();
             for (IRobotSnapshot robot : start.getRobots()) {
                 json.value(robot.getName());
+            }
+            json.endArray().name("robotInfo").beginArray();
+            for (String info : OracleHooks.robotInfo()) {
+                raw(json, info);
             }
             write(json.endArray().end());
         }

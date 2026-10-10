@@ -1,0 +1,17 @@
+[package]
+name = "robocode-s-difftest"
+description = "Replays classic Robocode recordings (tools/difftest oracle) in the robocode-s engine and reports the first difference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-engine.workspace = true
+serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
+flate2 = "1.1.10"

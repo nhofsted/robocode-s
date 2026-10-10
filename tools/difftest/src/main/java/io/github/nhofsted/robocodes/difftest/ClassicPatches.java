@@ -179,6 +179,15 @@ public final class ClassicPatches {
                         }
                         return new MethodVisitor(Opcodes.ASM9, mv) {
                             @Override
+                            public void visitCode() {
+                                super.visitCode();
+                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                        "io/github/nhofsted/robocodes/difftest/OracleHooks", "robotStarted",
+                                        "(Ljava/lang/Object;)V", false);
+                            }
+
+                            @Override
                             public void visitMethodInsn(int opcode, String owner, String method, String desc,
                                     boolean isInterface) {
                                 if (opcode == Opcodes.INVOKEVIRTUAL && owner.equals("java/lang/Object")
