@@ -6,6 +6,7 @@ A reimplementation of [Robocode](https://robocode.sourceforge.io/) with a Rust b
 - **Robots in any language**: Java/Kotlin, Python, C#/.NET, Rust, C/C++
 - **Isolation & resource limits** through pluggable launchers (local process, Docker, remote)
 - Runs on **Windows, Linux and macOS**
+- **Distributed RoboRumble** with a serverless AWS backend and a web interface that replays battles in the browser
 
 > Status: early design phase. See [docs/design.md](docs/design.md).
 

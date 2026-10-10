@@ -10,7 +10,8 @@ robocode-s is a reimplementation of [Robocode](https://robocode.sourceforge.io/)
 - a **GPU-accelerated** battlefield viewer,
 - a **client/server** architecture where robots run out of process (optionally in containers) and talk to the server over a well-defined protocol,
 - **bit-exact backward compatibility** with existing classic Java robots (`robocode.*` API), and
-- client libraries for robots in other languages (Java/Kotlin, Python, C#/.NET, Rust, C/C++).
+- client libraries for robots in other languages (Java/Kotlin, Python, C#/.NET, Rust, C/C++),
+- its own **distributed RoboRumble**: volunteers run battles, a serverless AWS backend ranks the robots, and a web interface shows rankings and replays battles in the browser.
 
 It runs on Windows, Linux and macOS.
 
@@ -25,7 +26,7 @@ It runs on Windows, Linux and macOS.
 5. **Optional determinism.** A deterministic mode in which the same seed and robots always give the same result, independent of machine load.
 6. **Cross-platform.** First-class support on Windows, Linux and macOS (x86-64 and arm64).
 7. **GUI.** Battle setup, a live viewer with robot debug painting, recording and replay.
-8. **RoboRumble participation** (subject to community acceptance, see §12).
+8. **Our own RoboRumble**: distributed battle execution, verifiable results, a web interface with in-browser replays (§12). Contributing to classic LiteRumble is optional.
 
 ### Non-goals (for now)
 
@@ -72,6 +73,9 @@ Components:
 | `runner` | Rust | Launches robot processes: local process, Docker container, or as a remote agent. Measures the robot's CPU time. |
 | `gui` | Rust (wgpu + egui) | Battle setup, viewer, debug painting, replay. Connects as an observer and can embed a server. |
 | `cli` | Rust | Headless battles, batch runs, recordings, rumble client. |
+| `rumble/*` | Rust (Lambdas) | Rumble backend: work assignment, result intake, auth, verification, rankings. |
+| `web` | TypeScript + WASM | Rumble website and in-browser replay viewer. |
+| `infra` | TypeScript (CDK) | AWS infrastructure for the rumble. |
 | `clients/java-compat` | Java | Drop-in replacement for `robocode.jar`, implementing the classic API on top of the protocol. |
 | `clients/*` | various | Native robot APIs for Java/Kotlin, Python, .NET, Rust and C/C++. |
 | `tools/difftest` | Java + Rust | Differential testing against classic Robocode. |
@@ -227,11 +231,76 @@ Native APIs for new robots, all generated from the same `.proto`:
 - Debug paint and console output are stored in an optional side stream.
 - Classic `.br` recordings can be imported if feasible (low priority).
 
-## 12. RoboRumble client
+## 12. robocode-s Rumble
 
-- The rumble client from `cli`/`gui` takes part in LiteRumble: it downloads participant lists and robot jars, runs pairings, and uploads results.
-- **Open issue (O1):** the rumble community needs to accept results from a non-classic engine. The plan is to approach the community only after the differential harness shows bit-exact agreement over a large corpus of rumble robots.
-- The client sends its own version identifier. Accepted versions are controlled by the rumble server.
+We run our own distributed rumble. Volunteers run battles with the robocode-s rumble client, and a serverless AWS backend collects results, computes rankings and serves a web interface for browsing results and replaying battles. Taking part in classic LiteRumble stays an optional extra (O1).
+
+### 12.1 Architecture
+
+```
+ rumble clients (cli / gui)                AWS
+ ┌──────────────────────┐   HTTPS   ┌────────────────────────────────────────────┐
+ │ GET  /work           │──────────►│ API Gateway (HTTP API)                     │
+ │ run battles locally  │           │   ├─ work Lambda      ─┐                   │
+ │ POST /results        │──────────►│   ├─ results Lambda   ─┼─► DynamoDB        │
+ │ PUT recording (S3    │──────────►│   ├─ auth Lambda       │   (bots, pairings,│
+ │     presigned URL)   │           │   └─ submit Lambda    ─┘    battles, users)│
+ └──────────────────────┘           │ S3: robot jars, recordings, site, rankings │
+                                    │ EventBridge schedule → rankings Lambda     │
+ browser ──────────────────────────►│ CloudFront → static site + ranking JSON    │
+                                    │ verify Lambda (container image: engine +   │
+                                    │   JVM runner) for validation & spot checks │
+                                    └────────────────────────────────────────────┘
+```
+
+- **Lambdas in Rust** (`cargo-lambda`), so they share the `engine`, `protocol` and recording code with the rest of the project.
+- **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
+- **Storage:** DynamoDB, on-demand, single-table design: bots, per-pairing statistics, battle records, users and tokens. S3 holds mirrored robot jars (keyed by SHA-256), recordings (lifecycle-pruned) and the generated ranking JSON.
+- **Website:** a static single-page app on S3 + CloudFront. It reads pre-computed ranking JSON and doesn't hit a database for page views.
+
+### 12.2 Server-assigned work
+
+Unlike LiteRumble, clients do not choose pairings themselves:
+
+1. A client calls `GET /work`. The work Lambda returns a batch of battle assignments: division, robot IDs and jar hashes, number of rounds, **seed** and assignment ID. Pairings with the fewest battles come first, as in LiteRumble.
+2. The client runs the battles in **deterministic mode** (§7.2). It downloads and verifies jars by hash, from the S3 mirror.
+3. The client calls `POST /results` with per-round scores, the recording hash and engine version. The recording is uploaded through a presigned S3 URL.
+4. The results Lambda checks that the assignment exists, is unexpired and belongs to this user, then updates the pairing statistics incrementally.
+
+Note: in deterministic mode slow robots never skip turns, so their rumble behavior may differ slightly from classic. This is accepted and documented for the rumble.
+
+### 12.3 Trust and verification
+
+- **Authentication:** GitHub OAuth. The auth Lambda exchanges the code and issues a long-lived upload token for the client and a session for the web UI. Cognito is not used because GitHub isn't a standard OIDC provider for Cognito.
+- **Cross-checks:** because battles are deterministic, a configurable fraction of assignments (e.g. 2–5%) goes to two different users. Any mismatch flags both submissions.
+- **Spot checks:** the verify Lambda re-runs sampled battles itself. Robots run inside the Lambda container (Firecracker isolation, time limited) with the local-process runner.
+- **Consequences:** users with mismatches are quarantined. Their results are excluded until re-verified, and they can be banned and their results purged.
+
+### 12.4 Participants and robot jars
+
+- **Submission:** a web form with GitHub login. Authors upload a jar or provide a URL; it's mirrored to S3. They choose divisions (1v1, melee, teams, twin duel) and can later replace the version or retire the bot.
+- **Validation:** the verify Lambda checks the jar structure and `.properties`, computes codesize for Java weight classes (nano/micro/mini/mega), and runs a short smoke battle. Only then is the bot activated.
+- **Seeding:** a one-time import of all robots in the current RoboWiki participant lists. Their jars are mirrored to S3. Imported bots are attributed to their original author and are claimable by that author after logging in with GitHub.
+- **Mirror and takedown policy:** jars are mirrored to keep the rumble working when original URLs die. Authors can request removal through the site or a GitHub issue, and removals are handled promptly. The import is announced on RoboWiki.
+- Other-language robots (M4) use the same flow with their own package format. Weight classes only apply where codesize is defined.
+
+### 12.5 Rankings
+
+- Computed incrementally on upload (pairing statistics) plus a scheduled rankings Lambda that writes JSON to S3 per division.
+- **Metrics (LiteRumble-compatible):** APS (average percentage score), PWIN, survival, ANPP, Vote and Glicko-2. Each is per division and weight class.
+- **History:** a daily snapshot of each bot's rank and score, for trend charts.
+
+### 12.6 Web interface
+
+- Rankings tables per division and weight class, sortable by every metric, with filters and search.
+- Bot pages: metadata, author, versions, rating history chart, best and worst pairings, and a full pairing matrix with heatmap.
+- Pairing pages: per-pairing statistics and a list of battles.
+- **Battle replay in the browser:** the engine and viewer are compiled to **WebAssembly** (WebGPU, with WebGL2 fallback) and play the uploaded recordings. Scrubbing works the same as in the desktop GUI (§11).
+- Contributor stats (battles run per user) and a page for submitting or managing bots.
+
+### 12.7 Classic LiteRumble (optional)
+
+Contributing to classic LiteRumble from robocode-s still depends on community acceptance (O1). The plan is unchanged: approach the community only after difftest shows bit-exact agreement over a large rumble corpus.
 
 ## 13. Compatibility reference and differential testing
 
@@ -262,7 +331,14 @@ robocode-s/
 │   ├── server/
 │   ├── runner/
 │   ├── gui/
+│   ├── viewer-wasm/          # engine + renderer for the browser
 │   └── cli/
+├── rumble/                   # Lambda functions (Rust, cargo-lambda)
+│   ├── api/                  # work, results, auth, submit
+│   ├── verify/               # validation & spot-check runner (container image)
+│   └── rankings/
+├── web/                      # rumble website (static SPA)
+├── infra/                    # AWS CDK (TypeScript)
 ├── proto/                    # .proto schema (source of truth)
 ├── clients/
 │   ├── java-compat/          # robocode.jar drop-in (Gradle)
@@ -287,17 +363,22 @@ robocode-s/
 | M2 | GUI | Viewer, battle setup, debug paint, recording and replay |
 | M3 | Isolation and distribution | Docker runner images, network relay, warm pools, remote runner agents with TLS and tokens |
 | M4 | Polyglot | Python, .NET, Rust, C/C++ and modern Java/Kotlin client libraries plus sample robots |
-| M5 | Rumble | Large-corpus difftest, rumble client, community engagement |
+| M5 | Rumble | AWS backend (work/results/auth/rankings), rumble client, seeding import from RoboWiki, website with rankings, cross-checks and spot checks |
+| M5b | Web replay | Engine + viewer compiled to WASM; replays in the browser |
 | M6+ | Extras | WASM runner, Tank Royale adapter, .NET compat |
 
 ## 17. Open questions
 
-- **O1** Will LiteRumble accept results from robocode-s, and under what conditions?
+- **O1** Will classic LiteRumble accept results from robocode-s? This is now optional, since we run our own rumble.
 - **O2** Which classic version do current rumble clients use? Are there rule-relevant differences from 1.11.1?
 - **O3** Container network isolation: is the relay approach acceptable, or are there simpler cross-platform options?
 - **O4** `Math` vs `StrictMath` divergence (§4.3): what exactly does "bit-exact" mean?
 - **O5** JRE distribution in local mode: bundle via `jlink`, download on demand, or require a user-installed Java?
 - **O6** Licensing of bundled classic sample robots. They are EPL-1.0, which permits distribution under later EPL versions; this needs confirmation for each file.
+- **O7** AWS account, region and domain name for the rumble site.
+- **O8** Cross-check fraction and spot-check rate. These trade compute cost against detecting cheating.
+- **O9** Recording retention: keep all, keep the latest N per pairing, or sample? This drives S3 cost.
+- **O10** Frontend framework for `web/` (e.g. Svelte or React with Vite).
 
 ## 18. Decisions so far
 
@@ -314,3 +395,8 @@ robocode-s/
 | Remote robots | Supported (authenticated, TLS) |
 | GUI scope | Setup and viewer, recording and replay, rumble client |
 | Design doc location | In repo (`docs/design.md`) |
+| Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
+| Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |
+| Robot jars | Mirrored to S3, with a takedown policy |
+| Rumble clients | Anyone with GitHub login; server-assigned seeded work, cross-checks and spot checks |
+| IaC | AWS CDK (TypeScript) |
