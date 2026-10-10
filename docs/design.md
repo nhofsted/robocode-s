@@ -277,9 +277,20 @@ Note: in deterministic mode slow robots never skip turns, so their rumble behavi
 ### 12.3 Trust and verification
 
 - **Authentication:** GitHub OAuth. The auth Lambda exchanges the code and issues a long-lived upload token for the client and a session for the web UI. Cognito is not used because GitHub isn't a standard OIDC provider for Cognito.
-- **Cross-checks:** because battles are deterministic, a configurable fraction of assignments (e.g. 2–5%) goes to two different users. Any mismatch flags both submissions.
-- **Spot checks:** the verify Lambda re-runs sampled battles itself. Robots run inside the Lambda container (Firecracker isolation, time limited) with the local-process runner.
-- **Consequences:** users with mismatches are quarantined. Their results are excluded until re-verified, and they can be banned and their results purged.
+- **Assumption:** most of the community is honest. Verification should cost little compute, while still catching cheating and broken clients (bugs, modified engines, nondeterminism).
+- **Reputation-based verification rate:** each user has a reputation that controls what fraction of their battles is re-run elsewhere:
+  - **New users start slightly suspicious:** about 20% of their battles are verified (initial value; configurable).
+  - Each verified, matching battle raises reputation, and the rate falls toward a **floor of about 1%**. The floor never reaches zero, so a trusted account that gets compromised or runs a broken client is still noticed.
+  - A user reaches the floor after roughly 100–200 matching verified battles (curve to be tuned).
+  - All values are configuration, not code.
+- **How a battle is verified:** the same assignment (same seed and robot versions) goes to a **high-reputation user** first, because their compute is free. The verify Lambda handles it if no trusted user picks it up in time. Results are only compared when both runs used the same engine version.
+- **Optimistic acceptance:** results count in the rankings immediately, even before verification. With a mostly honest community, this keeps rankings fresh.
+- **Mismatch handling:**
+  1. The verify Lambda re-runs the battle as a tie-breaker to find out which side is wrong. A mismatch can also be our own bug, such as nondeterminism, so it's not automatically treated as cheating.
+  2. The user who was wrong loses their reputation (back to "new", or below) and is **quarantined**: new results are held back, and a sample of their recent results is re-verified.
+  3. If the tie-breaker run disagrees with both submissions, it's an engine bug. An alert is raised and nobody is penalized.
+  4. Repeated confirmed mismatches lead to a ban, and that user's results are purged from the pairing statistics.
+- **Spot checks:** the verify Lambda runs robots inside the Lambda container, with the local-process runner and a time limit. Lambda's own isolation (Firecracker) acts as the sandbox.
 
 ### 12.4 Participants and robot jars
 
@@ -381,7 +392,7 @@ robocode-s/
 - **O5** JRE distribution in local mode: bundle via `jlink`, download on demand, or require a user-installed Java?
 - **O6** Licensing of bundled classic sample robots. They are EPL-1.0, which permits distribution under later EPL versions; this needs confirmation for each file.
 - **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The subdomain names can still change.
-- **O8** Cross-check fraction and spot-check rate. These trade compute cost against detecting cheating.
+- **O8** ~~Cross-check fraction~~ Decided: reputation-based (§12.3). The exact numbers (start rate, floor, curve) get tuned once real data exists.
 - **O9** Recording retention: keep all, keep the latest N per pairing, or sample? This drives S3 cost.
 - **O10** Frontend framework for `web/` (e.g. Svelte or React with Vite).
 
@@ -403,6 +414,6 @@ robocode-s/
 | Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
 | Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |
 | Robot jars | Mirrored to S3, with a takedown policy |
-| Rumble clients | Anyone with GitHub login; server-assigned seeded work, cross-checks and spot checks |
+| Rumble clients | Anyone with GitHub login; server-assigned seeded work; reputation-based verification (new users ~20%, trusted users ~1%) with optimistic acceptance |
 | IaC | AWS CDK (TypeScript) |
 | AWS deployment | eu-west-1; `rumble.planethofstede.be` and `api.rumble.planethofstede.be` in the existing Route 53 zone |
