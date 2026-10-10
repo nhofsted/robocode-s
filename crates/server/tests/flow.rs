@@ -7,6 +7,8 @@ use robocode_s_protocol::v1::{self, client_message, event, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{BattleOutcome, RobotEntry, ServerConfig, run_battle};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -112,16 +114,21 @@ fn classic_mode_skips_turns_of_slow_robots() {
         ..Default::default()
     };
     let (address, server) = start(config, vec![entry("a.A", "a"), entry("b.B", "b")]);
-    // A answers at once and later just disconnects; the battle continues with its commands.
+    // A answers at once and reports how far the battle got; later it just disconnects and
+    // the battle continues with its commands.
+    let progress = Arc::new(AtomicI64::new(0));
     let fast = {
-        let address = address.clone();
+        let (address, progress) = (address.clone(), progress.clone());
         thread::spawn(move || {
             let mut s = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "a");
             while let Some(msg) = receive(&mut s) {
                 match msg {
                     server_message::Msg::RoundStart(_) => execute(&mut s, 0),
-                    server_message::Msg::Tick(t) if t.turn >= 10 => return,
-                    server_message::Msg::Tick(t) => execute(&mut s, t.turn),
+                    server_message::Msg::Tick(t) if t.turn >= 20 => return,
+                    server_message::Msg::Tick(t) => {
+                        progress.store(t.turn, Ordering::SeqCst);
+                        execute(&mut s, t.turn);
+                    }
                     _ => {}
                 }
             }
@@ -133,8 +140,10 @@ fn classic_mode_skips_turns_of_slow_robots() {
         match msg {
             server_message::Msg::RoundStart(_) => execute(&mut slow, 0),
             server_message::Msg::Tick(t) if t.turn == 3 => {
-                // Too slow: the next turns run without B.
-                thread::sleep(Duration::from_millis(150));
+                // Too slow: B answers only after the battle reached turn 8 without it.
+                while progress.load(Ordering::SeqCst) < 8 {
+                    thread::sleep(Duration::from_millis(1));
+                }
                 execute(&mut slow, t.turn);
             }
             server_message::Msg::Tick(t) if t.turn > 3 => {
@@ -153,8 +162,8 @@ fn classic_mode_skips_turns_of_slow_robots() {
     fast.join().unwrap();
     server.join().unwrap().unwrap();
     assert!(
-        skipped.len() >= 2,
-        "expected skipped turns, got {skipped:?}"
+        skipped.len() >= 5,
+        "expected turns 4..8 or more to be skipped, got {skipped:?}"
     );
     assert_eq!(
         skipped[0], 4,
