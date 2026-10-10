@@ -27,7 +27,7 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 - `clients/java-determinism/`: Java agent for per-robot seeded randomness
 - `robots/samples/`: classic sample robots (EPL-2.0)
 - `tools/difftest/`: oracle that records classic battles for differential testing
-- `docs/`: [design](docs/design.md) and [architecture decision records](docs/adr/README.md)
+- `docs/`: [design](docs/design.md), [engine specification](docs/engine-spec.md) and [architecture decision records](docs/adr/README.md)
 
 ## License
 

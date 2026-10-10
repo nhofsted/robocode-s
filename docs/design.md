@@ -101,7 +101,7 @@ The turn structure follows classic `Battle.runTurn()`, roughly:
 5. Generate the remaining events (hit, death, win, custom).
 6. Check for round end.
 
-The exact order is taken from the 1.11.1 sources and pinned down by differential tests.
+The exact order, all formulas and every random draw are specified in **[engine-spec.md](engine-spec.md)**, written from the 1.11.1 sources and pinned down by differential tests.
 
 ### 4.3 Math functions — the main bit-exactness risk
 
@@ -460,6 +460,8 @@ robocode-s/
 - **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
 - **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
+- **O12** JDK geometry (`Rectangle2D`, `Arc2D`) in scanning and collisions: OpenJDK's code is GPL and can't be copied. Independent implementation verified by differential tests (recommended), a GPL secondary license for one module, or clean-room? See engine-spec §15.2.
+- **O13** `Utils.getRandom()` returns the engine's generator in classic. robocode-s gives robots a per-robot stream and the oracle would patch classic to match (engine-spec §15.1). Accept this deviation?
 
 ## 18. Decisions so far
 
