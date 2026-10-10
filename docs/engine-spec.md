@@ -582,11 +582,11 @@ Comparing these is the M1 acceptance criterion. Events are not recorded yet.
 
 ## 15. Deviations and open questions
 
-### 15.1 `Utils.getRandom()` (deviation)
+### 15.1 `Utils.getRandom()` (deviation, ADR 0010)
 
 In classic, `robocode.util.Utils.getRandom()` returns the **engine's** generator. A robot that draws from it shifts every later shuffle (§3). Robots in robocode-s run in their own processes and can't share it.
 
-**Proposal:** `java-compat` returns a per-robot `Random`, derived like the other streams (ADR 0009) with its own salt. The oracle patches `Utils.getRandom()` the same way for robot threads, so recordings stay comparable. None of the six top bots checked so far, and none of the samples, use it.
+**Decision:** `Utils.getRandom()` returns one `Random` per robot, seeded with `mix64(base ^ 0x5554494C53524E44)` (ADR 0010). The oracle patches classic's `Utils.getRandom()` the same way for robot threads (`ClassicPatches`), so recordings stay comparable. None of the six top bots checked, and none of the samples, use it.
 
 ### 15.2 O12: JDK geometry and licensing
 

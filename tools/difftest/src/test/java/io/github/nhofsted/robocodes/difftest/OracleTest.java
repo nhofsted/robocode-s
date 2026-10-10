@@ -80,6 +80,24 @@ class OracleTest {
     }
 
     @Test
+    void utilsGetRandomIsPerRobotOnRobotThreadsOnly() throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        command.add("-javaagent:" + System.getProperty("robocodes.difftest.agentJar"));
+        command.add("-javaagent:" + System.getProperty("robocodes.difftest.patchesJar"));
+        command.add("-cp");
+        command.add(System.getProperty("java.class.path"));
+        command.add(UtilsRandomProbe.class.getName());
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+        long expected = new java.util.Random(io.github.nhofsted.robocodes.determinism.RobotRandomness.utilsRandomSeed(
+                io.github.nhofsted.robocodes.determinism.RobotRandomness.baseSeed(7, "probe.Robot"))).nextLong();
+        assertTrue(output.contains("robot " + expected + " true"), output);
+        assertTrue(output.contains("engine true"), output);
+    }
+
+    @Test
     void jsonEscapesStringsAndNonFiniteDoubles() {
         String json = new Oracle.Json().begin()
                 .field("s", "a\"b\\c\nd\u0001")

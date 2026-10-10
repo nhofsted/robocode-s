@@ -461,7 +461,7 @@ robocode-s/
 - **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** JDK geometry (`Rectangle2D`, `Arc2D`) in scanning and collisions: OpenJDK's code is GPL and can't be copied. Independent implementation verified by differential tests (recommended), a GPL secondary license for one module, or clean-room? See engine-spec §15.2.
-- **O13** `Utils.getRandom()` returns the engine's generator in classic. robocode-s gives robots a per-robot stream and the oracle would patch classic to match (engine-spec §15.1). Accept this deviation?
+- **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
 
 ## 18. Decisions so far
 

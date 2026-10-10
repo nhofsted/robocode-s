@@ -83,11 +83,26 @@ class RobotRandomnessTest {
         assertEquals(GOLDEN_BASE, base);
         assertEquals(GOLDEN_MATH_SEED, RobotRandomness.mathRandomSeed(base));
         assertEquals(GOLDEN_FIRST_SEED, RobotRandomness.randomSeed(base, 1));
+        assertEquals(GOLDEN_UTILS_SEED, RobotRandomness.utilsRandomSeed(base));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void utilsRandomHookGivesOneInstancePerRobot() throws Exception {
+        Supplier<Random> hook = (Supplier<Random>) System.getProperties().get(RobotRandomness.UTILS_RANDOM_KEY);
+        Random[] fire = inRobot("sample.Fire", () -> new Random[] {hook.get(), hook.get()});
+        Random[] other = inRobot("jk.mega.DrussGT 3.1.16", () -> new Random[] {hook.get()});
+        assertTrue(fire[0] == fire[1], "same instance for the same robot");
+        assertTrue(fire[0] != other[0], "different robots get different instances");
+        assertEquals(null, inGroup("Battle", hook::get), "no instance outside robot threads");
+        long expected = new Random(RobotRandomness.utilsRandomSeed(RobotRandomness.baseSeed(SEED, "sample.Fire"))).nextLong();
+        assertEquals(expected, inRobot("sample.Fire", () -> hook.get().nextLong()));
     }
 
     private static final long GOLDEN_BASE = 4017542787009561894L;
     private static final long GOLDEN_MATH_SEED = -7329177522749448640L;
     private static final long GOLDEN_FIRST_SEED = 5799085141444697617L;
+    private static final long GOLDEN_UTILS_SEED = -3133940015624230923L;
 
     private static <T> T inRobot(String robot, Supplier<T> body) throws Exception {
         return inGroup(robot, body);

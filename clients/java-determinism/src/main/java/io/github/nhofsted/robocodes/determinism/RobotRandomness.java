@@ -26,6 +26,7 @@ import java.util.function.Supplier;
  *   base       = mix64(battleSeed) ^ mix64(fnv1a64(utf8(robotName)))
  *   Math.random: new java.util.Random(mix64(base ^ 0x4D41544852414E44L)).nextDouble()
  *   k-th new Random() (k = 1, 2, ...): seed = mix64(base + k * 0x9E3779B97F4A7C15L)
+ *   Utils.getRandom(): one new java.util.Random(mix64(base ^ 0x5554494C53524E44L)) per robot
  * </pre>
  * where {@code mix64} is the SplitMix64 finalizer. Calls from threads that do
  * not belong to a robot keep the JDK's normal behavior.
@@ -40,8 +41,16 @@ public final class RobotRandomness {
     static final String MATH_RANDOM_KEY = "robocodes.determinism.mathRandom";
     /** System property key of the {@code new Random()} seed hook (a {@code Supplier<Long>}). */
     static final String RANDOM_SEED_KEY = "robocodes.determinism.randomSeed";
+    /**
+     * System property key of the {@code robocode.util.Utils.getRandom()} hook (a
+     * {@code Supplier<Random>}). Classic returns the engine's generator there; robocode-s
+     * gives each robot its own instance (engine-spec §15.1). The classic oracle installs a
+     * patch that reads this hook.
+     */
+    public static final String UTILS_RANDOM_KEY = "robocodes.determinism.utilsRandom";
 
     private static final long MATH_SALT = 0x4D41544852414E44L; // "MATHRAND"
+    private static final long UTILS_SALT = 0x5554494C53524E44L; // "UTILSRND"
     private static final long GOLDEN_GAMMA = 0x9E3779B97F4A7C15L;
 
     private static volatile boolean agentInstalled;
@@ -69,6 +78,7 @@ public final class RobotRandomness {
         RobotRandomness randomness = new RobotRandomness(battleSeed, robotNames);
         System.getProperties().put(MATH_RANDOM_KEY, (DoubleSupplier) randomness::mathRandom);
         System.getProperties().put(RANDOM_SEED_KEY, (Supplier<Long>) randomness::nextSeed);
+        System.getProperties().put(UTILS_RANDOM_KEY, (Supplier<Random>) randomness::utilsRandom);
     }
 
     /** Whether the agent rewrote {@code Math.random()} and {@code new Random()}. */
@@ -90,6 +100,12 @@ public final class RobotRandomness {
     private Long nextSeed() {
         Stream stream = currentStream();
         return stream == null ? null : stream.nextSeed();
+    }
+
+    /** The robot's {@code Utils.getRandom()} instance, or null outside robot threads. */
+    private Random utilsRandom() {
+        Stream stream = currentStream();
+        return stream == null ? null : stream.utils;
     }
 
     private Stream currentStream() {
@@ -128,6 +144,11 @@ public final class RobotRandomness {
         return mix64(baseSeed ^ MATH_SALT);
     }
 
+    /** Seed of the {@link Random} a robot gets from {@code Utils.getRandom()}. */
+    public static long utilsRandomSeed(long baseSeed) {
+        return mix64(baseSeed ^ UTILS_SALT);
+    }
+
     /** SplitMix64 finalizer. */
     static long mix64(long z) {
         z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
@@ -148,11 +169,13 @@ public final class RobotRandomness {
     private static final class Stream {
         private final long base;
         private final Random math;
+        final Random utils;
         private long created;
 
         Stream(long base) {
             this.base = base;
             this.math = new Random(mathRandomSeed(base));
+            this.utils = new Random(utilsRandomSeed(base));
         }
 
         synchronized double mathRandom() {

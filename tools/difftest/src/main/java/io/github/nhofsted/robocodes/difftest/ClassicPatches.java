@@ -6,6 +6,7 @@ package io.github.nhofsted.robocodes.difftest;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
@@ -13,6 +14,8 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.github.nhofsted.robocodes.determinism.RobotRandomness;
 
 /**
  * Java agent with timing-only fixes for classic Robocode 1.11.1, for use by the oracle.
@@ -24,6 +27,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 10 minutes with {@code -Ddebug=true}. This patch makes that wait conditional,
  * as {@code RobotPeer.waitSleeping} already is. It changes timing only, never the
  * outcome of a battle.
+ *
+ * <p>It also makes {@code robocode.util.Utils.getRandom()} return the robot's own
+ * {@code Random} on robot threads, as robocode-s does (engine-spec §15.1). Classic
+ * returns the engine's generator there, which robocode-s can't share with robots in
+ * other processes. Other threads keep classic's behavior.
  */
 public final class ClassicPatches {
 
@@ -53,10 +61,76 @@ public final class ClassicPatches {
         }
     }
 
+    /**
+     * Prepends to {@code Utils.getRandom()}: {@code Object h = hook; if (h instanceof Supplier)
+     * { Object r = h.get(); if (r != null) return (Random) r; }}.
+     */
+    private static byte[] patchUtils(byte[] classfileBuffer) {
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+                @Override
+                protected String getCommonSuperClass(String type1, String type2) {
+                    return "java/lang/Object";
+                }
+            };
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    if (!name.equals("getRandom") || !descriptor.equals("()Ljava/util/Random;")) {
+                        return mv;
+                    }
+                    patched[0]++;
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitCode() {
+                            super.visitCode();
+                            Label original = new Label();
+                            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
+                                    "()Ljava/util/Properties;", false);
+                            mv.visitLdcInsn(RobotRandomness.UTILS_RANDOM_KEY);
+                            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
+                                    "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                            mv.visitVarInsn(Opcodes.ASTORE, 0);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.INSTANCEOF, "java/util/function/Supplier");
+                            mv.visitJumpInsn(Opcodes.IFEQ, original);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Supplier");
+                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Supplier", "get",
+                                    "()Ljava/lang/Object;", true);
+                            mv.visitVarInsn(Opcodes.ASTORE, 0);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitJumpInsn(Opcodes.IFNULL, original);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/Random");
+                            mv.visitInsn(Opcodes.ARETURN);
+                            mv.visitLabel(original);
+                        }
+                    };
+                }
+            }, 0);
+            if (patched[0] != 1) {
+                throw new IllegalStateException("expected Utils.getRandom(), found " + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("ClassicPatches: could not patch Utils: " + t);
+            Runtime.getRuntime().halt(3);
+            return null;
+        }
+    }
+
     private static final class Transformer implements ClassFileTransformer {
         @Override
         public byte[] transform(Module module, ClassLoader loader, String className, Class<?> classBeingRedefined,
                 ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            if ("robocode/util/Utils".equals(className)) {
+                return patchUtils(classfileBuffer);
+            }
             if (!"net/sf/robocode/battle/peer/RobotPeer".equals(className)) {
                 return null;
             }
