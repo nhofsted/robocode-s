@@ -257,6 +257,11 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 - **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
 - **Storage:** DynamoDB, on-demand, single-table design: bots, per-pairing statistics, battle records, users and tokens. S3 holds mirrored robot jars (keyed by SHA-256), recordings (lifecycle-pruned) and the generated ranking JSON.
 - **Website:** a static single-page app on S3 + CloudFront. It reads pre-computed ranking JSON and doesn't hit a database for page views.
+- **Deployment:** the owner's AWS account, region **eu-west-1** (Ireland). The DNS zone `planethofstede.be` is already hosted in Route 53.
+  - Website: `rumble.planethofstede.be` (CloudFront)
+  - API: `api.rumble.planethofstede.be` (API Gateway custom domain)
+  - TLS certificates come from ACM. CloudFront requires its certificate in **us-east-1**, so the CDK app has a small us-east-1 certificate stack next to the main eu-west-1 stack. The API Gateway certificate lives in eu-west-1.
+  - DNS records are alias records in the existing hosted zone, created by CDK (looked up with `HostedZone.fromLookup`).
 
 ### 12.2 Server-assigned work
 
@@ -375,7 +380,7 @@ robocode-s/
 - **O4** `Math` vs `StrictMath` divergence (§4.3): what exactly does "bit-exact" mean?
 - **O5** JRE distribution in local mode: bundle via `jlink`, download on demand, or require a user-installed Java?
 - **O6** Licensing of bundled classic sample robots. They are EPL-1.0, which permits distribution under later EPL versions; this needs confirmation for each file.
-- **O7** AWS account, region and domain name for the rumble site.
+- **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The subdomain names can still change.
 - **O8** Cross-check fraction and spot-check rate. These trade compute cost against detecting cheating.
 - **O9** Recording retention: keep all, keep the latest N per pairing, or sample? This drives S3 cost.
 - **O10** Frontend framework for `web/` (e.g. Svelte or React with Vite).
@@ -400,3 +405,4 @@ robocode-s/
 | Robot jars | Mirrored to S3, with a takedown policy |
 | Rumble clients | Anyone with GitHub login; server-assigned seeded work, cross-checks and spot checks |
 | IaC | AWS CDK (TypeScript) |
+| AWS deployment | eu-west-1; `rumble.planethofstede.be` and `api.rumble.planethofstede.be` in the existing Route 53 zone |
