@@ -8,6 +8,12 @@ subprojects {
         extensions.configure<JavaPluginExtension> {
             toolchain.languageVersion = JavaLanguageVersion.of(21)
         }
+        tasks.withType<Test>().configureEach {
+            testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
+        }
         tasks.withType<JavaCompile>().configureEach {
             options.encoding = "UTF-8"
             // Classic robocode.jar targets Java 8; robots built against our jar must too.

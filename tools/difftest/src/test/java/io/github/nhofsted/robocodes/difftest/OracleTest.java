@@ -91,6 +91,18 @@ class OracleTest {
         assertEquals("{\"s\":\"a\\\"b\\\\c\\nd\\u0001\",\"nan\":\"NaN\",\"d\":0.1,\"n\":42}", json);
     }
 
+    private static String threadDump(long pid) {
+        try {
+            Process jcmd = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
+                    Long.toString(pid), "Thread.print").redirectErrorStream(true).start();
+            String dump = new String(jcmd.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            jcmd.waitFor(30, TimeUnit.SECONDS);
+            return dump;
+        } catch (IOException | InterruptedException e) {
+            return "thread dump failed: " + e;
+        }
+    }
+
     private static List<String> oracleJvmArgs() {
         return Arrays.asList(System.getProperty("robocodes.difftest.oracleJvmArgs").split(" "));
     }
@@ -108,6 +120,7 @@ class OracleTest {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.addAll(jvmArgs);
+        command.add("-Dstderr.encoding=UTF-8"); // read back as UTF-8 below, also on Windows
         if (withAgent) {
             command.add("-javaagent:" + System.getProperty("robocodes.difftest.agentJar"));
         }
@@ -122,9 +135,12 @@ class OracleTest {
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(stderr.toFile())
                 .start();
-        if (!process.waitFor(5, TimeUnit.MINUTES)) {
+        if (!process.waitFor(3, TimeUnit.MINUTES)) {
+            String threads = threadDump(process.pid());
             process.destroyForcibly();
-            throw new AssertionError("oracle timed out");
+            String err = Files.readString(stderr, StandardCharsets.UTF_8);
+            throw new AssertionError("oracle timed out\n--- stderr (tail) ---\n"
+                    + err.substring(Math.max(0, err.length() - 4000)) + "\n--- threads ---\n" + threads);
         }
         return new Result(process.exitValue(), Files.readString(stderr, StandardCharsets.UTF_8));
     }
