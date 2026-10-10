@@ -126,24 +126,34 @@ Robot-side math runs in the robot's own runtime and is not affected.
 
 ### 5.2 Roles
 
-- **Runner ↔ server:** the runner registers its capabilities (runtimes, limits) and receives `LaunchRobot` requests.
-- **Robot ↔ server:** a robot connects with a one-time **session token**, which the server issued to the runner at launch, and then takes part in the lockstep loop.
-- **Observer ↔ server:** the GUI or other tools subscribe to the battle state stream and send battle control commands (pause, speed, enable debug paint for a robot).
+Every connection starts with `Hello` / `HelloAck` (protocol version, role, token, features) and then has one role:
+
+- **Runner ↔ server:** the runner registers its capabilities (`RunnerInfo`: runtimes, mode, trusted CPU time). It receives `LaunchRobot` (package by SHA-256 and URL or inline bytes, entry point, server address, session token, and the robot name and battle seed for its random streams per ADR 0009), and reports `LaunchResult` and `RobotExited`.
+- **Robot ↔ server:** a robot connects with the one-time **session token** from `LaunchRobot` and then takes part in the lockstep loop (§5.3).
+- **Observer ↔ server:** the GUI or other tools receive `BattleInfo`, then a `TurnSnapshot` per turn and `RoundResult`s, and send `ObserverControl` (pause, step, speed, debug paint per robot).
 
 ### 5.3 Lockstep loop (robot role)
 
-Per turn:
+Defined in `proto/robocode_s/v1/robocode_s.proto`. The exchange mirrors classic's `execute` (engine-spec §11), so the classic API can be rebuilt exactly:
 
 ```
-server → robot : TickEvent { turn, round, own_state, events[], (team messages), budget }
-robot  → server: TurnIntent { set_ahead/turn/gun/radar/fire/..., adjust flags,
-                              team messages, debug paint commands, custom-event results* }
+server -> robot : HelloAck { RobotStatics (names, type, team, battle rules) }
+server -> robot : RoundStart { round, status, commands }      the robot starts its code
+robot  -> server: Execute { turn, commands, output, paint, cpu_nanos }
+server -> robot : Tick { turn, status, commands, events[], team_messages[],
+                         bullet_updates[], halt, should_wait, paint_enabled, budget_nanos }
+robot  -> server: Execute ...                                  (applies in the next turn)
+server -> robot : RoundOver / BattleOver
 ```
 
-- Blocking calls (`ahead(100)`, `turnGunRight(...)`) and `waitFor(Condition)` are implemented **in the client library**. They become a sequence of turn intents. This keeps the wire protocol purely per-turn.
+- `commands` is the robot's **complete command state** (classic's `ExecCommands`): remaining turn angles and distance, adjust flags, max velocity and turn rate, colors, plus the one-shot parts (scan, bullet commands, team messages).
+- `Tick.commands` returns the server's updated copy (remaining values, energy-related zeroing), and the robot continues from it, as classic's robot side does.
+- Blocking calls (`ahead(100)`, `turnGunRight(...)`) and `waitFor(Condition)` are implemented **in the client library** as a sequence of turns, so the wire protocol stays purely per turn.
 - Custom events (`Condition.test()`) run client-side. Because they run during the robot's turn, firing them only affects that robot's own event queue, as in classic.
-- The server sends `TickEvent` to all robots in parallel and waits up to the turn budget (§7). Robots that miss the deadline **skip the turn**, with the classic semantics: the previous intent stays in effect, a `SkippedTurnEvent` is sent, and the robot is disabled after too many skips.
-- Classic runs robots one after another by default. Since robots cannot see each other's turn intents before the engine step, parallel execution produces the same results.
+- The server sends ticks to all robots in parallel and waits up to the turn budget (§7). Robots that miss the deadline **skip the turn**, with the classic semantics: the previous command state stays in effect, a `SkippedTurn` event is sent, and the robot is disabled after too many skips.
+- Classic runs robots one after another by default. Since robots cannot see each other's commands before the engine step, parallel execution produces the same results.
+- Debug painting is a list of vector operations (`PaintOp`), sent only while `Tick.paint_enabled` is set.
+- Framing: a varint length prefix, messages of at most 16 MiB (`crates/protocol`).
 
 ### 5.4 Observer stream
 

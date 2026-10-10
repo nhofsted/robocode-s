@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: EPL-2.0
 //
-// robocode-s wire protocol (skeleton). See docs/design.md §5.
-// Messages are sent as a varint length prefix followed by the encoded message.
+// robocode-s wire protocol, version 1 (docs/design.md §5, docs/engine-spec.md §11).
+//
+// Transport: any byte stream (TCP, with TLS off loopback). Every message is a
+// ClientMessage or ServerMessage, preceded by its length as a protobuf varint.
+//
+// A connection starts with Hello / HelloAck and then has one role:
+//   robot     one robot in one battle: the lockstep turn loop
+//   runner    a host that launches robot processes on the server's request
+//   observer  a viewer (GUI, recorder) that follows a battle and may control it
+//
+// Units: distances in pixels, angles in radians (0 = north, clockwise), unless a
+// field says otherwise. Colors are ARGB.
 
 syntax = "proto3";
 
@@ -11,9 +21,50 @@ option java_package = "io.github.nhofsted.robocodes.protocol.v1";
 option java_multiple_files = true;
 option csharp_namespace = "RobocodeS.Protocol.V1";
 
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Envelopes
+// ============================================================================
+
+message ClientMessage {
+  oneof msg {
+    Hello hello = 1;
+    // robot
+    Execute execute = 10;
+    // runner
+    LaunchResult launch_result = 20;
+    RobotExited robot_exited = 21;
+    // observer
+    ObserverControl observer_control = 30;
+  }
+}
+
+message ServerMessage {
+  oneof msg {
+    HelloAck hello_ack = 1;
+    Error error = 2;
+    // robot
+    RoundStart round_start = 10;
+    Tick tick = 11;
+    RoundOver round_over = 12;
+    BattleOver battle_over = 13;
+    // runner
+    LaunchRobot launch_robot = 20;
+    StopRobot stop_robot = 21;
+    // observer
+    BattleInfo battle_info = 30;
+    TurnSnapshot turn_snapshot = 31;
+    RoundResult round_result = 32;
+  }
+}
+
+// ============================================================================
 // Handshake
-// ---------------------------------------------------------------------------
+// ============================================================================
+
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+}
 
 enum Role {
   ROLE_UNSPECIFIED = 0;
@@ -22,51 +73,240 @@ enum Role {
   ROLE_OBSERVER = 3;
 }
 
-message ProtocolVersion {
-  uint32 major = 1;
-  uint32 minor = 2;
-}
-
 message Hello {
   ProtocolVersion version = 1;
   Role role = 2;
-  // One-time session token issued to the runner when the robot was launched.
-  string session_token = 3;
+  // Robots: the one-time token the server gave the runner in LaunchRobot.
+  // Runners and observers: their credential (empty on loopback).
+  string token = 3;
+  // Optional features the client supports.
   repeated string features = 4;
+  // Runners only.
+  RunnerInfo runner = 5;
 }
 
 message HelloAck {
   ProtocolVersion version = 1;
+  // Features both sides support.
   repeated string features = 2;
+  // Robots only: who they are and the rules of the battle.
+  RobotStatics robot = 3;
 }
 
-// ---------------------------------------------------------------------------
-// Robot role: lockstep turn loop (design §5.3)
-// ---------------------------------------------------------------------------
-
-message RobotState {
-  double x = 1;
-  double y = 2;
-  double energy = 3;
-  double velocity = 4;
-  double body_heading = 5;
-  double gun_heading = 6;
-  double radar_heading = 7;
-  double gun_heat = 8;
-  double distance_remaining = 9;
-  double body_turn_remaining = 10;
-  double gun_turn_remaining = 11;
-  double radar_turn_remaining = 12;
-  uint32 others = 13;
+// The connection is refused or ended; the server closes it afterwards.
+message Error {
+  string message = 1;
 }
 
-// Events are filled in during M1 following the classic robocode.Event hierarchy.
+// ============================================================================
+// Battle description
+// ============================================================================
+
+message BattleRules {
+  int32 battlefield_width = 1;
+  int32 battlefield_height = 2;
+  int32 num_rounds = 3;
+  double gun_cooling_rate = 4;
+  int64 inactivity_time = 5;
+  bool hide_enemy_names = 6;
+  int32 sentry_border_size = 7;
+  // Deterministic mode (ADR 0005): no timing-based skipped turns.
+  bool deterministic = 8;
+}
+
+// A robot's fixed description (classic's RobotStatics).
+message RobotStatics {
+  // Unique name, e.g. "jk.mega.DrussGT 3.1.16" or "sample.Fire (2)".
+  string name = 1;
+  string short_name = 2;
+  string very_short_name = 3;
+  // Full class name without version or suffix.
+  string full_class_name = 4;
+  string short_class_name = 5;
+  int32 robot_index = 6;
+  RobotType type = 7;
+  // Team robots only.
+  optional string team_name = 8;
+  int32 team_index = 9;  // -1 without a team
+  bool team_leader = 10;
+  repeated string team_members = 11;
+  BattleRules rules = 12;
+}
+
+message RobotType {
+  bool junior = 1;
+  bool advanced = 2;
+  bool team = 3;
+  bool droid = 4;
+  bool sentry = 5;
+  bool interactive = 6;
+  bool paint = 7;
+}
+
+// ============================================================================
+// Robot role: the lockstep turn loop (design §5.3, engine-spec §11)
+// ============================================================================
+//
+//   server -> RoundStart          the robot creates its instance and runs it
+//   robot  -> Execute             first command state (applies in turn 1)
+//   server -> Tick                results of turn 1
+//   robot  -> Execute             ...
+//   server -> RoundOver           the robot stops; next round or BattleOver
+//
+// Commands sent in Execute after Tick n take effect in turn n + 1.
+
+// The robot's command state (classic's ExecCommands). The robot sends all of it
+// with every Execute; the server returns its updated copy in Tick.
+message RobotCommands {
+  double body_turn_remaining = 1;
+  double gun_turn_remaining = 2;
+  double radar_turn_remaining = 3;
+  double distance_remaining = 4;
+  bool adjust_gun_for_body_turn = 5;
+  bool adjust_radar_for_gun_turn = 6;
+  bool adjust_radar_for_body_turn = 7;
+  // Whether the robot set adjust_radar_for_body_turn itself (classic API detail).
+  bool adjust_radar_for_body_turn_set = 8;
+  double max_turn_rate = 9;
+  double max_velocity = 10;
+  Colors colors = 11;
+  // The rest is only sent by robots, never returned.
+  bool scan = 12;
+  bool io_robot = 13;
+  repeated BulletCommand bullets = 14;
+  repeated TeamMessage team_messages = 15;
+}
+
+message Colors {
+  int32 body = 1;
+  int32 gun = 2;
+  int32 radar = 3;
+  int32 scan = 4;
+  int32 bullet = 5;
+}
+
+message BulletCommand {
+  int32 bullet_id = 1;
+  double power = 2;
+  // Fire assist (basic robots): aim here if the radar turned with the gun.
+  bool fire_assist_valid = 3;
+  double fire_assist_angle = 4;
+}
+
+message TeamMessage {
+  string sender = 1;
+  // Absent: all teammates.
+  optional string recipient = 2;
+  // Classic Java robots: a serialized java.io.Serializable.
+  bytes payload = 3;
+}
+
+message RoundStart {
+  int32 round = 1;
+  RobotStatus status = 2;
+  RobotCommands commands = 3;
+}
+
+message Execute {
+  // The turn whose results this robot last received (0 after RoundStart).
+  int64 turn = 1;
+  RobotCommands commands = 2;
+  // Console output since the last Execute.
+  string output = 3;
+  // Debug painting, only while the server has enabled it (Tick.paint_enabled).
+  repeated PaintOp paint = 4;
+  // CPU time the robot used for this turn, measured by the runner or library (ns).
+  uint64 cpu_nanos = 5;
+}
+
+message Tick {
+  int64 turn = 1;
+  RobotStatus status = 2;
+  // The server's copy of the command state (remaining values updated); the robot
+  // continues from it.
+  RobotCommands commands = 3;
+  // In the order the engine generated them (engine-spec §12).
+  repeated Event events = 4;
+  repeated TeamMessage team_messages = 5;
+  repeated BulletStatus bullet_updates = 6;
+  // The robot must stop (round over or halted).
+  bool halt = 7;
+  // The robot should keep waiting for the battle to end instead of stopping.
+  bool should_wait = 8;
+  bool paint_enabled = 9;
+  // CPU time budget for the next turn (ns); 0 in deterministic mode.
+  uint64 budget_nanos = 10;
+}
+
+message RoundOver {
+  int32 round = 1;
+}
+
+message BattleOver {
+  bool aborted = 1;
+}
+
+// classic's RobotStatus
+message RobotStatus {
+  double energy = 1;
+  double x = 2;
+  double y = 3;
+  double body_heading = 4;
+  double gun_heading = 5;
+  double radar_heading = 6;
+  double velocity = 7;
+  double body_turn_remaining = 8;
+  double radar_turn_remaining = 9;
+  double gun_turn_remaining = 10;
+  double distance_remaining = 11;
+  double gun_heat = 12;
+  int32 others = 13;
+  int32 num_sentries = 14;
+  int32 round = 15;
+  int32 num_rounds = 16;
+  int64 time = 17;
+}
+
+// An update of one of the robot's own bullets.
+message BulletStatus {
+  int32 bullet_id = 1;
+  double x = 2;
+  double y = 3;
+  optional string victim = 4;
+  bool active = 5;
+}
+
+// ============================================================================
+// Events (engine-spec §12); names are as the receiving robot sees them
+// ============================================================================
+
 message Event {
-  int64 time = 1;
-  int32 priority = 2;
   oneof kind {
-    ScannedRobot scanned_robot = 10;
+    ScannedRobot scanned_robot = 1;
+    HitWall hit_wall = 2;
+    HitRobot hit_robot = 3;
+    HitByBullet hit_by_bullet = 4;
+    BulletHit bullet_hit = 5;
+    BulletHitBullet bullet_hit_bullet = 6;
+    BulletMissed bullet_missed = 7;
+    RobotDeath robot_death = 8;
+    Death death = 9;
+    Win win = 10;
+    RoundEnded round_ended = 11;
+    BattleEnded battle_ended = 12;
+    SkippedTurn skipped_turn = 13;
   }
+}
+
+message Bullet {
+  int32 bullet_id = 1;
+  string owner = 2;
+  optional string victim = 3;
+  double heading = 4;
+  double x = 5;
+  double y = 6;
+  double power = 7;
+  bool active = 8;
 }
 
 message ScannedRobot {
@@ -76,45 +316,274 @@ message ScannedRobot {
   double distance = 4;
   double heading = 5;
   double velocity = 6;
+  bool sentry = 7;
 }
 
-message TickEvent {
-  uint32 round = 1;
-  int64 turn = 2;
-  RobotState state = 3;
-  repeated Event events = 4;
-  // Remaining CPU budget for this turn, in nanoseconds.
-  uint64 budget_nanos = 5;
+message HitWall {
+  double bearing = 1;
 }
 
-message TurnIntent {
+message HitRobot {
+  string name = 1;
+  double bearing = 2;
+  double energy = 3;
+  bool at_fault = 4;
+}
+
+message HitByBullet {
+  double bearing = 1;
+  Bullet bullet = 2;
+}
+
+message BulletHit {
+  string name = 1;
+  double energy = 2;
+  Bullet bullet = 3;
+}
+
+message BulletHitBullet {
+  Bullet bullet = 1;
+  Bullet hit_bullet = 2;
+}
+
+message BulletMissed {
+  Bullet bullet = 1;
+}
+
+message RobotDeath {
+  string name = 1;
+}
+
+message Death {}
+
+message Win {}
+
+message RoundEnded {
+  int32 round = 1;
+  int64 turns = 2;
+  int64 total_turns = 3;
+}
+
+message BattleEnded {
+  bool aborted = 1;
+  Results results = 2;
+}
+
+message SkippedTurn {
   int64 turn = 1;
-  optional double set_ahead = 2;
-  optional double set_turn_body = 3;
-  optional double set_turn_gun = 4;
-  optional double set_turn_radar = 5;
-  optional double set_fire = 6;
-  optional double set_max_velocity = 7;
-  optional double set_max_turn_rate = 8;
-  optional bool adjust_gun_for_body_turn = 9;
-  optional bool adjust_radar_for_gun_turn = 10;
-  optional bool adjust_radar_for_body_turn = 11;
 }
 
-// ---------------------------------------------------------------------------
-// Envelopes
-// ---------------------------------------------------------------------------
+// A contestant's results (classic's BattleResults, unrounded).
+message Results {
+  string name = 1;
+  int32 rank = 2;
+  double score = 3;
+  double survival = 4;
+  double last_survivor_bonus = 5;
+  double bullet_damage = 6;
+  double bullet_damage_bonus = 7;
+  double ram_damage = 8;
+  double ram_damage_bonus = 9;
+  int32 firsts = 10;
+  int32 seconds = 11;
+  int32 thirds = 12;
+}
 
-message ClientMessage {
-  oneof msg {
-    Hello hello = 1;
-    TurnIntent turn_intent = 2;
+// ============================================================================
+// Debug painting (robot onPaint / getGraphics)
+// ============================================================================
+
+message PaintOp {
+  oneof op {
+    int32 set_color = 1;  // ARGB
+    float set_stroke_width = 2;
+    float set_font_size = 3;
+    Shape draw = 4;
+    Shape fill = 5;
+    DrawString draw_string = 6;
   }
 }
 
-message ServerMessage {
-  oneof msg {
-    HelloAck hello_ack = 1;
-    TickEvent tick = 2;
+message Shape {
+  oneof shape {
+    Line line = 1;
+    Rect rect = 2;
+    Rect oval = 3;
+    ArcShape arc = 4;
+    Polygon polygon = 5;
   }
+}
+
+message Line {
+  double x1 = 1;
+  double y1 = 2;
+  double x2 = 3;
+  double y2 = 4;
+}
+
+message Rect {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+// An arc of the ellipse in the frame; angles in degrees as java.awt.geom.Arc2D.
+message ArcShape {
+  Rect frame = 1;
+  double start = 2;
+  double extent = 3;
+}
+
+message Polygon {
+  repeated double xs = 1;
+  repeated double ys = 2;
+}
+
+message DrawString {
+  string text = 1;
+  double x = 2;
+  double y = 3;
+}
+
+// ============================================================================
+// Runner role (design §6)
+// ============================================================================
+
+message RunnerInfo {
+  // e.g. "jvm", "python", "dotnet", "native"
+  repeated string runtimes = 1;
+  // "local", "container" or "remote"
+  string mode = 2;
+  // Whether this runner's CPU measurements can be trusted (design §7.3).
+  bool trusted_cpu_time = 3;
+}
+
+message RobotPackage {
+  // SHA-256 of the package, hex.
+  string sha256 = 1;
+  oneof source {
+    string url = 2;
+    bytes inline = 3;
+  }
+  // e.g. "jvm"
+  string runtime = 4;
+  // Class (or entry point) to start, e.g. "sample.Fire".
+  string entry_point = 5;
+}
+
+message LaunchRobot {
+  string robot_id = 1;
+  // Token the robot presents in its Hello.
+  string session_token = 2;
+  RobotPackage package = 3;
+  // Where the robot connects, e.g. "127.0.0.1:7654".
+  string server_address = 4;
+  // Unique robot name and battle seed, for the robot's own random streams (ADR 0009).
+  string robot_name = 5;
+  int64 battle_seed = 6;
+  bool deterministic = 7;
+  uint32 memory_limit_mb = 8;
+}
+
+message LaunchResult {
+  string robot_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message StopRobot {
+  string robot_id = 1;
+}
+
+message RobotExited {
+  string robot_id = 1;
+  int32 exit_code = 2;
+  // The end of the robot's error output, for diagnosis.
+  string stderr_tail = 3;
+}
+
+// ============================================================================
+// Observer role (design §5.4)
+// ============================================================================
+
+message BattleInfo {
+  BattleRules rules = 1;
+  repeated RobotStatics robots = 2;
+}
+
+message TurnSnapshot {
+  int32 round = 1;
+  int64 turn = 2;
+  repeated RobotSnapshot robots = 3;
+  repeated BulletSnapshot bullets = 4;
+}
+
+enum RobotState {
+  ROBOT_STATE_ACTIVE = 0;
+  ROBOT_STATE_HIT_WALL = 1;
+  ROBOT_STATE_HIT_ROBOT = 2;
+  ROBOT_STATE_DEAD = 3;
+}
+
+message RobotSnapshot {
+  RobotState state = 1;
+  double x = 2;
+  double y = 3;
+  double energy = 4;
+  double velocity = 5;
+  double body_heading = 6;
+  double gun_heading = 7;
+  double radar_heading = 8;
+  double gun_heat = 9;
+  double score = 10;
+  double total_score = 11;
+  Colors colors = 12;
+  // Console output this turn.
+  string output = 13;
+  // Debug paint this turn, if enabled for this robot.
+  repeated PaintOp paint = 14;
+}
+
+enum BulletState {
+  BULLET_STATE_FIRED = 0;
+  BULLET_STATE_MOVING = 1;
+  BULLET_STATE_HIT_VICTIM = 2;
+  BULLET_STATE_HIT_BULLET = 3;
+  BULLET_STATE_HIT_WALL = 4;
+  BULLET_STATE_EXPLODED = 5;
+  BULLET_STATE_INACTIVE = 6;
+}
+
+message BulletSnapshot {
+  int32 owner = 1;
+  int32 bullet_id = 2;
+  BulletState state = 3;
+  double x = 4;
+  double y = 5;
+  double heading = 6;
+  double power = 7;
+  int32 victim = 8;  // -1 without a victim
+  bool explosion = 9;
+  int32 frame = 10;
+  int32 color = 11;
+}
+
+message RoundResult {
+  int32 round = 1;
+  repeated Results results = 2;
+}
+
+message ObserverControl {
+  oneof control {
+    bool pause = 1;  // true: pause, false: resume
+    bool step = 2;   // one turn while paused
+    uint32 turns_per_second = 3;  // 0: as fast as possible
+    PaintToggle paint = 4;
+  }
+}
+
+message PaintToggle {
+  int32 robot_index = 1;
+  bool enabled = 2;
 }
