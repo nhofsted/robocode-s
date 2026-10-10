@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# JVM
+.gradle/
+build/
+*.class
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# .NET
+bin/
+obj/
+
+# IDEs / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Local copies of classic Robocode (not redistributed)
+/original/
