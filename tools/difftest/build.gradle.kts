@@ -98,3 +98,14 @@ tasks.test {
     jvmArgumentProviders.add(PathProperty("robocodes.difftest.patchesJar", patchesAgent))
     systemProperty("robocodes.difftest.oracleJvmArgs", oracleJvmArgs.joinToString(" "))
 }
+
+// Test vectors for the Rust port of java.util.Random (crates/engine/src/java_random.rs).
+tasks.register<JavaExec>("javaRandomVectors") {
+    description = "Regenerates crates/engine/tests/data/java_random.txt from the running JDK."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.github.nhofsted.robocodes.difftest.JavaRandomVectors"
+    val output = layout.settingsDirectory.file("crates/engine/tests/data/java_random.txt")
+    outputs.file(output)
+    args(output.asFile.path)
+    doFirst { output.asFile.parentFile.mkdirs() }
+}

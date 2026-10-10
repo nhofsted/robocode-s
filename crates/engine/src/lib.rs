@@ -4,3 +4,5 @@
 //!
 //! A pure simulation with no I/O, threads or clocks: each turn is
 //! `step(state, intents) -> (state', events)` (design §4).
+
+pub mod java_random;
