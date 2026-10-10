@@ -9,7 +9,6 @@ import robocode.Bullet;
 import robocode.BulletHitBulletEvent;
 import robocode.BulletHitEvent;
 import robocode.BulletMissedEvent;
-import robocode.DeathEvent;
 import robocode.Event;
 import robocode.HitByBulletEvent;
 import robocode.HitRobotEvent;
@@ -18,7 +17,6 @@ import robocode.RobotDeathEvent;
 import robocode.RoundEndedEvent;
 import robocode.ScannedRobotEvent;
 import robocode.SkippedTurnEvent;
-import robocode.WinEvent;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -38,9 +36,6 @@ import java.util.concurrent.atomic.AtomicReference;
  * API classes from the application class loader and are used directly.
  */
 public final class OracleHooks {
-
-    /** Classic's {@code EventManager.MAX_QUEUE_SIZE}. */
-    private static final int MAX_QUEUE_SIZE = 256;
 
     private static volatile boolean enabled;
     private static Turn current;
@@ -78,12 +73,19 @@ public final class OracleHooks {
 
     // ------------------------------------------------------------ hooks (called by RobotPeer)
 
-    /** Entry of {@code RobotPeer.performLoadCommands()}. */
+    /**
+     * Entry of {@code RobotPeer.performLoadCommands()}. Dead robots are recorded as null:
+     * their thread may still be finishing its last {@code execute} and replaces the command
+     * state at an unpredictable moment. Classic ignores a dead robot's commands.
+     */
     public static void commandsLoaded(Object peer) {
         if (!enabled) {
             return;
         }
         try {
+            if ((boolean) call(peer, "isDead")) {
+                return;
+            }
             Object commands = commands(peer);
             Oracle.Json json = new Oracle.Json().begin()
                     .field("bodyTurn", (double) call(commands, "getBodyTurnRemaining"))
@@ -124,12 +126,15 @@ public final class OracleHooks {
         }
     }
 
-    /** Entry of {@code RobotPeer.publishStatus(long)}. */
+    /** Entry of {@code RobotPeer.publishStatus(long)}. Dead robots are recorded as null (see above). */
     public static void statusPublished(Object peer) {
         if (!enabled) {
             return;
         }
         try {
+            if ((boolean) call(peer, "isDead")) {
+                return;
+            }
             Object commands = commands(peer);
             String json = new Oracle.Json().begin()
                     .field("bodyTurn", (double) call(commands, "getBodyTurnRemaining"))
@@ -146,23 +151,19 @@ public final class OracleHooks {
     }
 
     /**
-     * Entry of {@code RobotPeer.addEvent(Event)}. Records the event if classic will queue
-     * it: the robot must be running, and a full queue only takes critical events.
+     * Entry of {@code RobotPeer.addEvent(Event)}. Records every event the engine
+     * <em>generates</em>, which is what the robocode-s engine is compared on; delivery is
+     * the server's job there. Classic only queues an event while the robot's thread is
+     * running. That thread exits asynchronously after a death, so for a robot that died a
+     * turn or two earlier (e.g. a {@code RoundEndedEvent} right after it), queuing depends
+     * on timing. Not observed in practice, but the same kind of race as with dead robots'
+     * commands below.
      */
     public static void eventAdded(Object peer, Object event) {
         if (!enabled) {
             return;
         }
         try {
-            if (!(boolean) call(peer, "isRunning")) {
-                return;
-            }
-            Object queue = ((AtomicReference<?>) field(peer, "events")).get();
-            int size = ((List<?>) queue).size();
-            if (size > MAX_QUEUE_SIZE
-                    && !(event instanceof DeathEvent || event instanceof WinEvent || event instanceof SkippedTurnEvent)) {
-                return;
-            }
             String json = describe((Event) event);
             synchronized (OracleHooks.class) {
                 current.events.get(index(peer)).add(json);

@@ -49,9 +49,9 @@ One JSON object per line:
 A state contains, per robot (in index order): `state`, `x`, `y`, `energy`, `velocity`, `bodyHeading`, `gunHeading`, `radarHeading`, `gunHeat`, `score`, `totalScore`; and per bullet: `owner`, `id`, `state`, `x`, `y`, `heading`, `power`, `victim`. Doubles are written in Java's shortest round-trip form, so parsing them gives the exact bits back.
 
 Each `turn` line also has, per robot (in index order), what classic's engine did in that turn. These come from `ClassicPatches` hooks in `RobotPeer` (`OracleHooks`), which only observe:
-- `commands`: the command state loaded at the start of the turn (`performLoadCommands`, engine-spec §11.1). This includes the remaining values, adjust flags, max velocity and turn rate, `scan`, `io`, bullet commands (`id`, `power`, fire assist, `consumed`) and team messages (`sender`, `recipient`, `bytes`). A replay of these drives the robocode-s engine without real robots.
-- `remaining`: the remaining body/gun/radar turn and distance reported back at the end of the turn (`publishStatus`).
-- `events`: every event added to the robot's queue, in insertion order, with all fields (radians, bullets with id, owner, victim, position, power and active flag).
+- `commands`: the command state loaded at the start of the turn (`performLoadCommands`, engine-spec §11.1). This includes the remaining values, adjust flags, max velocity and turn rate, `scan`, `io`, bullet commands (`id`, `power`, fire assist, `consumed`) and team messages (`sender`, `recipient`, `bytes`). A replay of these drives the robocode-s engine without real robots. `null` for robots that are dead: their thread may still be finishing its last `execute` and replaces the command state at an unpredictable moment (this made CI fail). Classic ignores a dead robot's commands.
+- `remaining`: the remaining body/gun/radar turn and distance reported back at the end of the turn (`publishStatus`); `null` for dead robots, for the same reason.
+- `events`: every event the engine generates for the robot, in order, with all fields (radians; bullets with id, owner, victim, position, power and active flag). Classic only queues an event while the robot's thread runs, which is timing-dependent shortly after a death; delivery is the server's job in robocode-s.
 
 Recording costs about 1% of the battle time.
 
