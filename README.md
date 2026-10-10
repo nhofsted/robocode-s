@@ -16,7 +16,7 @@ Requirements: Rust (stable, via [rustup](https://rustup.rs)), a C toolchain, and
 
 ```sh
 cargo test --workspace     # engine, protocol, server, runner, cli
-./gradlew build            # Java compatibility library and sample robots
+./gradlew build            # Java libraries, sample robots and difftest oracle
 ```
 
 ## Repository layout
@@ -24,7 +24,9 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 - `crates/`: Rust workspace (engine, fdlibm, protocol, server, runner, cli)
 - `proto/`: wire protocol schema
 - `clients/java-compat/`: drop-in replacement for classic `robocode.jar`
+- `clients/java-determinism/`: Java agent for per-robot seeded randomness
 - `robots/samples/`: classic sample robots (EPL-2.0)
+- `tools/difftest/`: oracle that records classic battles for differential testing
 - `docs/`: [design](docs/design.md) and [architecture decision records](docs/adr/README.md)
 
 ## License

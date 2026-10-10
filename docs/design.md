@@ -109,8 +109,9 @@ Classic Robocode calls `java.lang.Math.sin/cos/atan2/...`. On HotSpot these may 
 
 **Decision: "bit-exact" means bit-exact against classic Robocode running with `StrictMath` semantics (fdlibm).**
 1. The engine uses a Rust port of fdlibm (`crates/fdlibm`) for every transcendental function. It's exact on every platform.
-2. The difftest oracle runs classic with StrictMath-equivalent math: `Math` intrinsics disabled, or engine math calls patched to `StrictMath`. The exact mechanism is chosen in M1.
+2. The difftest oracle runs classic with `-XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives`, which makes `Math` identical to `StrictMath`. Measured on JDK 21/x86-64: with intrinsics, `Math.sin/cos/tan` differ from `StrictMath` for about 3.3% of inputs; `atan2` and `hypot` never do. Without intrinsics, 0 differences in 5M samples.
 3. Classic running on a JVM with intrinsics may differ from us in rare cases. That is classic's own platform nondeterminism, not a compatibility bug.
+4. Scanning and collisions use `java.awt.geom` (`Arc2D`, `Line2D`, `Rectangle2D`), whose algorithms must be ported as well.
 
 Robot-side math runs in the robot's own runtime and is not affected.
 
@@ -192,7 +193,9 @@ Classic robots get a per-robot data directory with a quota (`getDataFile`, `Robo
 
 - There are no skipped turns based on time: the server always waits for every robot's intent, up to a hard limit. A robot that exceeds the hard limit is **disabled**. Only that pathological case can make results depend on timing.
 - All engine randomness is seeded.
-- The JVM compat runner seeds `java.util.Random` and `Math.random()` deterministically per robot, as classic does with `-DRANDOMSEED`.
+- Robots' own randomness is seeded **per robot**: `Math.random()` and `new Random()` draw from streams derived from the battle seed and the robot's name (ADR 0009). For JVM robots, a Java agent (`clients/java-determinism`) does this. Classic itself can't: its `RANDOMSEED` only seeds `Math.random()` on old JVMs, as a single stream shared by all robots.
+- Robot JVMs run with `-XX:-InlineMathNatives`, so robots' own trigonometry is identical on every platform (§4.3). Otherwise volunteers on different hardware could get different results for the same seed.
+- Known limit: robots that read the clock to budget their own computation can still behave differently between runs.
 - Under WASM, budgets become instruction fuel, which makes even the time limits deterministic.
 
 ### 7.3 Trust
@@ -378,7 +381,7 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 
 - **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. The version used by current RoboRumble clients will be investigated in M1 (O2). Robots are tuned against that version, so if it differs in rule-relevant ways, the harness also runs against it.
 - **Harness (`tools/difftest`):**
-  1. Runs a battle in classic Robocode via the `robocode.control` API (`RobocodeEngine`, `BattleListener`, `ITurnSnapshot`) with `RANDOMSEED`.
+  1. Runs a battle in classic Robocode via the `robocode.control` API (`RobocodeEngine`, `BattleListener`, `ITurnSnapshot`) with `RANDOMSEED`, `-Ddebug=true` (no timing-based skipped turns), `-XX:-InlineMathNatives` and the determinism agent. Recordings are byte-identical across runs (`tools/difftest/README.md`).
   2. Runs the same battle in robocode-s, deterministic mode, with the same seed.
   3. Compares per-turn snapshots field by field (positions, headings, energy, gun heat, bullets, events) and reports the first divergence with a diff of both states.
 - **Corpus:** the classic sample robots first (bundled, see §13.1), then a growing set of RoboRumble robots (1v1, melee, teams).

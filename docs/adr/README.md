@@ -10,3 +10,4 @@
 | [0006](0006-cpu-time-budgets.md) | Time budgets measured in robot CPU time |
 | [0007](0007-own-rumble-on-aws-free-tier.md) | Own distributed rumble on the AWS free tier |
 | [0008](0008-licensing.md) | EPL-2.0 license; classic samples bundled under EPL-2.0 |
+| [0009](0009-per-robot-random-streams.md) | Per-robot random streams via a Java agent |
