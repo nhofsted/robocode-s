@@ -2,7 +2,7 @@
 
 //! Replays test vectors produced by a real JDK (see `tools/difftest/.../JavaRandomVectors.java`).
 
-use robocode_s_engine::java_random::{JavaRandom, shuffle};
+use robocode_s_java_random::{JavaRandom, shuffle};
 
 const VECTORS: &str = include_str!("data/java_random.txt");
 
@@ -47,6 +47,10 @@ fn matches_jdk_vectors() {
             "nextDouble" => {
                 let bits = u64::from_str_radix(fields[1], 16).unwrap();
                 assert_eq!(r.next_double().to_bits(), bits, "{}", at());
+            }
+            "nextGaussian" => {
+                let bits = u64::from_str_radix(fields[1], 16).unwrap();
+                assert_eq!(r.next_gaussian().to_bits(), bits, "{}", at());
             }
             "nextBytes" => {
                 let mut bytes = vec![0u8; fields[1].parse().unwrap()];

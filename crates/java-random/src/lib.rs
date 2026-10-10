@@ -5,9 +5,8 @@
 //! Classic Robocode uses `java.util.Random` (seeded through `RANDOMSEED`) for
 //! initial robot placement and for the order in which robots are processed each
 //! turn, so the engine must reproduce it exactly (design §4.1). Tested against
-//! vectors produced by a real JDK (`tests/data/java_random.txt`).
-//!
-//! `nextGaussian` is not ported yet: it needs `StrictMath.log` from the fdlibm port.
+//! vectors produced by a real JDK (`tests/data/java_random.txt`). Also used to
+//! generate the inputs of the fdlibm tests.
 
 const MULTIPLIER: i64 = 0x5_DEEC_E66D;
 const ADDEND: i64 = 0xB;
@@ -19,6 +18,8 @@ const DOUBLE_UNIT: f64 = 1.0 / (1u64 << 53) as f64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaRandom {
     seed: i64,
+    /// Bits of the cached second value of `nextGaussian`, if any.
+    next_next_gaussian: Option<u64>,
 }
 
 impl JavaRandom {
@@ -26,12 +27,14 @@ impl JavaRandom {
     pub fn new(seed: i64) -> Self {
         Self {
             seed: scramble(seed),
+            next_next_gaussian: None,
         }
     }
 
     /// `setSeed(seed)`.
     pub fn set_seed(&mut self, seed: i64) {
         self.seed = scramble(seed);
+        self.next_next_gaussian = None;
     }
 
     /// `next(bits)`: the next `bits` (1..=32) pseudorandom bits, as Java's `int`.
@@ -93,6 +96,25 @@ impl JavaRandom {
     pub fn next_double(&mut self) -> f64 {
         let high = i64::from(self.next(26)) << 27;
         (high + i64::from(self.next(27))) as f64 * DOUBLE_UNIT
+    }
+
+    /// `nextGaussian()`: Marsaglia's polar method with `StrictMath.log` and `sqrt`,
+    /// returning the cached second value on every other call.
+    pub fn next_gaussian(&mut self) -> f64 {
+        if let Some(bits) = self.next_next_gaussian.take() {
+            return f64::from_bits(bits);
+        }
+        let (v1, v2, s) = loop {
+            let v1 = 2.0 * self.next_double() - 1.0; // between -1 and 1
+            let v2 = 2.0 * self.next_double() - 1.0;
+            let s = v1 * v1 + v2 * v2;
+            if s < 1.0 && s != 0.0 {
+                break (v1, v2, s);
+            }
+        };
+        let multiplier = robocode_s_fdlibm::sqrt(-2.0 * robocode_s_fdlibm::log(s) / s);
+        self.next_next_gaussian = Some((v2 * multiplier).to_bits());
+        v1 * multiplier
     }
 
     /// `nextBytes(bytes)`.

@@ -341,11 +341,22 @@ name = "robocode-s-engine"
 version = "0.1.0"
 dependencies = [
  "robocode-s-fdlibm",
+ "robocode-s-java-random",
 ]
 
 [[package]]
 name = "robocode-s-fdlibm"
 version = "0.1.0"
+dependencies = [
+ "robocode-s-java-random",
+]
+
+[[package]]
+name = "robocode-s-java-random"
+version = "0.1.0"
+dependencies = [
+ "robocode-s-fdlibm",
+]
 
 [[package]]
 name = "robocode-s-protocol"

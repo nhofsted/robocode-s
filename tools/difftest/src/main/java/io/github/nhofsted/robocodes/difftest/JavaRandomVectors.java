@@ -15,7 +15,7 @@ import java.util.Random;
 
 /**
  * Writes test vectors for the Rust port of {@code java.util.Random}
- * ({@code crates/engine/src/java_random.rs}), produced by the running JDK.
+ * ({@code crates/java-random}), produced by the running JDK.
  *
  * <p>Format: one operation per line, {@code seed <long>} starts a new generator.
  * Doubles and floats are written as raw bits in hex, so comparisons are exact.
@@ -49,7 +49,7 @@ public final class JavaRandomVectors {
                 Random random = new Random(seed);
                 out.println("seed " + seed);
                 for (int i = 0; i < OPS_PER_SEED; i++) {
-                    switch (chooser.nextInt(9)) {
+                    switch (chooser.nextInt(10)) {
                         case 0 -> out.println("nextInt " + random.nextInt());
                         case 1, 2 -> {
                             int bound = BOUNDS[chooser.nextInt(BOUNDS.length)];
@@ -81,6 +81,7 @@ public final class JavaRandomVectors {
                             }
                             out.println("shuffle " + size + " " + (order.isEmpty() ? "-" : order));
                         }
+                        case 9 -> out.println("nextGaussian " + Long.toHexString(Double.doubleToRawLongBits(random.nextGaussian())));
                         default -> throw new AssertionError();
                     }
                 }

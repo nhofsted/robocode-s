@@ -1,0 +1,3637 @@
+# java.util.Random test vectors from Ubuntu 21.0.12.1+1-1-26.04.4-Ubuntu; regenerate with ./gradlew :tools:difftest:javaRandomVectors
+seed 0
+nextFloat 3f3b20b4
+nextInt -723955400
+nextGaussian bff4a2176d8fccc4
+shuffle 0 -
+shuffle 3 1,0,2
+nextInt -1728529858
+nextBoolean true
+nextBoolean false
+nextBoolean false
+nextBytes 8 23c29b624de9ef9c
+nextIntBounded 1 0
+nextInt -73789608
+nextLong -2228689144322150137
+nextIntBounded 7 6
+nextBytes 5 f1d00c2d0f
+nextInt 1344049776
+nextInt 553609048
+nextIntBounded 3 2
+shuffle 1 0
+nextDouble 3fc2c3d7d690caa4
+nextIntBounded 1431655765 49903503
+nextLong 25579809655956232
+nextDouble 3f82e47bedd13880
+nextDouble 3fe203af08d5ff36
+nextIntBounded 1073741824 271531193
+shuffle 2 0,1
+nextGaussian 3fe5db040637e12e
+nextIntBounded 16 4
+shuffle 7 0,1,2,4,6,5,3
+nextFloat 3ef97694
+nextLong -2440897930508784356
+nextInt -81839914
+nextInt -1146103148
+nextIntBounded 1 0
+nextIntBounded 1000 112
+shuffle 5 4,1,0,3,2
+shuffle 4 3,1,0,2
+nextIntBounded 2147483646 287633608
+nextIntBounded 1431655765 1172799737
+nextIntBounded 7 2
+nextDouble 3fc7ce825f507b20
+nextDouble 3fd3a3c6eb8ec656
+nextIntBounded 256 171
+nextIntBounded 256 183
+nextFloat 3d83a1e0
+nextFloat 3e12a85c
+nextIntBounded 10 8
+shuffle 1 0
+nextDouble 3fdda119d46350e6
+shuffle 0 -
+nextIntBounded 100 38
+nextIntBounded 256 170
+shuffle 6 3,2,0,4,1,5
+shuffle 10 1,6,0,8,9,3,5,7,4,2
+nextBoolean false
+nextFloat 3e9f6d00
+nextLong 4013465704250623170
+nextGaussian 3fe7a23103cf170e
+nextGaussian 3ff0ac36c5dd8331
+nextBytes 5 fbae72b6e6
+nextLong 3896605098068159738
+nextLong -4001237302722672165
+shuffle 6 1,4,5,0,2,3
+nextFloat 3f1c9524
+nextBoolean true
+nextIntBounded 2 0
+shuffle 8 4,0,7,3,2,1,5,6
+nextInt 617380302
+nextBoolean true
+nextIntBounded 255 134
+nextDouble 3fe72d6cc73c0bfd
+nextInt -1385753324
+nextDouble 3fd260b25cdecdb8
+nextGaussian 3ff220325a48aa48
+shuffle 11 1,7,0,6,2,8,10,4,5,9,3
+nextDouble 3fd8074080c199d8
+nextBoolean true
+nextIntBounded 1431655765 153810577
+nextLong 57782583159920408
+nextBytes 6 5f4ed41c57cf
+nextIntBounded 65536 564
+shuffle 0 -
+nextDouble 3fef1a3723daddd7
+nextBoolean true
+nextDouble 3fd663d64c47715c
+nextBytes 5 9d9719b8b1
+nextGaussian bff4bf9c5bc77969
+nextFloat 3f239820
+nextLong 4713610129296514631
+nextDouble 3fd3c93f6be16210
+shuffle 11 8,5,10,3,7,4,6,1,2,9,0
+shuffle 3 0,1,2
+nextBytes 4 06f8f000
+nextFloat 3f3d7928
+nextGaussian bffeaa64c05b4825
+nextInt -348690342
+nextInt 1341976962
+nextGaussian 3fd42eb345edb01c
+nextIntBounded 1 0
+nextDouble 3fee0b5176fe7d2e
+nextBytes 2 3613
+shuffle 9 6,0,5,3,2,1,8,4,7
+nextFloat 3efe5d10
+nextBoolean false
+nextGaussian 3ff175da53a83a5c
+nextBoolean false
+nextGaussian 400af38c9045d586
+nextBytes 7 8c3ee760ba6946
+shuffle 6 1,4,5,0,3,2
+nextIntBounded 1073741824 12514286
+nextInt -185358571
+nextFloat 3f337749
+nextBytes 4 6c2dddc2
+nextIntBounded 5 2
+shuffle 1 0
+nextGaussian 3ffb472465ae8380
+nextFloat 3f11e533
+nextLong 7176580044932830276
+shuffle 6 2,3,5,4,0,1
+nextGaussian bfc0bd8c8b316d6b
+nextFloat 3f180d2a
+nextLong 4886465643886762423
+nextInt -460347667
+nextInt -1053605891
+nextIntBounded 100 0
+nextBytes 6 3c227a3810af
+nextBytes 2 a307
+nextFloat 3f300362
+nextIntBounded 2147483647 815739113
+nextIntBounded 2147483647 877239393
+nextLong -5887536009584728550
+nextDouble 3fc5c266557f0bd4
+nextBytes 7 3c8fdf58f3fa8b
+nextDouble 3feb1cad4f27cda7
+shuffle 2 0,1
+nextFloat 3f14781d
+nextDouble 3f698be41606f800
+nextBoolean false
+nextInt 1339899789
+nextBoolean true
+nextDouble 3fe1498f2ce81f3f
+nextDouble 3fef23b2a829151c
+nextBoolean true
+nextInt 1775057871
+nextIntBounded 5 1
+nextIntBounded 256 224
+nextDouble 3fe60c6e756a70ca
+nextLong -6819959017335327829
+nextBytes 4 47cc5dd1
+nextGaussian bfd9d848c6a62fbc
+nextBytes 2 fdf2
+nextBoolean false
+nextIntBounded 100 57
+nextBytes 5 203f5c1f92
+nextLong -5288884321442703868
+nextFloat 3f6edbea
+nextDouble 3fe513d6ba7d2698
+nextInt -1765140980
+nextGaussian 3ff5ad662a6df5ce
+nextBoolean true
+shuffle 9 7,0,8,6,3,2,5,1,4
+nextFloat 3f518363
+nextBoolean true
+nextInt 219565529
+nextInt -255081261
+nextBytes 6 4940b0412ec3
+nextIntBounded 2147483646 93816562
+nextBytes 9 bf76d5368c44f39ec0
+nextDouble 3fe09b30d201191c
+nextGaussian bff0302f16e2af6f
+shuffle 0 -
+nextIntBounded 10 8
+nextDouble 3fd0ee5827271c40
+nextBoolean false
+nextBytes 3 b59fa7
+nextLong 5492728113478971232
+nextIntBounded 2147483647 1628803829
+nextLong 2414144054346199416
+nextDouble 3fe6a55cd0b044b6
+shuffle 4 0,2,1,3
+nextBoolean true
+nextBoolean true
+nextBytes 8 9ea7ec15ae1269bc
+nextIntBounded 5 0
+shuffle 8 4,1,6,3,2,0,7,5
+nextFloat 3eb36bee
+nextIntBounded 65536 60985
+shuffle 2 0,1
+nextIntBounded 1073741825 19491384
+nextGaussian bfe31b9c50a710ce
+nextBytes 2 95b1
+nextInt 174692559
+nextIntBounded 7 5
+nextBoolean true
+nextBoolean false
+nextLong 4407336020763227833
+nextIntBounded 1073741824 389242893
+nextLong -1019362334163299157
+nextDouble 3fcbdf3f2b487f6c
+nextFloat 3f68ea13
+nextBytes 2 af11
+nextIntBounded 1073741825 41584107
+nextIntBounded 1431655765 588860149
+nextDouble 3fe4cbea8559b065
+nextGaussian bfcba3975fc5e4e8
+shuffle 7 3,0,1,6,5,4,2
+nextInt 2022278952
+nextLong -6910832155197454005
+nextIntBounded 1073741825 76864406
+nextFloat 3e67ae7c
+nextIntBounded 256 122
+nextBoolean false
+nextLong 1709464157265079686
+nextInt -1242849904
+nextIntBounded 2147483646 1971124528
+nextBoolean false
+nextIntBounded 2147483646 236885555
+nextIntBounded 1073741824 879767680
+nextFloat 3f158bef
+nextBytes 2 ecc2
+nextIntBounded 256 213
+nextGaussian 3fe48f4d3ccd1f1f
+nextGaussian 3fff1f263c2dfb78
+nextIntBounded 1 0
+nextLong -4967794198301962640
+nextFloat 3f0f07ec
+nextInt -1094584616
+nextIntBounded 1 0
+shuffle 1 0
+nextBytes 4 aa28c734
+nextLong 397575863283460719
+nextDouble 3fe6949a5f5cec1b
+nextIntBounded 2 0
+nextFloat 3f300cb1
+nextIntBounded 1000 77
+nextBoolean true
+nextIntBounded 2 0
+nextBoolean false
+nextInt 869823999
+nextFloat 3e47d76c
+nextDouble 3fce7601326ea55c
+nextBoolean true
+shuffle 0 -
+nextDouble 3feee127b1351a0b
+nextLong 6119745577970185558
+nextBoolean false
+nextBoolean false
+nextLong 1794894844987367466
+shuffle 3 0,2,1
+nextInt -1417675888
+nextInt 1261380316
+nextInt 1842059106
+nextBytes 5 9afba63ec4
+nextFloat 3ee08a30
+nextInt -731890682
+shuffle 9 7,8,5,2,1,0,3,4,6
+nextBytes 9 72b16cb23a856b00c4
+shuffle 10 0,1,3,2,4,8,6,5,7,9
+shuffle 1 0
+nextBoolean true
+nextBoolean true
+nextBytes 4 acb2c8f4
+nextIntBounded 16 11
+nextIntBounded 256 140
+nextDouble 3fd5db709ab3f81a
+nextGaussian bfe20b35337437e6
+nextGaussian bfe11cd665193263
+nextIntBounded 1 0
+nextGaussian bfc7a60634274d63
+nextLong -3633026240743431204
+nextBytes 1 5b
+nextFloat 3f3169ae
+shuffle 6 1,2,0,3,4,5
+nextBytes 9 6491bde6aa9a8d9cd8
+nextGaussian bff53ddf3197dd2a
+nextInt 575224572
+shuffle 10 8,0,9,1,5,7,4,2,6,3
+nextBytes 1 42
+nextDouble 3fd2c8d7a7cc5fdc
+shuffle 4 1,3,0,2
+nextDouble 3fd3ddaac5f2a48e
+nextBoolean true
+nextLong 4328502305394555230
+nextDouble 3fe13acc9cbe4190
+nextBoolean false
+nextDouble 3fec6922ea7b0362
+nextBytes 6 1821bc460c71
+nextGaussian 3fdb83ceeca06a01
+nextIntBounded 3 1
+shuffle 2 0,1
+nextIntBounded 1000 596
+nextDouble 3fbbec41c910b470
+nextInt -276461812
+nextIntBounded 10 6
+nextInt -535550357
+nextInt 195735820
+nextBoolean true
+nextLong 6781068808715432852
+nextIntBounded 10 5
+nextBoolean false
+setSeed 305419896
+nextLong 7593191914167524302
+seed 1
+nextIntBounded 1073741825 215764588
+nextBytes 2 6f0e
+nextFloat 3ed09bf2
+nextFloat 3e54b330
+nextBytes 6 f0b84609e5f1
+nextBytes 4 dd85aba8
+nextDouble 3feef7db3daf9843
+nextDouble 3f790e549c66e000
+nextBytes 8 ba5bb5f67e1bda28
+nextLong -1109287713991315740
+nextIntBounded 7 0
+nextBytes 7 fc0c34e9a99de4
+nextFloat 3ef96384
+nextGaussian bff1e47cef7b6c24
+nextBytes 6 6452474b9ef3
+nextInt -2119636700
+nextDouble 3feba9ae48ed8027
+nextInt -1978864692
+nextLong -4232865876030345843
+nextBytes 5 81baeea87c
+nextIntBounded 100 63
+nextIntBounded 1431655765 812182689
+nextFloat 3f1fbcaa
+nextLong 2578166436595196069
+nextDouble 3fe63d038b9a0c1b
+nextIntBounded 16 12
+nextGaussian bffa887c6af9fb4d
+nextFloat 3b9f0200
+nextIntBounded 3 0
+nextGaussian 3fee5ee999c77a01
+nextDouble 3fb34c9d62d9fc60
+nextIntBounded 5 0
+shuffle 9 5,3,1,4,6,8,0,7,2
+shuffle 3 0,2,1
+nextLong 2970725011242582564
+nextGaussian bff0a9f1f81d18bb
+nextFloat 3e365400
+nextBoolean false
+shuffle 6 2,0,4,3,5,1
+nextBoolean false
+nextIntBounded 2147483646 847227192
+nextIntBounded 65536 55420
+nextBytes 9 d3c5b4376a0f136890
+shuffle 1 0
+nextIntBounded 3 0
+nextInt 1001396483
+nextDouble 3fe0aa390f1e887a
+nextFloat 3ec645b0
+nextLong 707006413279611759
+nextIntBounded 5 4
+nextBytes 8 d5d2e11c3375b9a7
+nextIntBounded 1073741824 245674263
+nextBytes 4 6dc5ad1e
+nextBytes 7 79fcebfd9ab608
+shuffle 3 0,1,2
+nextIntBounded 7 3
+nextIntBounded 1073741824 221982718
+nextGaussian bff5911942f1bcc8
+nextDouble 3fec1c16caab3bd5
+nextGaussian bfe92e83412a86fa
+nextBytes 4 c06c6d4a
+nextFloat 3ee2ecbe
+nextIntBounded 1073741825 110484543
+nextFloat 3f010f07
+shuffle 8 3,2,0,5,7,6,4,1
+nextIntBounded 2147483646 1090191377
+nextIntBounded 7 5
+shuffle 4 2,0,3,1
+nextBoolean false
+nextGaussian bfef45f6fe4a8cd3
+nextFloat 3f7660cd
+nextGaussian 3ff1b51e98667005
+nextInt 66075398
+nextIntBounded 1 0
+nextBoolean false
+nextIntBounded 5 3
+nextIntBounded 10 1
+nextLong -8320357513071910606
+nextBytes 6 3e2d338e018b
+shuffle 4 3,1,0,2
+nextBytes 8 9983d7861019f2b2
+nextFloat 3eb8591c
+nextBytes 6 effe6234440e
+nextGaussian bfe72bcd5b4f9471
+nextInt 966463784
+nextDouble 3fe6630ddfdd6532
+nextBytes 6 4419d1edfef2
+nextIntBounded 2 1
+shuffle 2 0,1
+nextInt 387176550
+shuffle 1 0
+nextIntBounded 1000 157
+nextFloat 3edff5dc
+nextGaussian 3fea4644c4007650
+nextIntBounded 1073741824 684507653
+nextInt 1377758715
+nextLong 161601140914943624
+nextInt -1584027382
+nextInt 1601478698
+nextIntBounded 10 3
+nextBytes 8 fcdd1ae976185fe1
+nextInt 1306683493
+nextLong -5404080405594186050
+nextLong -5102892484113533015
+nextGaussian 3f79b5ddc5646add
+nextInt 658187541
+nextLong -7441807534858945953
+nextIntBounded 65536 62079
+shuffle 11 4,6,9,1,3,7,2,5,10,0,8
+nextFloat 3f1dfd45
+nextGaussian 3fd49d06e5cae69f
+nextFloat 3f17433e
+nextLong 518729297779020562
+shuffle 1 0
+shuffle 3 0,1,2
+nextInt 313644362
+shuffle 9 4,3,5,6,2,7,1,0,8
+shuffle 6 0,3,4,5,2,1
+shuffle 10 1,6,5,7,8,9,0,2,3,4
+nextIntBounded 255 150
+nextBytes 5 44f7346042
+nextIntBounded 1000 969
+nextGaussian 3fdac6eaceea5531
+nextIntBounded 2 1
+nextGaussian 3fd5708ec2d98bb4
+nextIntBounded 1 0
+nextGaussian bfe823f8786f93a5
+nextDouble 3fd324e26e6e47d0
+nextIntBounded 100 19
+nextIntBounded 1000 939
+nextIntBounded 1000 608
+nextDouble 3fe87137aa1732b0
+nextIntBounded 1073741825 918478941
+nextGaussian bffea3272a5a9ef6
+nextGaussian 3fb60b79c5bcce96
+nextGaussian 3fdaacd2fb7c8091
+nextIntBounded 1073741825 433172911
+nextInt -398224277
+nextBoolean true
+nextBytes 3 91ae19
+nextGaussian 3fd81e807e885a19
+nextGaussian 3fe5b16638282a68
+nextBoolean true
+nextIntBounded 100 65
+nextIntBounded 2147483646 1670123134
+nextLong -7243389174711685803
+nextInt 1354730503
+nextFloat 3f60fe08
+nextDouble 3f990f38d5392e60
+nextIntBounded 255 36
+nextLong 4885875761526838815
+nextFloat 3f13a35f
+nextLong 8556296580499353143
+nextDouble 3fc6afe3a15871f0
+nextLong -5974473391241630449
+nextIntBounded 100 92
+nextInt -1814936637
+nextBytes 7 b5784dbe027977
+nextBytes 6 38abd9eddb6f
+shuffle 8 3,6,1,0,7,5,2,4
+nextGaussian 3fe635f7824ac21f
+nextDouble 3fd7a56e7a161fd0
+nextBoolean true
+nextIntBounded 2147483646 1994784063
+nextBytes 4 127fc1e0
+nextIntBounded 255 194
+nextBoolean false
+shuffle 3 1,0,2
+nextIntBounded 256 40
+nextGaussian 3fe03d1153498815
+shuffle 4 0,3,2,1
+nextBoolean false
+nextBoolean false
+nextIntBounded 1073741824 844615247
+nextLong -1912670262378697445
+nextGaussian bfe4bd16fb2d7554
+nextGaussian 3fedb6d72d9bc580
+nextDouble 3fe0dd7a783d94ba
+nextInt 1793730412
+nextBoolean false
+nextIntBounded 256 220
+nextIntBounded 3 1
+nextInt -267687234
+nextBytes 5 0f5f2b6dd6
+nextLong 7388975574969141522
+nextInt -1100535778
+nextInt -1944657997
+nextDouble 3fd7612b5134de90
+nextDouble 3fe870ae1d358b55
+nextGaussian c0003a6dee1331b2
+nextGaussian 3fc29f8992ed3183
+nextDouble 3fdea2a02020be06
+nextFloat 3e06511c
+nextBytes 3 abcd81
+nextLong 586541553579625708
+shuffle 3 1,0,2
+nextIntBounded 1000 486
+shuffle 2 0,1
+nextIntBounded 1000 268
+nextInt 1604795124
+nextBytes 3 dfbf27
+nextLong 515150125455177686
+nextFloat 3f458dad
+nextGaussian bfc43ee0392c9b35
+nextIntBounded 2 0
+nextIntBounded 3 1
+nextDouble 3fe4fea0995dec44
+shuffle 9 4,0,3,8,6,1,2,7,5
+nextGaussian bff1121da11f3511
+nextIntBounded 10 7
+shuffle 1 0
+nextBoolean false
+nextLong -4113790345307396671
+shuffle 1 0
+nextLong 4469205987600845164
+nextIntBounded 10 9
+nextBytes 6 bc54af911305
+nextDouble 3fdd0f786d466a4e
+nextFloat 3ef0811c
+nextLong -7343378748249317669
+shuffle 8 3,2,1,7,4,6,0,5
+nextBoolean false
+nextIntBounded 1000 504
+nextIntBounded 1073741824 622085418
+nextIntBounded 1431655765 492141733
+nextIntBounded 1 0
+nextDouble 3fd3745996856d4e
+nextGaussian bfd6b30ee9abb741
+shuffle 3 2,0,1
+nextDouble 3fd8e0f0c196d1ec
+nextInt 1139224850
+nextInt -1375217015
+nextBoolean false
+nextLong 7677068407400238110
+nextInt 670972566
+nextInt 319379702
+nextLong 9017556648300948337
+nextDouble 3fefb430d96de687
+nextFloat 3f7ac582
+nextBoolean false
+nextBytes 6 3cec4e27a891
+nextBoolean true
+nextIntBounded 256 71
+nextBytes 1 ff
+shuffle 11 3,4,2,5,7,6,1,0,8,9,10
+nextIntBounded 7 0
+shuffle 11 7,1,10,0,2,9,5,4,6,3,8
+shuffle 1 0
+nextInt -120190546
+nextBytes 8 908478aef0b45ba9
+shuffle 10 1,0,5,9,7,3,6,8,2,4
+shuffle 2 1,0
+nextIntBounded 65536 29137
+nextGaussian 3fefa6d2081b680e
+nextBoolean false
+nextIntBounded 100 24
+nextIntBounded 256 27
+nextIntBounded 1000 109
+nextFloat 3f7bc436
+nextGaussian 3ff1c09b37362e77
+nextInt -791260744
+nextIntBounded 1000 311
+nextIntBounded 65536 10196
+nextFloat 3eeee2f2
+nextFloat 3ee82498
+nextIntBounded 2147483647 431007868
+nextBoolean false
+nextGaussian bff4910c12fff5ed
+nextInt -466908554
+nextLong -8306706606536940827
+nextBoolean true
+nextLong -4681839759482913740
+nextBoolean true
+shuffle 11 9,5,6,2,3,10,0,7,1,8,4
+nextIntBounded 5 4
+nextBoolean false
+nextIntBounded 10 4
+nextFloat 3ed49588
+nextBoolean false
+nextBytes 3 f99e08
+nextIntBounded 1431655765 795210291
+nextFloat 3eb33152
+nextBytes 5 b8df2ddfe7
+nextGaussian 3fb4a375e39b5c02
+nextFloat 3eb86b3a
+nextGaussian bfe0ef9e3f744576
+nextIntBounded 10 9
+nextBytes 5 b569ed1822
+nextIntBounded 65536 14841
+nextGaussian bfd87bf4c442836d
+nextFloat 3e55cad8
+nextInt 1022639698
+nextIntBounded 2147483647 2029591284
+nextInt -1559623510
+nextBoolean false
+nextInt 2034696979
+nextDouble 3fe7e6cb6f42139e
+nextBytes 1 df
+nextBytes 5 477b23800a
+nextIntBounded 2147483646 207407050
+setSeed 305419897
+nextLong 7591539430950840174
+seed -1
+nextIntBounded 1 0
+nextInt 1887904451
+nextFloat 3c490800
+nextBytes 5 9eff4b8c69
+nextBytes 0 -
+nextFloat 3f19cdbb
+nextIntBounded 1073741824 447147238
+nextBytes 1 0c
+nextLong -3206673117535979274
+nextFloat 3f4e5875
+nextGaussian bfc980da1459e84c
+nextLong -5716699375945509478
+shuffle 1 0
+shuffle 8 4,0,3,5,2,6,1,7
+nextIntBounded 2 1
+nextInt 1440933800
+nextGaussian bfdcd94d31351c5d
+nextIntBounded 10 5
+nextBytes 9 5936bf00d5bd102d18
+nextInt -810270448
+nextInt -1313581830
+nextGaussian bfd167fdca3f280d
+nextBoolean true
+nextIntBounded 3 1
+nextIntBounded 2 1
+shuffle 9 3,0,8,4,6,5,2,1,7
+nextGaussian bfda188ac8835e9b
+nextGaussian 3fe7a998cf9c2e3e
+shuffle 4 2,3,1,0
+nextBytes 8 5730e0cb38a6357f
+nextLong 7281057856451354158
+shuffle 3 0,2,1
+nextLong 7194708676771986116
+nextDouble 3feb0b7bbcbda7e3
+nextGaussian bfd7b42c13886573
+nextGaussian bff82c55db5820de
+nextDouble 3fe358cea479862e
+nextGaussian bfe0570aed0ca43e
+nextIntBounded 256 117
+shuffle 8 0,4,5,6,3,2,1,7
+nextIntBounded 10 3
+shuffle 11 9,10,4,6,5,0,3,8,1,7,2
+nextIntBounded 1073741825 964505939
+nextBoolean false
+nextBoolean true
+nextInt 1380671218
+shuffle 0 -
+nextFloat 3c48ffc0
+nextIntBounded 3 1
+nextDouble 3fee68fafadb7c2a
+nextFloat 3f178c3b
+nextIntBounded 2147483646 8853360
+nextIntBounded 2147483646 1553512429
+nextGaussian bff22137f1dda708
+nextLong 5701772225673476859
+nextIntBounded 16 10
+shuffle 8 7,2,1,4,5,0,6,3
+nextBoolean false
+nextBytes 0 -
+nextFloat 3f6879d3
+nextGaussian bfff3cf23b60d726
+nextBytes 8 5c01f36f4768d30c
+shuffle 9 6,1,0,5,8,4,7,2,3
+shuffle 7 5,1,0,2,3,6,4
+nextIntBounded 16 5
+nextBoolean false
+nextBoolean false
+nextLong 2926176125357939460
+nextFloat 3e5fc590
+nextIntBounded 16 10
+shuffle 4 3,1,0,2
+nextIntBounded 2147483646 1391209840
+nextBytes 5 aa767c328f
+nextDouble 3fe506c32cdb138f
+nextGaussian 3ffb5534de9768d0
+nextIntBounded 2147483646 1882708785
+nextBoolean true
+nextBoolean false
+nextLong -4429637124277614545
+nextDouble 3fe35464f5c2898a
+nextIntBounded 3 2
+nextBytes 3 2bf661
+nextIntBounded 5 0
+nextBytes 2 4be3
+nextIntBounded 1000 177
+nextIntBounded 1000 264
+nextDouble 3fb97ffd40adf918
+nextLong -5844487579312997289
+nextLong -5051835633813212758
+nextBytes 0 -
+nextInt -220228842
+nextGaussian 3fdc90952495a2b8
+nextDouble 3f967fe3c93bdea0
+nextIntBounded 1000 480
+nextLong -1479765311982217023
+nextGaussian 4007824868d3cd94
+nextInt -340228953
+nextBoolean true
+nextIntBounded 7 3
+nextBytes 5 bb4771356b
+nextBoolean false
+nextBytes 7 433b95f445de28
+nextIntBounded 2147483646 489067818
+nextIntBounded 3 0
+nextGaussian bfdb8558b753f253
+nextDouble 3fe376bcdaecf987
+nextIntBounded 1431655765 504127685
+nextDouble 3fed0e7c29a940cb
+nextDouble 3fcfa15b9c3720d0
+nextBytes 3 f61143
+nextLong 8891622175328353669
+nextFloat 3d00ade0
+nextBoolean false
+nextGaussian 3fff64d083df42fb
+nextBoolean true
+nextDouble 3fe1cd4e4484a782
+nextLong -2876074595711424675
+nextFloat 3f1baf20
+nextInt -2076826602
+nextBoolean true
+nextBytes 2 35d4
+nextFloat 3e36b658
+nextBoolean true
+nextBytes 5 5cfda85011
+nextBytes 2 bd2a
+nextDouble 3fdd3b4b4253bfe4
+nextLong 7511430601706503616
+shuffle 2 0,1
+nextLong 3795340831637800409
+nextGaussian 3ffbd39f42cc006e
+nextBoolean true
+nextBytes 3 ebd08a
+nextIntBounded 1431655765 842320760
+nextGaussian 3faebd55865514fa
+nextBytes 4 f7a07ca5
+nextLong -6581855512079761136
+nextInt -1435021269
+nextDouble 3fe24d3859f2c0af
+nextGaussian bfa2ae9afd09d78a
+nextIntBounded 2 1
+nextIntBounded 2147483647 2009648340
+nextIntBounded 255 16
+nextFloat 3f0b4dcd
+nextIntBounded 255 187
+nextIntBounded 5 3
+nextBytes 1 ae
+nextLong 4341785981409940499
+nextIntBounded 10 1
+nextLong -8500288858928744956
+nextBoolean false
+nextIntBounded 256 54
+nextLong 2458092038333253721
+nextBoolean false
+shuffle 7 2,1,4,3,6,5,0
+nextIntBounded 65536 6888
+nextBytes 3 202fa0
+nextLong 2753917613281410837
+nextFloat 3f543039
+nextGaussian bfe147a61f884221
+nextIntBounded 10 7
+nextIntBounded 256 216
+nextLong -3079224294427638393
+nextIntBounded 255 125
+nextGaussian bff8aa012f9cb232
+nextDouble 3f59ae198a91f000
+nextIntBounded 3 1
+nextIntBounded 16 13
+nextBytes 6 98e4a2b02b1d
+nextBoolean false
+nextInt -2073181693
+nextLong -4629090947216427051
+nextBytes 4 4dcc3358
+nextInt -1729045285
+nextLong -2897209787110310641
+nextInt 420029872
+nextBoolean false
+nextDouble 3fac6db34ed9e640
+nextDouble 3fa3371d441d8860
+nextBytes 4 1fefd423
+nextInt 92950466
+nextIntBounded 255 125
+nextGaussian 3ff99d2c7585cf89
+nextGaussian bfed5fde9dd6638c
+nextDouble 3fe1a4d68e7068d0
+nextGaussian 40004a02a053ce9e
+nextBoolean false
+nextLong 7566790790420054800
+nextIntBounded 5 4
+nextIntBounded 255 28
+nextInt 438836703
+nextFloat 3d5de560
+nextInt 2094245974
+nextIntBounded 65536 25431
+nextBytes 3 88c78c
+shuffle 5 4,2,1,0,3
+nextInt 1251758669
+nextFloat 3e3bd6d4
+nextBoolean false
+nextGaussian bffded83501d2485
+nextInt -970019221
+nextInt 2046597278
+nextIntBounded 100 14
+nextBytes 6 69b1c4217e82
+nextBoolean true
+nextFloat 3f4ad979
+nextBytes 1 3b
+nextDouble 3fe3fc72fee5c6be
+shuffle 8 4,0,6,7,5,1,2,3
+nextInt 1678583658
+nextDouble 3fee0c25ccc8d3a8
+nextDouble 3fe3e15245508424
+nextInt -1362429839
+nextFloat 3de75c90
+nextDouble 3fb453bace8b88d0
+nextIntBounded 7 5
+nextIntBounded 10 1
+nextGaussian 3fe41c1f5d93cac0
+nextInt -602049775
+nextBoolean false
+nextGaussian 3fdda6d1c8aea710
+nextLong 7460939734670481007
+nextIntBounded 100 91
+nextIntBounded 2 1
+nextIntBounded 2 0
+nextDouble 3fd02c8c6e29f74c
+nextFloat 3d6b7680
+nextLong -3963172595026931217
+nextBytes 7 f7c8b91b407d10
+nextBytes 0 -
+nextIntBounded 255 54
+nextFloat 3dbef8f0
+nextInt -773203234
+nextLong 3405258480851330508
+nextIntBounded 3 1
+nextBoolean false
+nextDouble 3fe96fa83e9d2081
+nextBytes 3 407d2d
+nextBoolean false
+nextDouble 3fe85d3b3869e528
+nextFloat 3f0ab6d8
+nextLong 3370387709259247839
+nextInt 1956678050
+shuffle 7 4,2,3,1,0,6,5
+nextFloat 3ef95dd8
+nextFloat 3e5db3d8
+nextBytes 0 -
+nextIntBounded 16 3
+nextBoolean true
+nextBytes 7 3cb8538149d94f
+nextBytes 6 c8fb851c202b
+nextBytes 9 677da004fa8b88d09d
+nextDouble 3fb79d1cc985c5a0
+nextFloat 3ce9f680
+shuffle 0 -
+nextIntBounded 1073741824 252011602
+nextBytes 5 2ca434830d
+nextDouble 3fe6ad89252ce0ed
+nextLong -5552480171693073008
+nextInt -1236606777
+nextInt 340872942
+nextLong -8743653922577104722
+nextBytes 6 3ca32a08efa8
+nextIntBounded 100 83
+nextIntBounded 1 0
+nextLong -6887121960511514563
+nextInt 2005206693
+nextLong -4484448853609956046
+shuffle 2 1,0
+nextLong -8782200112669536348
+nextFloat 3d98b370
+nextIntBounded 1000 462
+nextBytes 8 ec9399fdc877a693
+nextBytes 3 5a2f08
+shuffle 0 -
+nextIntBounded 16 6
+nextInt -1775537713
+nextIntBounded 2147483647 1253358308
+nextLong -1813597748744472953
+nextIntBounded 10 0
+nextFloat 3dbcf448
+nextBytes 4 8c60c462
+shuffle 10 7,6,9,4,1,5,8,3,0,2
+nextGaussian 3fdbd60a5525533b
+nextInt 1847721709
+nextGaussian bfcb9d37e5f7fdad
+nextDouble 3fc3c434ba7eab5c
+nextBytes 8 a1162fc7a5f61dcd
+nextInt -432098803
+nextDouble 3fef7551a4b213c6
+nextDouble 3fe8ced72d0697f1
+nextGaussian bfcc9d95e80208ff
+nextLong -8042733729764433881
+nextIntBounded 2147483646 1215621657
+nextInt -1405778730
+nextBoolean false
+nextGaussian bffbe31be61abb14
+nextBoolean true
+nextFloat 3f2540d8
+nextDouble 3fed9233724f0db0
+shuffle 4 1,0,2,3
+setSeed -305419897
+nextLong -7594844405965678548
+seed 42
+nextBoolean true
+nextDouble 3fabfd15d773ddf0
+nextFloat 3d445c00
+nextIntBounded 5 0
+nextIntBounded 5 0
+nextBoolean false
+nextInt -1255373459
+nextLong -6169532649852302182
+nextDouble 3fece86cf39c2cbe
+nextDouble 3fd79a23a61b35c8
+nextDouble 3fd1a5db3b0bfbe2
+nextInt 1991376913
+shuffle 9 5,4,0,1,3,7,2,8,6
+nextLong -1279628870744142884
+nextGaussian 3fd82b268ff9476a
+nextLong 6240679879620383709
+nextBoolean false
+nextInt -747470862
+nextDouble 3fd75ecd12c16798
+nextBoolean false
+nextDouble 3fe2cc3482318166
+nextBytes 9 97e953c0026cc4a45e
+shuffle 10 4,9,3,1,2,8,6,0,5,7
+nextInt -782556179
+nextInt 47529512
+nextGaussian bfdc5072f40bac52
+nextGaussian bfb12e58ab59cc07
+nextDouble 3fe6d4395c4399b5
+nextFloat 3ef60ddc
+nextInt -543521657
+shuffle 1 0
+shuffle 0 -
+nextDouble 3fd2aa8003832cc4
+nextIntBounded 2 1
+nextGaussian 3fd8bc7ef864acb6
+shuffle 9 8,0,2,1,7,3,4,6,5
+nextInt 1873820859
+nextIntBounded 1 0
+nextFloat 3f261757
+nextBoolean false
+shuffle 6 2,1,5,3,0,4
+shuffle 4 1,0,2,3
+nextBoolean false
+nextBytes 1 fb
+nextBytes 0 -
+nextLong -3899374207328935075
+nextIntBounded 5 4
+shuffle 10 9,2,0,6,8,5,4,1,3,7
+nextInt -1940620640
+nextFloat 3ed7899a
+shuffle 9 0,3,2,4,6,7,8,5,1
+shuffle 11 5,4,8,7,0,10,2,9,1,6,3
+nextInt 493511358
+nextLong -5584775193021092232
+nextBytes 5 1df79ae837
+nextLong 3618275030082862648
+nextIntBounded 16 12
+nextBoolean false
+nextGaussian 4001b2df6d1c2fa1
+nextGaussian bfe440fde64d7017
+nextIntBounded 2147483646 656226238
+nextBoolean true
+nextBoolean true
+nextLong -3762601634461998405
+nextIntBounded 255 227
+nextLong 2329045896118581347
+nextInt 2136002747
+nextLong -3860734252442316894
+nextDouble 3fe57536984ab865
+nextIntBounded 2147483647 1006464803
+nextIntBounded 3 0
+nextBytes 6 4ae498753e94
+nextGaussian bffb864817581b93
+nextFloat 3e0b7e88
+nextDouble 3fd89d76cd13f356
+nextBytes 3 71756f
+shuffle 8 5,0,2,1,4,3,6,7
+nextIntBounded 1 0
+nextDouble 3fe3af52789ddecd
+shuffle 1 0
+nextIntBounded 16 5
+nextInt -965849238
+nextInt 1574372582
+nextInt 1197532648
+nextDouble 3fef505617319290
+nextBytes 1 19
+nextDouble 3fd7ecee6eba6e68
+nextBoolean false
+nextIntBounded 255 246
+nextInt 1427321858
+shuffle 8 5,2,3,7,0,1,4,6
+nextIntBounded 1 0
+nextDouble 3fec59c5f95debb5
+nextIntBounded 2 1
+nextDouble 3fe9c5c2c2520e32
+shuffle 5 4,2,0,3,1
+nextInt 116092379
+nextLong -6262094140920583774
+nextBytes 9 1c1e0041a3253e48f9
+nextBoolean true
+nextBoolean true
+nextBytes 5 eb618de753
+nextLong 6344612640102792207
+nextBoolean false
+nextLong 165156786091954061
+nextLong 315024622061921936
+shuffle 8 6,3,7,5,4,1,0,2
+nextFloat 3f0e6f10
+nextFloat 3ef5ef3c
+nextInt 497143023
+nextBoolean false
+nextLong -7590675875771744094
+nextIntBounded 100 16
+nextIntBounded 1431655765 1345345174
+nextGaussian bfca7f68b6aabf3c
+shuffle 4 3,1,0,2
+nextGaussian bffe82f29b275f20
+nextGaussian 3ff5e5a4e24c327b
+nextGaussian bfe1e8d76b4ecc9a
+nextIntBounded 3 0
+nextBoolean false
+nextGaussian 3fe7d3d47a8bb32b
+nextInt -1657398909
+nextLong -5739823523825024814
+nextLong 3829302004107794106
+nextLong 3700012061207321863
+shuffle 9 0,7,1,3,4,2,5,8,6
+nextLong -9062082934530301358
+nextBytes 3 97960a
+nextGaussian 3ff4b8950d4c3219
+nextGaussian bfe2a5493f3ae656
+nextInt -589165719
+nextIntBounded 100 31
+nextBoolean true
+shuffle 9 0,7,6,4,2,8,5,1,3
+nextBytes 4 d36acbc3
+nextBytes 6 b5eabfd2254b
+shuffle 0 -
+nextDouble 3feb3585a363558b
+nextBoolean true
+nextIntBounded 1073741824 573837295
+nextFloat 3e0439c8
+nextLong 4490053457775251895
+nextInt 172955764
+nextLong -8432473707242302101
+nextLong 2817034374447275247
+nextBoolean true
+nextBytes 7 b3daebbe4fda8a
+nextBoolean true
+nextDouble 3fd507205f845f14
+nextFloat 3f385a17
+nextGaussian 3fe89d004b4b90d9
+nextDouble 3fdc868dd1a578c2
+nextDouble 3fe09cc6e0d4b2ec
+nextBoolean false
+nextIntBounded 2 0
+shuffle 0 -
+nextGaussian 3fcf84a2a4960c7b
+nextFloat 3eea6f4c
+nextIntBounded 1073741825 397581613
+nextInt 1798983211
+nextIntBounded 3 2
+nextIntBounded 1431655765 948545005
+nextFloat 3eac4b14
+nextDouble 3fdd5cd786c56f20
+nextIntBounded 1073741825 274891518
+nextBoolean false
+nextDouble 3fc3cd12b34ae950
+nextIntBounded 2 1
+nextBytes 7 40ee892af24d6f
+nextIntBounded 1073741825 1035584741
+nextBoolean false
+nextGaussian 400574da5f6150c9
+nextBytes 9 46140fb6d49ccaf7cb
+nextBoolean false
+nextFloat 3f59e261
+nextIntBounded 1000 56
+nextBoolean true
+nextLong 6271859040431005877
+nextFloat 3f1af65f
+nextLong 6815820689859494765
+nextFloat 3f015e3b
+nextIntBounded 1 0
+nextBoolean false
+nextFloat 3e95f864
+nextIntBounded 1073741825 708899329
+shuffle 4 1,0,3,2
+nextBytes 9 49026ca2e62c426fc2
+nextDouble 3fe192cb19bdae4f
+nextIntBounded 256 147
+shuffle 1 0
+nextBytes 3 d8bcb8
+nextInt -1170221766
+nextDouble 3fd0dfc5c989701a
+nextBytes 8 f834fe747f166cd1
+nextDouble 3fbb87ef788f92e8
+nextBytes 0 -
+nextFloat 3f714eef
+nextFloat 3ebee2fe
+nextIntBounded 1431655765 1388031529
+nextGaussian 3fe468c5e8c3510e
+nextInt -1964645508
+nextIntBounded 2147483646 1804082165
+nextIntBounded 2147483646 1268323588
+nextLong 1786721879601088065
+shuffle 5 4,1,3,0,2
+nextIntBounded 100 92
+nextBytes 0 -
+shuffle 0 -
+nextBoolean true
+nextLong 2971056645043808722
+shuffle 9 6,3,4,1,7,8,2,0,5
+nextIntBounded 255 72
+shuffle 1 0
+nextLong -7100893377085129110
+nextInt 937660154
+nextDouble 3fc682af768a68bc
+nextInt 2136027956
+nextIntBounded 100 33
+shuffle 10 3,7,0,9,1,6,4,5,2,8
+nextInt 460054188
+nextIntBounded 3 0
+nextFloat 3e6bceec
+nextGaussian bfeb1a353357ba76
+shuffle 2 0,1
+shuffle 6 0,1,5,2,4,3
+nextBoolean false
+nextDouble 3fd30e81fcc2d46c
+nextBytes 0 -
+nextBytes 9 13d4213c8f257bb4c0
+nextDouble 3fd36f9b76eaaef2
+nextIntBounded 255 149
+nextDouble 3fdd6ad1b90d97aa
+nextBoolean false
+shuffle 8 5,2,7,1,0,6,3,4
+nextIntBounded 255 1
+nextBytes 3 72dafc
+shuffle 2 0,1
+nextIntBounded 16 6
+nextLong -2081598585733574224
+nextGaussian 3fe1d6d7e8ecb249
+shuffle 7 4,0,3,1,6,5,2
+shuffle 8 1,2,5,0,4,6,7,3
+nextIntBounded 2147483646 1098138543
+nextLong 8494261396226432207
+nextFloat 3f04275a
+nextGaussian 3ff318ef10da98b2
+shuffle 0 -
+nextIntBounded 1073741825 1054870065
+nextBoolean true
+nextDouble 3fe744ea3c11918a
+nextBytes 1 54
+nextLong -944507829597266040
+nextBytes 2 e5e4
+nextInt -1115022561
+nextFloat 3f24c84a
+nextGaussian bff71c8e64f67a2e
+nextBytes 0 -
+nextGaussian c00618dd50e7cae3
+shuffle 11 2,7,6,0,5,9,3,8,1,4,10
+nextBoolean false
+nextInt 285045782
+nextDouble 3feae53de5cd69e7
+nextLong -7802707267455867820
+shuffle 0 -
+nextInt 68739990
+nextBytes 7 c07301d7550d19
+nextLong 8864398633056828611
+nextIntBounded 1073741824 358583087
+nextBoolean true
+nextInt -823221854
+nextBoolean true
+nextInt -916929925
+nextIntBounded 16 15
+nextDouble 3fd293844ea055be
+nextFloat 3f06fac3
+nextBoolean false
+nextIntBounded 10 5
+nextLong -1841352097424129257
+nextLong 5673639170572753798
+nextBoolean true
+nextIntBounded 1073741824 889928169
+nextGaussian 3fe14c1b77c109fc
+nextLong -6264246790243631120
+nextLong 7717403172009939676
+nextGaussian bfddfa73742780e5
+nextIntBounded 1000 775
+nextIntBounded 3 1
+nextBoolean true
+nextLong -7362712524364313709
+nextLong -1238235106684124003
+shuffle 5 3,1,4,2,0
+nextFloat 3e30d6d4
+nextInt -1306419646
+nextFloat 3edc1bd4
+nextDouble 3fec5f8468783fe3
+nextLong -7775972244008400372
+nextLong -6375373480205312428
+nextBytes 8 5e65f11c0e7cb819
+nextIntBounded 10 7
+setSeed 305419858
+nextLong 7662596243627996048
+seed 25214903917
+nextIntBounded 100 0
+nextDouble 3f502500aa854400
+nextDouble 3fc69c39ebaad254
+nextFloat 3dbb0b88
+nextBytes 7 92d1a0179a44ba
+nextIntBounded 5 2
+nextBoolean false
+nextFloat 3e6ec650
+nextDouble 3fea99f13f742fa2
+nextBoolean true
+nextBoolean true
+nextIntBounded 2147483646 109160704
+nextInt -1000507651
+nextInt 81238462
+nextLong 4655215942749824611
+nextFloat 3f604048
+nextInt -2011947947
+nextIntBounded 16 14
+nextIntBounded 16 8
+nextBytes 9 fe4d78cf3d4f3c30de
+nextIntBounded 100 75
+nextIntBounded 100 22
+nextIntBounded 65536 53429
+nextLong -278711534114550735
+nextInt -455670687
+nextFloat 3f48d3eb
+nextBytes 8 1da6d51914f7d840
+nextBoolean false
+nextIntBounded 1 0
+nextLong -5923666226553227036
+nextBytes 0 -
+nextDouble 3fe8162c400cc207
+nextGaussian 3ff815158b631b35
+nextInt 801165253
+nextBoolean false
+nextLong -9048120744002625308
+nextIntBounded 255 70
+nextBytes 1 11
+nextDouble 3fec0ac03af7cc0d
+nextBytes 7 f1f07686cb9086
+nextIntBounded 256 138
+nextFloat 3f2b00a5
+nextIntBounded 2147483646 367524280
+nextInt -726798080
+nextFloat 3f5ca5d5
+nextIntBounded 256 196
+shuffle 8 2,3,7,5,4,6,1,0
+nextDouble 3fe9ecd1a3b6b460
+nextIntBounded 1000 583
+nextGaussian 3ff6c148b4c91a89
+nextFloat 3f031fbc
+nextGaussian 3fce2a1208019d88
+nextGaussian 3ff03333d9732478
+nextIntBounded 1000 177
+nextLong 6152529585076461489
+nextBytes 7 c3224b2dc372a3
+nextLong -2717558884256910061
+nextLong -832182770510914916
+nextGaussian bffd493686c70c85
+nextFloat 3e885a58
+nextIntBounded 256 200
+nextIntBounded 256 119
+nextIntBounded 1 0
+nextIntBounded 16 7
+nextBytes 1 80
+nextGaussian 3fccb07f6ca5fd20
+nextInt -145629456
+nextBytes 5 4151c0c101
+nextInt -562784844
+nextIntBounded 2147483647 287847111
+nextFloat 3f5896e6
+nextFloat 3c942c80
+nextBytes 6 2fdcdbf06e80
+nextIntBounded 2147483647 1717925801
+nextInt 615111416
+nextIntBounded 2147483647 1310953536
+nextDouble 3fed10a696320057
+nextIntBounded 1431655765 786117942
+nextIntBounded 2 1
+nextGaussian bfdcbf31d7aae7e0
+nextFloat 3e3ae06c
+nextBoolean true
+nextLong -1867569564157683006
+nextIntBounded 5 3
+shuffle 3 0,1,2
+nextIntBounded 1073741825 725244635
+nextInt -2006555793
+nextInt -1279568380
+nextDouble 3fef1284f62509d9
+nextIntBounded 1073741824 807390770
+nextDouble 3fb742de76a76408
+nextInt 750092220
+nextIntBounded 256 5
+nextIntBounded 5 2
+nextBoolean false
+shuffle 3 1,2,0
+nextIntBounded 16 2
+nextIntBounded 1073741825 817862019
+nextInt 1287545444
+nextGaussian 40035711ae249871
+nextFloat 3cac2180
+nextInt 1025649444
+nextDouble 3fa2ffff9c4ba990
+nextLong -8754187488033426311
+nextBoolean true
+nextDouble 3fe8c3375078d64c
+nextIntBounded 1 0
+nextBoolean true
+nextBytes 0 -
+nextBytes 7 83c98757899ff1
+nextLong -7597812829331365198
+nextLong 1289926188862897669
+nextInt 1731562111
+nextBoolean true
+nextIntBounded 16 3
+shuffle 9 0,8,4,6,5,2,3,1,7
+nextBoolean true
+nextBytes 3 e5c94f
+nextBytes 8 a44ad0bc8bc3cfd2
+nextBytes 6 828fa4b80289
+nextInt 1540924681
+nextDouble 3fe3881bb351ed6e
+nextBoolean true
+nextFloat 3f462298
+nextGaussian bff881ee23478f08
+nextDouble 3fe42ab7c9727822
+nextLong 5137434238384493944
+nextFloat 3f249ab7
+nextDouble 3fe7c547834f2a86
+nextIntBounded 10 1
+nextIntBounded 1073741824 663883102
+nextFloat 3f5abc58
+shuffle 10 3,8,5,7,9,4,6,0,2,1
+nextLong -8124548679534154758
+shuffle 7 2,3,5,6,1,4,0
+shuffle 6 4,5,1,3,0,2
+nextLong 6561517116526305860
+nextIntBounded 65536 25686
+shuffle 2 1,0
+nextLong 5266847549992688776
+nextInt 1908617086
+shuffle 4 0,2,1,3
+nextBoolean true
+nextInt 63209809
+nextDouble 3fe5f973f6c1ad20
+nextLong 2391569465776381534
+nextBytes 0 -
+nextFloat 3c562c40
+nextInt 1680013961
+nextBytes 0 -
+nextIntBounded 1073741825 32335482
+nextLong -1396630623916916418
+nextIntBounded 65536 43389
+nextIntBounded 1431655765 1406410569
+nextInt 327877294
+nextGaussian 3fe5f1af9d565821
+nextIntBounded 100 90
+shuffle 4 3,2,1,0
+nextGaussian 3fe285928aec6f55
+nextIntBounded 5 3
+nextDouble 3fd055f3a236b324
+nextLong 8908841168481272453
+nextIntBounded 65536 6611
+nextIntBounded 10 0
+nextLong -2612150563368698656
+nextBytes 9 6a7152d2ac84ddf69d
+nextBytes 1 d8
+nextGaussian 3ff1f10cb76f87f4
+nextLong 1163627973475558523
+nextInt 817147204
+nextDouble 3fd1b4e3872832ce
+nextDouble 3fe4c7bc6135803a
+nextGaussian bff2279899bdf0ba
+nextIntBounded 2 0
+nextFloat 3f38d47c
+nextLong -5078355233392868803
+nextIntBounded 16 1
+nextBoolean true
+nextGaussian 400839bf8ae40f1b
+nextInt -1112766954
+nextLong 4409835705207781274
+nextIntBounded 7 4
+nextDouble 3f9acf4fd968f6e0
+shuffle 1 0
+nextFloat 3d2b4750
+nextInt 241038143
+nextGaussian c0061c7d0d3de759
+nextLong -7240250177693166968
+shuffle 11 3,10,9,7,2,1,4,8,0,6,5
+nextLong -1139108940769310486
+nextDouble 3fe2f6acc0faedf3
+shuffle 10 6,1,5,0,7,4,9,2,8,3
+nextGaussian 3fb035e3ff014179
+nextBoolean true
+shuffle 6 1,5,3,4,0,2
+nextFloat 3f7c1d5f
+nextBoolean true
+nextLong -7816588203214933191
+nextGaussian bfd5c3eb86386884
+nextGaussian bffe0c48209537f9
+nextLong 1817446859640690912
+nextBytes 7 a525b9b247d631
+nextBytes 5 2ab1a0e479
+nextInt 1298313107
+nextBytes 6 e0e226240931
+nextGaussian bfa824d4bfa7faa1
+nextBoolean true
+nextIntBounded 7 5
+nextFloat 3e85c6c6
+nextLong 8393914549183424095
+nextFloat 3f75e295
+shuffle 8 3,1,7,6,5,4,2,0
+nextLong -2418176267816458533
+nextBoolean true
+nextBoolean false
+nextIntBounded 2147483646 433816808
+nextLong 8718653038051218366
+nextLong -1218078756519643949
+nextBytes 8 215f26929af4f081
+shuffle 7 6,3,5,2,1,0,4
+nextDouble 3fe86eb716265aa5
+nextIntBounded 65536 35544
+nextLong 8873820176719861063
+nextGaussian 3fd8f09c8a4aeb89
+nextBytes 0 -
+nextInt 315970421
+nextDouble 3fe0dab4dc0f9c65
+shuffle 0 -
+nextBytes 5 13ba68c025
+nextInt 40270207
+shuffle 0 -
+nextInt -1013726161
+nextIntBounded 65536 6631
+nextBoolean true
+nextIntBounded 1073741824 95825270
+nextBoolean false
+nextFloat 3f657232
+nextLong -4699391160933574151
+nextInt -1780434646
+nextIntBounded 7 3
+nextBoolean true
+nextIntBounded 1073741824 425301838
+nextIntBounded 7 5
+nextInt -312604513
+nextBoolean false
+nextFloat 3f5eeb8d
+nextFloat 3e6bc1a4
+shuffle 0 -
+nextIntBounded 2147483647 1050037421
+nextIntBounded 1073741825 468933677
+nextBytes 6 ec9ba6eb2866
+nextLong 7533467951329384022
+nextIntBounded 1073741825 225834377
+nextDouble 3fe0f3f89c9568e9
+nextFloat 3dea7bb0
+nextDouble 3fa5cb6a401d9200
+nextIntBounded 5 0
+nextFloat 3efd0bd0
+nextInt 1486426332
+nextIntBounded 2147483647 75322081
+nextFloat 3ebba68c
+nextIntBounded 1000 398
+nextGaussian 3f8369f250b26f3f
+nextGaussian 3fea10d0f45d6f28
+nextBoolean false
+nextBytes 7 ac8d463de0146a
+nextDouble 3fba00b7f1c08ef0
+nextBoolean false
+nextBoolean false
+nextBoolean true
+nextBytes 7 1352b783fe48c5
+nextIntBounded 2147483646 1549597311
+nextBytes 9 575cb7cde29c92bd4c
+nextBoolean true
+nextBoolean false
+nextInt -1821622346
+nextBoolean true
+nextDouble 3fe1a33766a1159a
+nextLong 2288457152153382913
+shuffle 2 1,0
+nextBoolean false
+nextIntBounded 255 155
+nextIntBounded 16 10
+nextBytes 9 d44cdc4c1df90f6fec
+nextIntBounded 2147483647 266912418
+nextBytes 7 e05a63228e84dd
+nextIntBounded 7 1
+nextGaussian 3fd32e57810d2182
+nextBytes 5 a44aa538ad
+nextInt -1022502616
+nextFloat 3ed7a7de
+nextIntBounded 65536 45002
+nextLong -8731002512247426043
+nextFloat 3e131784
+nextIntBounded 255 55
+nextDouble 3fe7d44bf5d6cd9e
+nextIntBounded 16 11
+nextInt 746294269
+shuffle 1 0
+nextFloat 3f0e83b6
+setSeed 24911589397
+nextLong -1443812045653089274
+seed -9223372036854775808
+nextInt -1155484576
+nextFloat 3f54d951
+nextInt 1033096058
+nextBytes 8 be70399bf6c92da3
+nextBytes 2 3af0
+nextInt -1930858313
+nextBytes 4 0325f41d
+shuffle 1 0
+nextDouble 3fe31f174640953b
+nextIntBounded 1 0
+nextBytes 3 4bf0b5
+nextLong 7105486291024734541
+nextBoolean true
+nextInt -73789608
+nextIntBounded 1073741824 944015042
+shuffle 1 0
+nextIntBounded 65536 1512
+nextDouble 3fee1eb699686687
+shuffle 2 1,0
+nextIntBounded 7 3
+shuffle 10 0,7,8,9,6,3,2,1,5,4
+nextBytes 8 7a781d90cbe6bf1a
+nextBytes 1 e7
+nextBytes 8 a49709a06c0e3149
+nextGaussian bfdcfdc05b352db9
+nextIntBounded 7 0
+nextGaussian 3ff6734aab3f59e9
+nextIntBounded 3 1
+nextBytes 0 -
+nextBoolean false
+shuffle 6 0,5,1,4,3,2
+nextBytes 3 a0613a
+nextFloat 3c51d2c0
+nextIntBounded 1431655765 885230877
+nextBytes 7 21c6d5869d61cc
+nextIntBounded 2 1
+nextFloat 3f7c139a
+nextIntBounded 10 8
+nextBytes 3 f301cf
+shuffle 2 1,0
+nextBoolean false
+nextIntBounded 1431655765 659000788
+nextInt -1192467086
+nextInt -1412716779
+nextInt -1223932479
+nextIntBounded 16 1
+nextFloat 3e12a85c
+nextIntBounded 5 3
+nextIntBounded 1000 358
+nextIntBounded 256 70
+nextFloat 3b92fb80
+nextIntBounded 1 0
+nextIntBounded 255 92
+nextBoolean true
+nextIntBounded 1073741825 748226726
+nextIntBounded 10 0
+nextFloat 3ead7336
+nextLong -7259568352408974738
+nextFloat 3f6eafac
+nextLong -524865453008036006
+nextBoolean true
+nextBytes 2 4b03
+shuffle 4 1,3,0,2
+nextInt 1337360486
+nextBytes 7 cbb1b237c24412
+nextBytes 7 ceabbfdad87c31
+shuffle 8 5,1,7,4,3,6,2,0
+nextGaussian 3fbc008222476212
+nextGaussian bfd0a73eaebe8850
+nextLong 7290283101517863911
+nextInt -996341162
+nextIntBounded 1 0
+nextDouble 3fe3cad0cb275431
+nextIntBounded 1073741824 656754981
+nextFloat 3f5a9208
+nextLong 453864015181517797
+nextBoolean true
+nextLong -120421011786498678
+nextGaussian 3fe310a7e28696c9
+nextLong 8142886840698975765
+nextBytes 1 39
+nextBoolean false
+nextDouble 3feb4a5cd3c59b5f
+nextDouble 3fe00f07f5b40dda
+nextLong -148625824714636787
+nextInt -131984708
+nextIntBounded 1431655765 1214366859
+nextInt 1516579035
+nextLong 6925694130040970654
+nextFloat 3f49a855
+nextBytes 7 23ed5512f448cd
+nextFloat 3cee72e0
+nextIntBounded 1000 871
+nextIntBounded 65536 31697
+nextIntBounded 2147483647 18505541
+nextBoolean true
+nextDouble 3fded6eebfd36c82
+nextFloat 3eb31eb2
+nextDouble 3fe88ee2bdc0ccbc
+shuffle 0 -
+nextBoolean true
+nextGaussian 3ff05c5e676257c3
+nextIntBounded 2147483647 1372327958
+nextDouble 3fd05a86d5666de4
+nextLong 5702961989472887051
+nextInt -651630279
+nextIntBounded 3 2
+nextBytes 5 b769550df6
+nextGaussian 3fb016b1464157df
+nextBytes 0 -
+nextDouble 3fd1bdcf1f05a8b8
+nextBoolean true
+nextGaussian 3feaa59913fbde0e
+nextIntBounded 1431655765 1309710589
+nextGaussian 3fc3aca9a3ab7924
+nextGaussian bff29b978ac5c2d8
+nextGaussian bff76bfed32df5c2
+nextBytes 1 a5
+nextBytes 4 66d1c95d
+nextLong 6982618520329021882
+nextBoolean true
+nextFloat 3f34375b
+nextBytes 4 c4154937
+nextInt 1386277121
+nextBoolean false
+nextIntBounded 1000 573
+nextBytes 2 15a7
+nextGaussian bfa61745616f8c26
+nextLong -5514858212339405460
+nextInt -1093701172
+nextFloat 3f3d7272
+nextGaussian 3fe1f737af02ec32
+nextDouble 3fd8e61561860d44
+shuffle 1 0
+shuffle 2 0,1
+nextDouble 3fd5744e32ada02c
+nextIntBounded 256 148
+nextDouble 3f7007a26034ab00
+nextInt 1137718941
+shuffle 5 1,0,2,4,3
+nextBytes 7 3c227a3810afcc
+nextBytes 6 a307515f6262
+nextDouble 3fd84f987689338c
+nextInt -1370798799
+nextFloat 3eb4c34c
+shuffle 10 5,9,1,3,6,7,8,2,4,0
+nextIntBounded 2 1
+nextBytes 1 6e
+nextInt 1339899789
+nextIntBounded 256 165
+nextFloat 3f0a4c79
+nextFloat 3f1d03e7
+nextBytes 0 -
+nextDouble 3fef23b2a829151c
+nextBoolean true
+nextFloat 3ed39a76
+nextGaussian bff62e3d575a3928
+nextFloat 3cde91a0
+nextBytes 9 ed6cc2e0af7363b049
+nextLong -6819959017335327829
+nextLong -3360305141762794454
+nextBoolean true
+nextBytes 6 294e9b51f566
+shuffle 7 5,6,2,3,4,1,0
+nextDouble 3fda48d6e1f5c3f2
+nextInt -312090222
+nextBytes 8 bb1b9ab60456463a
+nextInt -287577538
+nextIntBounded 2147483646 1414486782
+nextIntBounded 256 79
+nextIntBounded 1073741825 47504452
+shuffle 7 2,3,0,6,1,4,5
+nextLong 6995928140111635280
+nextDouble 3fe2f52dc068b26e
+nextDouble 3fee19789a0d8202
+nextBoolean true
+nextBytes 8 e40d2f0bbf76d536
+shuffle 2 0,1
+nextIntBounded 2147483647 716679008
+nextDouble 3fe09b30d201191c
+nextGaussian bff0302f16e2af6f
+nextInt 980775637
+nextIntBounded 3 0
+nextBoolean false
+nextBoolean false
+nextGaussian bfe31b9c50a710ce
+nextGaussian bfb741d8c2b4c967
+nextInt 562086714
+nextIntBounded 2 0
+nextIntBounded 65536 46378
+nextFloat 3db044b0
+nextDouble 3fea2b1b4723462d
+nextFloat 3f351672
+nextBoolean true
+shuffle 2 0,1
+nextGaussian bfe97feb742ed399
+nextBoolean false
+nextFloat 3f3c6912
+nextBytes 7 7cb8068827ec9e
+shuffle 11 1,9,0,6,2,8,5,7,3,4,10
+shuffle 0 -
+shuffle 5 4,2,1,0,3
+nextGaussian bffc5dcf9c958752
+nextBytes 4 5c7fdaf1
+nextIntBounded 100 93
+nextLong 4016786749698341737
+nextGaussian 3fba60dcf1122382
+nextBytes 9 c513eae8af111561d7
+nextIntBounded 1000 534
+shuffle 0 -
+nextGaussian bff366c348b4c7a1
+nextBoolean false
+nextGaussian 3fed01f85011932d
+nextGaussian 3feb66381f4830d5
+nextBoolean true
+nextBoolean false
+nextDouble 3feb2f57b4d446da
+nextBoolean true
+nextIntBounded 1431655765 1166726497
+nextFloat 3e9b9410
+nextFloat 3ef1130e
+nextIntBounded 256 160
+nextLong 2241606563660412717
+nextBytes 4 4c9feb39
+nextFloat 3ef46900
+nextBytes 1 f1
+nextGaussian bfd47900c809eea3
+nextIntBounded 1 0
+shuffle 3 2,1,0
+nextIntBounded 2147483647 1971124528
+nextIntBounded 5 1
+nextFloat 3de1e960
+shuffle 1 0
+shuffle 9 3,2,8,5,1,7,6,4,0
+nextFloat 3eb06a44
+nextBytes 5 7fd90ebb70
+nextDouble 3fe1e0fd95f60fb6
+nextFloat 3f72f9bf
+nextIntBounded 5 3
+nextFloat 3cb08f20
+nextIntBounded 7 2
+shuffle 1 0
+nextIntBounded 65536 46244
+nextBoolean true
+nextDouble 3fcb23b2d6019628
+shuffle 2 1,0
+nextBoolean true
+nextFloat 3ef030ea
+nextFloat 3d110680
+nextDouble 3fc9ec3ae63ebb7c
+nextDouble 3fce7601326ea55c
+shuffle 8 4,0,2,5,1,7,3,6
+nextLong 1794894844987367466
+nextFloat 3f51d76f
+nextDouble 3fe7dabb7d5bffdc
+nextBytes 9 dc222f4b6297cb6d9a
+nextBytes 3 c4c0dd
+nextDouble 3fdc11463d4603c0
+nextBoolean false
+nextFloat 3f0a1f26
+shuffle 6 5,4,0,3,2,1
+nextIntBounded 10 2
+nextLong -5589897934282193606
+nextIntBounded 7 2
+nextLong -5727558868953203691
+nextIntBounded 16 11
+nextInt 652525130
+nextFloat 3d8dd120
+nextFloat 3f76fc1b
+nextLong -9161356953358167518
+nextGaussian 3fe3fa5b954e9ee7
+nextInt -1195647518
+nextIntBounded 2 1
+nextDouble 3fd5db709ab3f81a
+nextBoolean false
+nextGaussian 3fef6752cbb11d8b
+nextBoolean true
+nextIntBounded 255 3
+nextBytes 6 b9cf424c3276
+nextGaussian 3fec843c2699079f
+nextBoolean false
+nextBoolean false
+shuffle 7 1,6,0,5,2,3,4
+nextDouble 3fca94bb8b2dfe38
+nextBoolean true
+nextDouble 3fe63eb8611249d7
+shuffle 4 1,2,3,0
+nextDouble 3fb618539dc14e90
+nextIntBounded 1000 967
+nextBytes 4 d5a10a68
+shuffle 6 1,0,5,3,2,4
+nextDouble 3fe26c88531173fb
+nextInt 723532789
+nextDouble 3fd3ddaac5f2a48e
+nextInt -418146186
+nextLong 4328502305394555230
+nextIntBounded 2147483647 1156264553
+nextIntBounded 1073741824 636619910
+nextInt 1524473942
+nextBoolean true
+setSeed -9223372036549355912
+nextLong 7593191914167524302
+seed 9223372036854775807
+nextLong 4961115982468162243
+nextInt 52699159
+nextFloat 3f0c4bff
+nextBytes 4 695e7ea9
+nextLong -7364023878800395366
+shuffle 5 0,2,1,4,3
+nextDouble 3fd3d33ad0e89c00
+nextIntBounded 2147483647 149520196
+shuffle 10 7,1,8,6,0,4,9,5,3,2
+nextInt 1950990286
+nextIntBounded 256 159
+nextGaussian bfea8d3be93c4b77
+nextBoolean false
+nextIntBounded 3 2
+nextBoolean true
+nextBytes 9 bfa7a698aed5d259d6
+shuffle 2 1,0
+nextInt 940235974
+nextDouble 3fb611bec517c3f0
+nextIntBounded 5 2
+nextDouble 3fe7ecaee3752fa3
+nextBytes 2 1a1a
+nextDouble 3fec0eafe106f1ea
+nextIntBounded 65536 20399
+nextLong -2441479626109622105
+shuffle 1 0
+nextGaussian 3fdd92b86a61ed95
+nextFloat 3e394c0c
+nextIntBounded 1431655765 785608363
+nextBoolean true
+nextLong 9166415377726145419
+nextIntBounded 65536 13017
+shuffle 0 -
+nextDouble 3fd8637d8904b3ce
+nextLong 7194708676771986116
+nextLong -2856445453099795348
+nextIntBounded 16 3
+nextIntBounded 1073741825 891703499
+nextGaussian 3fea56493462f491
+nextDouble 3fedccc53ed789dd
+nextLong -1397868828029963537
+nextBytes 4 87ec5951
+nextDouble 3febeeee047f46d5
+nextGaussian 3fbe0557626eab19
+nextInt 712739606
+nextFloat 3ea7a8ea
+nextLong -2900411868977439929
+nextDouble 3fca7fd16269f578
+nextBytes 2 a1d0
+nextInt 454958500
+nextLong -771416632108303053
+nextBoolean false
+nextIntBounded 2147483646 1533719247
+nextFloat 3f727c04
+nextIntBounded 1073741825 964505939
+nextFloat 3e8c5096
+nextBoolean true
+nextBytes 9 f25e4b52f0ff2303a6
+nextBytes 7 edd747f353856f
+nextGaussian 3fe4c79d630b13eb
+nextLong -6364443779247095918
+nextFloat 3e1840b8
+nextIntBounded 2 0
+nextBytes 5 fbba7445ee
+nextInt 2035472042
+nextLong 4123087692669530428
+nextBytes 5 02da8e53c4
+nextInt -176886343
+nextIntBounded 5 1
+nextIntBounded 100 86
+shuffle 9 6,0,1,2,4,7,8,3,5
+shuffle 3 2,1,0
+nextBoolean true
+nextIntBounded 255 11
+nextBoolean true
+nextBoolean false
+nextIntBounded 1 0
+nextFloat 3e554a44
+nextIntBounded 1073741824 975413005
+nextGaussian 3ff93c2b9e3f484e
+nextIntBounded 7 1
+nextFloat 3e9a6992
+nextFloat 3efa7606
+nextBytes 0 -
+nextDouble 3fc44deed6c60b60
+nextBoolean false
+nextGaussian 40009ca3db596079
+nextIntBounded 100 40
+nextBytes 2 aa76
+nextInt -423357041
+nextIntBounded 2147483646 1411058856
+nextIntBounded 1073741824 651730044
+nextBoolean true
+nextInt -526949608
+nextIntBounded 7 1
+nextBoolean true
+nextInt -529549725
+nextBytes 2 4e3e
+nextBytes 0 -
+nextIntBounded 1 0
+nextIntBounded 255 71
+nextBoolean false
+nextFloat 3f1aa327
+nextLong -5165293074374276515
+shuffle 7 6,4,5,2,0,3,1
+nextDouble 3f85bf235dc86b00
+nextInt 350075991
+nextBytes 7 4246e4b9aa31e7
+nextFloat 3f72df93
+nextBoolean false
+shuffle 10 2,1,8,4,0,6,9,7,3,5
+nextLong 2576899943565686607
+nextFloat 3ee74922
+shuffle 9 2,0,7,1,4,8,3,5,6
+shuffle 7 5,3,2,4,6,0,1
+nextBoolean false
+nextBoolean false
+nextBoolean true
+shuffle 6 1,5,4,0,2,3
+nextIntBounded 65536 37164
+nextBytes 0 -
+nextLong 6616191169619122480
+nextInt 1439186374
+nextBoolean true
+nextIntBounded 1073741825 383175545
+nextDouble 3feac0aafa8547ea
+nextIntBounded 65536 8101
+nextGaussian 3fc686e49c635b39
+nextBoolean false
+nextBytes 9 202ded744afe3b2556
+nextBytes 1 c0
+shuffle 8 0,6,4,1,7,2,3,5
+nextBoolean false
+nextIntBounded 1000 156
+nextGaussian 3fd18533f37ce115
+nextFloat 3e9b1758
+nextIntBounded 16 10
+nextLong -6581855512079761136
+nextIntBounded 1073741825 522980089
+nextBytes 7 c4ebf9c4a89991
+nextLong -5987824251039789793
+nextBoolean true
+nextIntBounded 7 3
+nextIntBounded 2147483646 373433047
+shuffle 5 0,1,3,4,2
+nextBytes 7 047657bb404344
+nextFloat 3e58a7b0
+nextInt 572319151
+nextInt 1913768025
+nextLong 972652890178516639
+nextFloat 3e1dbe70
+shuffle 0 -
+nextBytes 9 afb8935f1606ecf06a
+nextIntBounded 5 4
+nextIntBounded 2 0
+nextInt 1889546016
+nextIntBounded 1 0
+nextFloat 3ef0a8fe
+nextBytes 4 9b3930d4
+nextInt 1783078271
+nextLong 3653932991408701121
+nextGaussian bfd8bd3c500afe9e
+nextFloat 3e1b84a4
+nextFloat 3e4e5978
+nextIntBounded 1000 226
+shuffle 8 0,4,7,5,3,2,1,6
+nextFloat 3f30a2e4
+nextBytes 7 2b1d0729f61557
+shuffle 7 0,2,3,1,6,5,4
+nextBytes 8 0f3d8177b0250919
+nextBytes 6 3ac80d339ad9
+nextDouble 3fe3b679904cdc75
+nextDouble 3fe10762191ea778
+nextIntBounded 100 33
+shuffle 5 1,4,3,2,0
+shuffle 1 0
+nextFloat 3f6ad715
+nextIntBounded 5 1
+shuffle 8 2,0,7,4,3,5,1,6
+nextFloat 3e02bd0c
+nextIntBounded 65536 47269
+nextInt 2099857736
+nextFloat 3dd140e8
+nextBytes 5 ea56de0d56
+nextIntBounded 1073741825 833324954
+nextIntBounded 255 254
+nextIntBounded 1431655765 355141208
+shuffle 10 2,0,9,5,6,7,3,8,4,1
+nextInt 566538601
+nextLong -1915856689858723848
+nextIntBounded 65536 51929
+nextLong -9178952614813657097
+nextBytes 4 ced7b8dc
+shuffle 9 6,8,7,5,2,0,4,1,3
+nextFloat 3f70612e
+nextGaussian 3ff01258d453fc76
+nextFloat 3de75c90
+nextGaussian 3ffaee38a1f8198b
+nextGaussian bfe9abe2d85d788f
+shuffle 9 4,5,2,1,8,7,3,6,0
+nextInt 1227335582
+nextBoolean true
+shuffle 9 4,6,7,8,0,3,1,2,5
+shuffle 5 1,2,3,0,4
+nextDouble 3fecf0f4b8cfcfe7
+nextDouble 3fd50f8eacb7d41c
+nextIntBounded 10 8
+nextDouble 3fe665afab3bbd57
+nextDouble 3fe85d3b3869e528
+nextFloat 3f0ab6d8
+nextLong 3370387709259247839
+shuffle 1 0
+nextBytes 8 a289a0748b19cd61
+nextBoolean true
+nextBytes 1 ed
+nextDouble 3fd27881eb1f0452
+nextBoolean true
+nextDouble 3fdf2bbb3376cf6e
+nextInt 835981321
+nextBytes 6 6c7264ae3cb8
+nextFloat 3ee09fb2
+nextIntBounded 5 1
+shuffle 11 1,7,8,0,6,5,9,4,10,3,2
+nextLong -5373839975347642948
+nextIntBounded 1 0
+shuffle 10 8,2,5,1,4,3,7,9,6,0
+nextIntBounded 2147483647 1345717128
+shuffle 1 0
+nextLong 210358828624316069
+shuffle 10 6,9,5,2,7,0,8,3,4,1
+nextGaussian 3fbbd00e4531b65c
+nextLong 4469874695449651998
+nextLong -7625876411937884728
+nextIntBounded 255 127
+nextBoolean true
+nextLong -4917052570664531689
+nextBytes 5 8c60c46211
+nextInt -250173220
+nextLong 7567049570042097504
+nextIntBounded 1431655765 1021749335
+nextIntBounded 5 1
+nextIntBounded 1 0
+nextIntBounded 16 1
+nextIntBounded 10 7
+nextBoolean false
+nextGaussian 3fd00d06475c449e
+nextInt 150927795
+nextFloat 3e94c14c
+nextBytes 9 6d38aadbedfe216e62
+nextDouble 3fea7eab5e3978b5
+nextGaussian bfca9ca9418ada42
+nextLong -3666503333511777779
+nextLong -312282001509812026
+nextFloat 3f4676b9
+shuffle 8 7,2,6,1,4,0,3,5
+nextDouble 3fe21d3a8561ac26
+nextGaussian bff58b1aecaa6f6d
+nextGaussian 3ff46781039f9b97
+nextFloat 3e93c36c
+shuffle 0 -
+nextIntBounded 2147483647 1855550685
+nextIntBounded 1000 912
+shuffle 0 -
+shuffle 1 0
+nextGaussian 3fd004208ebf02fa
+nextIntBounded 16 3
+nextFloat 3e791b88
+nextDouble 3fe422804dd46454
+nextIntBounded 3 2
+nextLong 3678633832951942270
+nextIntBounded 1 0
+nextBoolean true
+nextBytes 7 4daf49905069d2
+nextIntBounded 1431655765 143535648
+nextLong 8207513568230512067
+nextBytes 7 e70309d380376e
+nextIntBounded 10 9
+nextBytes 1 62
+nextGaussian bfe0de60bd46639c
+nextBytes 8 28bfcc92d90a106f
+nextIntBounded 3 1
+nextBoolean true
+nextDouble 3fc09d4378c9c738
+nextFloat 3f79ac16
+nextFloat 3f15efcd
+nextGaussian bfde57c61becd1bb
+nextBytes 5 a7ff912eba
+nextLong 6279025578184011382
+nextLong 7159562748587199226
+nextFloat 3f142cc0
+nextInt -1003598261
+nextBoolean true
+nextLong -9169553942021836956
+nextDouble 3fd0d704f36f3a3a
+nextGaussian bf9d39a0dba22df7
+nextLong -5960914593104212893
+nextBytes 4 8122c0a5
+nextGaussian 3fe734fb234d2b93
+nextGaussian 3fe5fb9a40962c08
+shuffle 1 0
+setSeed 9223372036549355911
+nextLong -7594844405965678548
+seed 281474976710655
+nextLong 4961115982468162243
+nextInt 52699159
+nextBoolean true
+nextDouble 3fe52fcbccce6dda
+nextIntBounded 256 106
+nextDouble 3fd98df14d37f9bc
+nextFloat 3d679380
+nextBoolean true
+nextDouble 3fd3d33ad0e89c00
+nextIntBounded 1073741824 74760098
+nextIntBounded 16 1
+nextGaussian 3fd29cf96cac7937
+nextIntBounded 100 55
+nextIntBounded 2147483646 1286832617
+shuffle 3 0,1,2
+nextBytes 9 cebf4974308f289fa8
+nextLong 4291381384867427929
+nextBoolean false
+nextBytes 6 1861bf261041
+nextBoolean true
+nextLong 4403664655197798852
+nextIntBounded 16 1
+nextFloat 3f324cee
+nextIntBounded 1073741825 753494743
+nextInt -236683050
+nextBoolean false
+nextFloat 3e602b70
+nextBoolean false
+shuffle 11 7,4,10,6,0,9,1,8,3,2,5
+nextIntBounded 255 112
+shuffle 5 1,2,0,4,3
+nextGaussian 3fe3b5fde1237fe6
+nextGaussian bff5cad47ea379e5
+nextGaussian 3fd268f26b64216e
+nextGaussian bfee096801436601
+shuffle 0 -
+nextFloat 3f381bae
+nextDouble 3fda93286ea9cb46
+nextIntBounded 2147483646 1298348684
+nextFloat 3f0f30c5
+nextIntBounded 2147483647 987516795
+nextBytes 7 c32966eebb3bf1
+nextIntBounded 2 1
+nextBytes 9 efb2ae0687ec595124
+nextBoolean true
+nextGaussian 3fcce45bafd7c1de
+nextIntBounded 10 3
+nextLong 6040581895798893254
+nextIntBounded 10 9
+shuffle 7 5,3,1,0,2,6,4
+nextFloat 3ed28a8c
+shuffle 7 5,0,3,1,6,2,4
+shuffle 1 0
+shuffle 9 6,5,1,8,4,3,2,0,7
+nextBytes 4 1af4aca7
+shuffle 1 0
+nextLong 6991908318429064806
+nextFloat 3e9e4186
+nextIntBounded 2 0
+nextBytes 9 eeb8dda5aad6527969
+nextInt 1398419772
+nextGaussian bfb903d201099239
+nextIntBounded 16 1
+nextIntBounded 2 1
+nextBoolean false
+nextInt 215181383
+nextLong 5925305486658166979
+nextGaussian 3fd087338169e9c7
+nextGaussian 3fd04a96c53b00da
+nextDouble 3fe5bff1b4698160
+shuffle 6 2,0,3,4,1,5
+nextFloat 3f688e7c
+nextLong 6443750048348293581
+nextGaussian bff05865e8fed25a
+nextFloat 3efa7606
+nextInt 681303471
+nextBytes 6 045b30b60464
+nextBoolean true
+nextBytes 9 9b51bfacbb6fa6839b
+shuffle 6 2,5,0,3,1,4
+shuffle 8 1,6,2,7,0,3,4,5
+nextGaussian 3ff6a039ba9a0249
+nextGaussian 3fe21e703a222f10
+nextBoolean true
+shuffle 8 5,0,3,6,2,7,4,1
+nextBytes 6 8335e4ae57bc
+nextInt -1176222142
+nextDouble 3fe7dce63796fc98
+nextFloat 3cb3ff00
+nextDouble 3fe9277bd6a47ec7
+nextBytes 4 4ad176eb
+nextBoolean true
+nextIntBounded 1073741824 22826
+nextIntBounded 1073741825 467825510
+nextDouble 3fc9e546b1bec950
+nextIntBounded 1000 636
+nextGaussian bf901f00bff7faf0
+nextBytes 3 529aef
+nextFloat 3e55c51c
+nextBoolean true
+nextDouble 3fd6a2690f4953b4
+nextIntBounded 2 0
+nextGaussian 3fea8fc655d63595
+nextBoolean false
+nextIntBounded 100 82
+nextIntBounded 1073741824 653097395
+nextBytes 7 e2309f5d8ac118
+nextBoolean true
+nextIntBounded 5 4
+nextIntBounded 3 1
+nextLong -2181705388410072586
+nextInt 2070242114
+nextIntBounded 1000 962
+nextGaussian bfdda5973003198b
+nextBytes 2 3059
+nextBoolean false
+nextFloat 3f59196b
+nextInt -1905626624
+nextBytes 9 4af09490652116d85d
+nextIntBounded 2 1
+nextBytes 6 16243684555c
+nextBoolean true
+nextDouble 3fc6d6cb7ac0aafc
+nextIntBounded 1431655765 676626094
+nextFloat 3dfd2ee8
+nextFloat 3d0d82a0
+nextIntBounded 5 0
+nextIntBounded 5 2
+shuffle 2 1,0
+nextBoolean true
+shuffle 8 0,6,4,1,7,2,3,5
+nextInt 1629476110
+nextBoolean true
+nextLong -4183533716984851873
+nextFloat 3de9ebd0
+nextFloat 3e766a94
+nextGaussian 3fb0fabbf53d9a5d
+nextLong 5587749650258764023
+nextInt -1532457655
+nextGaussian 3ffca16b54d08a48
+nextBoolean true
+shuffle 2 0,1
+nextDouble 3fe59cdf345a6e68
+nextFloat 3f1fd92d
+nextFloat 3f7a8d99
+nextIntBounded 1073741825 373433047
+shuffle 1 0
+nextIntBounded 100 12
+nextBytes 1 13
+nextInt 650501123
+nextBoolean true
+nextBoolean true
+nextBoolean false
+nextGaussian 3fe62dc05f3b6aee
+nextIntBounded 100 35
+nextIntBounded 5 0
+nextIntBounded 1431655765 956884012
+nextInt 226463398
+nextIntBounded 1431655765 1013742415
+nextBytes 8 d79c6f27afb8935f
+shuffle 2 0,1
+nextIntBounded 7 1
+nextBoolean true
+nextFloat 3dd74608
+nextInt 1889546016
+nextBoolean false
+nextGaussian bfebe861cdb4a2f9
+nextGaussian c003c1fd8607d065
+nextGaussian bfe4adb5fbc58aba
+nextLong -3079224294427638393
+nextIntBounded 10 0
+nextInt 6731857
+nextIntBounded 1073741824 640305088
+nextLong -5023057424038764715
+nextBoolean true
+nextBoolean false
+shuffle 4 0,2,3,1
+nextIntBounded 1073741825 488119274
+nextIntBounded 2 0
+nextFloat 3f18f0dc
+shuffle 9 8,1,7,4,2,6,5,3,0
+nextGaussian bfe97be1c4cba2a7
+nextDouble 3fc1ea7780b149f8
+shuffle 9 3,4,0,8,6,7,1,5,2
+nextIntBounded 2147483647 1060851641
+nextFloat 3ee66232
+nextInt -520716489
+nextGaussian bfd0a462b239d53d
+nextBytes 4 4849297d
+nextGaussian bfefa58b2e58468e
+nextLong 1884789287902140138
+nextDouble 3fdf34ea163570f2
+nextIntBounded 2147483647 281437124
+shuffle 0 -
+nextFloat 3e295830
+nextBoolean false
+nextDouble 3fc12c5d70f1e3a8
+nextInt 1251758669
+shuffle 7 3,4,5,1,6,0,2
+nextInt -446070146
+nextLong -4581779337403336416
+nextBytes 8 3bcf9d80f797e39f
+nextIntBounded 5 0
+nextDouble 3fdfc6f6439d2a48
+shuffle 5 1,3,4,0,2
+shuffle 2 1,0
+nextInt 1678583658
+nextDouble 3fee0c25ccc8d3a8
+nextBoolean true
+nextIntBounded 1431655765 1426604623
+nextGaussian 3fcdff6a7c409dc2
+nextInt -1902842306
+nextLong -7403140012432759566
+nextInt -707734538
+nextBoolean true
+shuffle 11 2,4,7,9,6,10,5,3,8,0,1
+nextBoolean false
+nextInt -922748026
+nextIntBounded 5 2
+nextIntBounded 1073741824 116290109
+nextInt -703562432
+nextGaussian bfe141b09e7af2f8
+nextFloat 3e4ab428
+nextBoolean false
+nextIntBounded 3 0
+nextIntBounded 2147483647 396424262
+nextIntBounded 3 0
+nextGaussian bfc2fca83a488923
+nextIntBounded 3 1
+shuffle 11 7,8,2,5,9,1,0,10,3,6,4
+nextBytes 1 9d
+nextBytes 1 3e
+shuffle 6 5,1,3,0,4,2
+shuffle 2 0,1
+nextDouble 3fdc13f651c85fbc
+nextFloat 3ef4a256
+nextGaussian 3fbc190064857cd2
+nextFloat 3c940fa0
+nextBoolean true
+shuffle 4 1,3,0,2
+nextLong 526837727670669641
+nextInt -2093702100
+nextFloat 3efbcbf2
+nextDouble 3fe6ad89252ce0ed
+nextGaussian 3ff01e5a8386586a
+nextIntBounded 1073741824 564794181
+nextIntBounded 1431655765 686530647
+nextLong 588462181330168047
+nextBoolean false
+nextDouble 3fe5d565bd036038
+nextInt 48977981
+shuffle 3 0,2,1
+nextBoolean true
+nextInt 1930707797
+nextIntBounded 1073741825 150464466
+nextBoolean false
+nextIntBounded 2147483647 1361547462
+nextFloat 3f7d9993
+nextBytes 9 c877a6935a2f083e1e
+nextLong -7625876411937884728
+shuffle 0 -
+nextDouble 3fecda99cea519b4
+nextIntBounded 100 90
+nextBytes 6 17899e178c60
+nextLong 4778414934915983580
+nextLong 7567049570042097504
+nextFloat 3ef39aa0
+nextInt 971099182
+nextIntBounded 1 0
+nextBytes 2 856e
+nextBoolean false
+nextBytes 8 178c604a4a6bf6df
+nextBytes 2 8c5a
+nextIntBounded 1073741825 406413034
+nextFloat 3f6c1b61
+nextInt 150927795
+shuffle 8 5,7,6,3,4,0,1,2
+nextIntBounded 1431655765 1260469347
+nextLong -4145922659591193039
+nextBoolean false
+nextInt -1334098671
+nextIntBounded 10 9
+shuffle 1 0
+nextFloat 3eafae88
+shuffle 8 0,6,7,1,5,3,2,4
+shuffle 3 1,2,0
+nextInt -583865926
+nextDouble 3fef66ecc102ff0d
+nextIntBounded 10 5
+nextFloat 3f7d45b8
+shuffle 9 3,6,2,8,4,1,7,5,0
+nextIntBounded 255 49
+nextDouble 3fc7d0b2e661a43c
+nextIntBounded 10 1
+shuffle 1 0
+shuffle 6 5,0,3,2,1,4
+nextFloat 3ee3cde4
+nextDouble 3fec7282be98481f
+nextGaussian 3ff12d961ffe0ce1
+nextBytes 2 8037
+setSeed 281474671290759
+nextLong -7594844405965678548
+seed 281474976710656
+nextBoolean true
+nextGaussian 3ff2563ccb7eebd9
+nextBoolean false
+nextDouble 3fe19d2e10efa128
+shuffle 7 0,3,4,1,5,2,6
+nextDouble 3fef83d267dcd07a
+nextFloat 3f61121b
+nextBoolean false
+nextLong -1083761183081836303
+nextBytes 4 0f626346
+shuffle 2 1,0
+nextLong 2377732757510138102
+nextFloat 3e161ebc
+nextIntBounded 5 0
+nextDouble 3f97cbbc005ae0a0
+nextLong -8361175665883705505
+shuffle 2 0,1
+shuffle 7 1,0,6,4,2,5,3
+nextBoolean false
+nextBoolean true
+shuffle 6 4,1,5,2,0,3
+nextBoolean true
+nextBytes 4 d6381ffb
+nextDouble 3fe775fb548f6e24
+nextInt -784703072
+nextBoolean false
+shuffle 11 1,9,10,2,3,6,4,8,5,7,0
+nextBytes 7 07d983faa91b8f
+nextFloat 3f38ec65
+nextIntBounded 2147483646 1441125258
+nextInt -1223932479
+nextFloat 3d83a1e0
+nextBytes 8 7717aa24ac42f25b
+nextBytes 3 6c6784
+nextDouble 3fd18d4390125f7c
+nextInt -1430871151
+nextGaussian 3fd788b80af3e727
+nextIntBounded 65536 4685
+nextLong -5727640368653921972
+nextBoolean true
+nextInt 1455004595
+shuffle 2 0,1
+nextIntBounded 255 10
+nextFloat 3f6eafac
+nextLong -524865453008036006
+nextDouble 3febb430b445501a
+nextLong -7146617210012600256
+nextBoolean false
+nextIntBounded 10 3
+nextLong 4013465704250623170
+nextIntBounded 16 13
+nextBytes 0 -
+nextFloat 3da98be0
+nextLong 178444451137370484
+nextInt -1321591463
+shuffle 0 -
+nextDouble 3fd01cc2ec574c40
+nextFloat 3f72bc3c
+nextInt -1233998085
+nextInt -1331702554
+nextInt 907249073
+nextIntBounded 7 2
+nextIntBounded 1073741824 840839159
+nextGaussian bfe1524c0a2ceb11
+nextGaussian 3ff626a34fb5a487
+nextLong -7037289748000766416
+nextFloat 3f1c9524
+nextLong -2697084138585034005
+nextIntBounded 2 1
+nextInt -300903254
+nextBoolean true
+nextBytes 2 8afd
+nextBoolean true
+nextBytes 8 026a937ae439982b
+nextBytes 1 ce
+nextDouble 3feec944c186621e
+nextIntBounded 1431655765 616654004
+nextBytes 5 80dbeccd14
+nextFloat 3ee202b0
+nextFloat 3ea4216c
+nextIntBounded 1431655765 992326428
+nextIntBounded 7 5
+nextDouble 3feb4a5cd3c59b5f
+nextBoolean true
+nextLong -5295745683034211942
+nextLong -7967076592325094724
+nextIntBounded 1431655765 1214366859
+nextLong 6513657358736753182
+shuffle 11 10,9,8,4,7,5,2,0,1,3,6
+nextGaussian 3f83cd7a29c87a0a
+nextLong 5702961989472887051
+nextLong -2798730738562476822
+nextGaussian bffb112d0f0a1550
+nextDouble 3faaaad3182b4670
+nextLong 187704103329199613
+nextIntBounded 1073741825 759893441
+nextBytes 4 bd30f7d1
+nextBytes 9 85733416b1450cedfd
+nextIntBounded 1 0
+nextFloat 3b70f800
+nextLong -4793755749571226073
+nextIntBounded 1 0
+nextBytes 5 bc7f178832
+nextBoolean true
+nextLong 5763747164966042709
+nextBoolean true
+nextLong -2319452971287571658
+nextDouble 3fe384263c5f1d18
+nextBytes 8 68949ce86b060b26
+nextIntBounded 256 11
+nextInt -97160665
+nextBytes 7 aab28fa536a803
+nextDouble 3fdfcba203527f58
+nextFloat 3f01b732
+nextLong 9064415381070535901
+nextDouble 3fc9aa85cbb93a2c
+nextGaussian c000ef62227c9850
+nextFloat 3e5d2454
+nextIntBounded 1431655765 693138560
+nextDouble 3fd1a814702fbcfa
+nextBytes 1 15
+nextBytes 7 ad4977b36c2ddd
+nextInt -1093701172
+nextLong -4795644687787016661
+nextInt 2068400044
+shuffle 0 -
+nextIntBounded 2147483646 504834159
+nextIntBounded 255 199
+nextIntBounded 1000 875
+nextInt 408998980
+nextDouble 3fed2abfb2ae89c6
+nextGaussian 3fed437aa96bee95
+nextIntBounded 100 17
+nextIntBounded 1 0
+nextLong 72191801432025792
+nextInt 1137718941
+nextInt 252008887
+nextIntBounded 255 4
+nextIntBounded 10 2
+nextInt 1278046001
+nextGaussian bff450abbc639ca0
+nextGaussian bfe2910cd3bbb979
+shuffle 9 4,1,7,6,0,5,8,3,2
+nextBytes 0 -
+nextGaussian 3fd025b7b96134a8
+nextDouble 3f698be41606f800
+nextInt 176533870
+nextInt 1339899789
+nextLong -6493150732801509051
+shuffle 11 3,5,0,8,1,7,6,4,2,10,9
+nextBoolean false
+nextDouble 3fea2bb98fc27ae1
+nextFloat 3f3db9ee
+nextFloat 3ea3369c
+nextIntBounded 2 1
+nextDouble 3fda743d4509cc8c
+nextIntBounded 5 4
+nextLong -4605199251911937283
+nextInt 816987543
+nextIntBounded 1073741824 440981228
+nextInt 526139168
+nextFloat 3f6d65e1
+nextInt -1231414341
+nextFloat 3e691958
+nextIntBounded 10 9
+nextIntBounded 2147483646 1414486782
+nextGaussian 3fcf74173bf5112e
+nextIntBounded 1000 0
+shuffle 10 2,3,7,6,1,4,5,9,0,8
+nextGaussian bffbb9093bf7f54f
+nextIntBounded 65536 61643
+nextIntBounded 1431655765 551034916
+nextIntBounded 65536 35005
+nextBytes 9 e40d2f0bbf76d5368c
+nextIntBounded 10 8
+shuffle 9 1,7,4,8,3,0,6,2,5
+nextGaussian 3ff5387bdcba5bb5
+nextInt 1920058376
+shuffle 7 6,3,2,5,1,0,4
+nextBytes 9 7831ed0b8ee62ab5c3
+nextLong -3361697295616129626
+nextLong -5398001761030105627
+shuffle 7 5,6,1,2,0,3,4
+nextDouble 3fc6729ca5a8178c
+nextIntBounded 1073741824 1037169010
+nextBytes 5 5e992be27e
+nextDouble 3fd66d7dcee3965e
+nextLong -259991515897342863
+nextBytes 6 95b16d93cf98
+nextBoolean true
+nextIntBounded 2147483647 1266526868
+shuffle 0 -
+nextFloat 3e8bd4e4
+nextBytes 9 c3002a3db936608334
+nextBytes 2 5c7f
+nextIntBounded 7 2
+nextIntBounded 7 3
+nextFloat 3eb487f6
+nextIntBounded 1073741825 814385367
+nextInt 83168215
+nextInt -1073062227
+nextBytes 9 eb9532462d545fa6ad
+nextFloat 3f724938
+nextLong 5310389416429997037
+nextIntBounded 1 0
+nextLong 6603892404781862964
+nextIntBounded 10 6
+nextBoolean false
+nextLong -2775697817324692652
+nextIntBounded 2147483646 1453074869
+nextIntBounded 10 8
+nextLong -8424639776421181328
+nextBoolean false
+nextDouble 3fe402f958f8de4a
+nextGaussian bfe1482b462afd9f
+nextGaussian bf9af79d1c13b27a
+nextBytes 4 983cb917
+nextInt 168570246
+nextGaussian 3ffb9efe349fdc47
+nextIntBounded 1073741824 879767680
+nextInt -1785991171
+shuffle 8 2,7,5,6,0,3,1,4
+nextGaussian bfe145dfe5da81d3
+nextBytes 7 7fd90ebb700ef7
+nextDouble 3fe1e0fd95f60fb6
+nextIntBounded 5 0
+nextGaussian bfd88e4daeef9c76
+nextBytes 7 6a839deb876547
+nextFloat 3f300cb1
+nextInt 1194456154
+nextLong -1536563194244860551
+nextInt 152070336
+nextLong 3735865629819132902
+nextBytes 8 7102ec3ce42a7593
+nextGaussian bfdd49e6ffab0ae5
+nextLong -3626747492440654429
+nextFloat 3e1a8d04
+nextFloat 3ea9db68
+nextIntBounded 7 6
+nextDouble 3fc1b04e0d13d5f8
+nextLong 1794894844987367466
+nextIntBounded 100 22
+nextIntBounded 5 1
+nextFloat 3f2b7ffb
+nextLong 5417587206880204642
+nextDouble 3fcf537dcf5bb818
+nextInt 1883576512
+nextBoolean true
+shuffle 4 3,1,2,0
+shuffle 8 5,7,2,1,0,6,3,4
+nextInt -1734818876
+shuffle 0 -
+nextBytes 7 8e9f83b015fce7
+nextGaussian 3fc6799cab0ca0d2
+shuffle 3 0,2,1
+nextFloat 3f30fd65
+nextBoolean true
+nextInt -855508472
+nextDouble 3fee991655c5deef
+nextFloat 3f0c31e8
+nextBoolean false
+nextGaussian bfd6a57882833cc3
+nextGaussian 3fe4b4e13284492a
+nextBoolean false
+nextBoolean true
+nextIntBounded 10 9
+nextInt -187653156
+nextBoolean false
+nextBoolean true
+nextBoolean false
+nextGaussian 3ff195519567f3b5
+nextInt 522351049
+nextIntBounded 16 15
+nextDouble 3fe02be11002f5aa
+nextBytes 5 6491bde6aa
+nextInt 718048728
+nextDouble 3fca94bb8b2dfe38
+nextBytes 6 0a213c982cc3
+nextLong 2470570724734906539
+nextDouble 3fce571ee8523494
+nextBoolean false
+nextBytes 1 51
+nextBoolean true
+nextIntBounded 255 116
+nextIntBounded 5 0
+nextGaussian bfec87519ac3be11
+shuffle 10 8,7,2,5,0,9,6,1,3,4
+nextFloat 3f17c832
+nextBoolean false
+nextInt -481749145
+nextIntBounded 2 0
+shuffle 5 4,2,1,3,0
+nextBytes 0 -
+nextIntBounded 1431655765 974438596
+nextBoolean false
+nextLong 2612881467784922892
+nextInt 1957512113
+nextBytes 7 6b2614e00cb1aa
+nextFloat 3f5a1cb0
+nextLong 6781068808715432852
+setSeed 281475282130552
+nextLong 7593191914167524302
+seed -8682522807148012
+nextBoolean true
+shuffle 8 6,7,3,1,5,0,4,2
+nextBytes 4 674a8a2b
+nextIntBounded 256 143
+nextIntBounded 1 0
+nextLong 1989987012783740105
+nextIntBounded 7 6
+nextDouble 3fa0c098682bb330
+nextBytes 3 9f8ced
+nextBytes 8 6fc2ea201ead49c0
+nextIntBounded 1073741825 50894299
+nextDouble 3fe0a663b7aae0f2
+nextBytes 3 159e06
+nextBoolean false
+nextBytes 7 5d2a533a8dbdd2
+nextIntBounded 65536 1019
+nextBoolean true
+shuffle 9 3,7,6,2,0,4,1,5,8
+nextIntBounded 5 2
+nextBytes 1 40
+nextLong -8826116508544411729
+nextBoolean false
+nextIntBounded 7 1
+shuffle 0 -
+shuffle 0 -
+nextInt -525210186
+nextLong -5214449286011877303
+nextIntBounded 256 252
+nextDouble 3f9e3c723ed3f360
+nextIntBounded 1073741824 425660933
+nextDouble 3feeef5b4267db26
+nextInt -889885105
+nextBoolean false
+shuffle 5 4,2,3,0,1
+nextInt 793140113
+nextFloat 3f21d27e
+nextBytes 4 04e4a0b1
+nextIntBounded 2147483647 1600937585
+nextIntBounded 1 0
+shuffle 3 0,1,2
+nextBoolean false
+shuffle 6 3,0,5,4,1,2
+nextFloat 3eb75916
+shuffle 9 6,5,0,3,1,2,7,8,4
+nextFloat 3f07b655
+nextGaussian 3ff2484f211d8b41
+nextDouble 3fd9cbcd6910739c
+shuffle 0 -
+nextIntBounded 3 2
+nextLong -8116004275989674119
+nextInt -1949432653
+nextBytes 5 a6e3f7c9cd
+nextFloat 3f0bd058
+nextBytes 1 ca
+nextIntBounded 1431655765 497600801
+nextFloat 3e684808
+nextInt 1756387015
+nextFloat 3d2f0410
+nextFloat 3f01f1d3
+nextBytes 8 2a6eff6e9f696529
+nextGaussian bfd11e62e95155ae
+nextFloat 3f3ca1ed
+nextBoolean false
+nextIntBounded 255 0
+nextFloat 3f21cdc3
+nextGaussian 3ff769c101dd619b
+nextGaussian 3fec3b937ec5d64f
+nextIntBounded 1073741825 918293476
+nextLong -5503156693753419326
+nextBoolean true
+nextBoolean false
+nextInt 395475538
+nextGaussian 3fd6b64e0d8a3bf1
+shuffle 0 -
+shuffle 10 2,3,5,7,6,4,9,0,8,1
+nextInt -652893632
+nextGaussian 3fd17143cf6ad2aa
+shuffle 5 0,3,2,4,1
+nextFloat 3f2bb2f5
+nextFloat 3f0eeacb
+nextBoolean true
+nextFloat 3edc0cb6
+nextInt -1483195277
+nextInt -1564775060
+nextIntBounded 2 1
+nextInt 1733317475
+nextGaussian 3fcec1800f3bdb7a
+nextInt -195243871
+nextBytes 2 85eb
+nextBoolean true
+nextIntBounded 3 2
+nextIntBounded 256 36
+nextBytes 5 48e2029288
+nextBoolean false
+nextBytes 2 d711
+nextDouble 3fe28965de9a887e
+nextGaussian bf9d791027a806ea
+nextIntBounded 2147483646 360794778
+nextFloat 3d2a4e40
+nextLong 7033173455109413274
+nextIntBounded 2 1
+nextInt -679158312
+nextFloat 3f20958c
+nextLong -7520237097284330267
+shuffle 5 0,2,4,3,1
+shuffle 6 3,1,0,5,2,4
+nextFloat 3ecefcb8
+nextBytes 4 1a922744
+nextGaussian bffbea5378ce1393
+nextBoolean true
+shuffle 1 0
+nextBytes 1 45
+nextInt -1353683825
+nextGaussian bff86052313ca545
+nextFloat 3ecf2bfa
+nextIntBounded 1073741825 579390841
+nextIntBounded 7 5
+nextInt -1338285612
+nextIntBounded 10 7
+nextDouble 3fdc0073a2668ea4
+nextInt -1014224742
+nextIntBounded 5 0
+nextLong 1484770046629564547
+nextFloat 3ee4da08
+nextDouble 3fef945966ea776b
+nextGaussian 3fab3d508370ef5c
+nextIntBounded 5 2
+nextInt 486842903
+nextLong -1271831609826600479
+nextIntBounded 1 0
+nextBytes 2 86b7
+nextIntBounded 5 4
+nextLong 5597408704173405794
+nextBytes 6 b172eb308d0c
+nextBytes 8 eba38f6c2a937677
+nextIntBounded 3 0
+nextDouble 3fa737dcddad26b0
+nextIntBounded 1073741825 970479230
+nextIntBounded 2147483646 141086739
+nextIntBounded 1 0
+shuffle 8 5,1,4,3,0,7,2,6
+nextBoolean false
+nextInt 423749463
+nextInt -1983224556
+nextInt -162651388
+nextGaussian bfd0e54b2d0b7be9
+nextGaussian bfedf1c682ac3a8e
+nextBoolean false
+nextFloat 3f52516f
+nextIntBounded 3 2
+nextBytes 2 2569
+nextLong 1221339146219479331
+nextFloat 3db8afc0
+nextIntBounded 1 0
+nextGaussian bf8f6f92b3db3894
+nextInt -725354
+nextBytes 2 d965
+nextDouble 3fe41f611647d6b8
+nextBytes 5 0f502abc71
+nextIntBounded 7 4
+nextDouble 3fd8e76b7fc022ee
+nextBytes 6 41a95988dd86
+nextLong 2315763009808083040
+nextBytes 4 9068246b
+shuffle 2 1,0
+nextDouble 3feb33bf9ecf8c74
+nextLong 8553919902892118940
+nextDouble 3fc5f8939019bfa8
+shuffle 11 10,6,3,1,4,5,8,0,9,7,2
+nextIntBounded 1000 459
+nextBoolean true
+nextFloat 3f7c8d3c
+shuffle 3 0,2,1
+shuffle 11 8,5,3,1,10,0,9,6,2,7,4
+nextBytes 0 -
+nextIntBounded 1000 752
+nextIntBounded 1431655765 1296996366
+nextDouble 3fec683826756a90
+nextGaussian 3fd44a67fde8ed54
+nextIntBounded 100 51
+nextBytes 7 a472708cb1a574
+nextDouble 3feb58aee4a3d957
+nextDouble 3fe9141579cfdfa4
+nextIntBounded 7 2
+nextDouble 3fe9316fff93b14f
+nextFloat 3e993fe6
+nextFloat 3f52a024
+shuffle 5 4,3,0,2,1
+nextLong -2075148920059924720
+nextBoolean true
+nextGaussian bfcdbfa4bcce02b6
+shuffle 11 8,2,6,10,9,0,4,5,3,1,7
+nextIntBounded 1 0
+nextIntBounded 2 1
+nextBoolean true
+nextInt 1637904939
+shuffle 1 0
+nextGaussian bfdf8d786b6ba988
+nextGaussian 3fff74b615a32f50
+shuffle 11 3,7,9,8,6,10,5,1,4,2,0
+nextLong 8540495307147303704
+nextDouble 3fbbc828b4db7990
+nextInt 1986643381
+nextInt -1350763920
+nextLong 2776559452710501037
+nextLong -7709176917484068712
+nextBytes 2 dadf
+nextBytes 0 -
+nextBytes 2 944b
+nextIntBounded 16 1
+nextBytes 3 0270e1
+nextIntBounded 10 4
+shuffle 0 -
+shuffle 6 2,1,4,3,0,5
+nextDouble 3fe9321c57f527ef
+nextIntBounded 1073741825 507540444
+nextBytes 2 c2c7
+nextLong 973897743110669758
+nextGaussian 3fe5347186269c2c
+shuffle 7 6,0,2,4,1,3,5
+nextBoolean true
+nextBytes 2 ec77
+nextBytes 0 -
+nextDouble 3fd0a21a2d1a7d52
+nextIntBounded 1073741825 505034991
+nextFloat 3e27594c
+nextInt -1533071977
+nextDouble 3fe8599e2d18756d
+nextIntBounded 1073741825 945933635
+nextFloat 3f353f0b
+nextBoolean true
+nextIntBounded 1000 193
+nextFloat 3f387b32
+nextLong 6168071142346612896
+nextLong 8890255173332425015
+nextInt -1973165009
+nextInt 1086501912
+nextBoolean true
+nextIntBounded 255 223
+nextIntBounded 1000 111
+nextIntBounded 1073741824 777052976
+nextInt -1115621088
+nextBytes 0 -
+nextLong -4065305714247818887
+nextBytes 5 39d78172a5
+nextDouble 3fd80e4e86ef0246
+nextIntBounded 256 182
+nextBoolean false
+nextInt -912965110
+nextIntBounded 16 9
+nextLong 4641350907776155839
+nextGaussian bfcf6e6c243f24a7
+nextLong -3746513070272840558
+nextBytes 8 6ed6c8e6bf6db273
+nextIntBounded 7 3
+nextFloat 3eb021f4
+nextInt 1941703074
+nextBytes 5 0ed296df7b
+nextBoolean false
+nextIntBounded 1431655765 1222822677
+nextIntBounded 10 9
+nextGaussian 3ffa6b56fcf8d76a
+nextBoolean false
+nextBytes 3 f1e919
+nextFloat 3f5e7913
+nextDouble 3fe87c71f4db01d5
+nextIntBounded 2147483647 1645798021
+shuffle 2 1,0
+nextBoolean false
+nextBoolean false
+nextBoolean true
+nextLong -2024826168206797380
+shuffle 7 2,3,6,0,1,5,4
+nextIntBounded 255 144
+nextDouble 3fd2400a24b051e6
+nextBoolean false
+nextFloat 3eb9c43a
+nextFloat 3f1c6db8
+nextInt -1283013426
+nextInt -789170972
+shuffle 9 1,3,7,8,0,4,5,2,6
+nextDouble 3fe15b66f7dae7ef
+shuffle 2 1,0
+nextIntBounded 2 1
+nextBoolean false
+nextIntBounded 2147483646 1750018795
+nextDouble 3fc43a92b66755a0
+nextInt 661976660
+nextIntBounded 2147483646 1421868667
+nextFloat 3f64b401
+nextIntBounded 1 0
+nextLong -4708088671645582923
+nextIntBounded 1000 771
+nextLong 4708351144696209702
+nextLong 6568885404573517713
+nextLong 5052949695470327780
+nextDouble 3faa66f987eac730
+nextBytes 3 90fc1b
+nextDouble 3fbfb71d79b76d60
+nextBytes 2 8698
+setSeed -8682522503859092
+nextLong -8980655801839844325
+seed 123456789
+nextFloat 3f29fe66
+nextGaussian 3feae04ddc4a1c39
+nextDouble 3fcbb96f9c964030
+nextInt 1827465615
+nextIntBounded 10 7
+nextGaussian bfe9051cd9cf40b9
+nextGaussian c0063eac5bf44a9e
+nextFloat 3c82f540
+nextLong 8987220997374458426
+nextLong 2115867195944107995
+nextFloat 3e7ecd30
+shuffle 6 5,3,0,4,2,1
+nextInt 823057922
+nextFloat 3f72a617
+nextFloat 3efd5d84
+nextInt -1733635456
+nextBoolean true
+nextDouble 3fd12f08eab08f28
+nextLong 8930988782065292119
+nextBoolean true
+shuffle 4 3,1,2,0
+nextGaussian bfd8eba1b5d79782
+nextIntBounded 5 4
+nextInt -2093746736
+nextBoolean true
+nextGaussian 3fe3dcadb5023003
+nextIntBounded 7 4
+nextLong -5326694536815068636
+nextLong -5812524777867937279
+nextLong -8103990556446739547
+nextLong 577752288938529162
+nextLong 7431054702711929035
+nextBytes 4 26fb4873
+nextGaussian 3fd66a31e2560102
+nextIntBounded 65536 24857
+nextInt -353967484
+nextIntBounded 3 0
+nextInt -1233924336
+nextInt -305060128
+nextFloat 3f34a545
+nextInt 393003467
+nextFloat 3f630a97
+nextIntBounded 16 6
+nextBoolean false
+nextGaussian bfd0ec1f16b05f0d
+nextGaussian bff5aac2406bd8c2
+nextFloat 3c05c080
+nextIntBounded 1 0
+nextBytes 5 61a51b6e33
+nextGaussian bfcda9fa2522a96d
+nextGaussian bff398e26a5ad8c1
+nextIntBounded 255 33
+nextInt -494629044
+shuffle 9 6,1,7,5,3,2,8,0,4
+nextLong 7141922199361494269
+nextGaussian bfe688230e15a2e2
+nextDouble 3fa9c931da14c970
+nextGaussian bfe12e87355b07ed
+nextFloat 3bc7fe00
+nextFloat 3f051743
+nextIntBounded 10 4
+nextBoolean true
+shuffle 10 5,3,9,7,1,0,8,6,4,2
+nextBoolean true
+nextBoolean false
+nextBoolean false
+nextDouble 3feebb664cedbe16
+nextInt 687664337
+nextGaussian bff5ffb585e9b087
+nextIntBounded 2147483647 115154980
+shuffle 9 4,3,1,6,5,0,8,7,2
+nextGaussian bfe499ca214e691c
+nextLong -2048909770946092898
+nextLong 5285035174032366593
+nextIntBounded 7 0
+nextFloat 3e45ab04
+nextIntBounded 256 46
+nextIntBounded 256 23
+nextBytes 6 134daa8de88e
+nextBytes 8 734dbcc5c350c3fc
+nextInt 1140888310
+nextGaussian bfd5b5296a30a352
+nextBytes 2 9107
+nextBoolean true
+nextDouble 3fc6872d0106da40
+shuffle 2 1,0
+nextIntBounded 256 31
+nextDouble 3fe7eadce0097fe9
+shuffle 7 1,6,5,4,0,2,3
+nextBytes 5 7482bfbd53
+nextGaussian 3feab3e66cea3e09
+nextIntBounded 65536 24749
+nextIntBounded 1073741825 1016965382
+nextGaussian bffe84700b3fdaa4
+nextIntBounded 256 185
+nextFloat 3f439f8a
+nextDouble 3fe12b82d7a1bdd8
+nextBytes 2 08f5
+nextBoolean true
+shuffle 8 6,0,7,5,4,2,1,3
+nextGaussian 4003424cc1b7953d
+shuffle 9 0,5,3,8,1,4,7,2,6
+shuffle 4 3,1,0,2
+nextIntBounded 1073741825 441586858
+shuffle 7 6,1,3,4,5,0,2
+nextFloat 3f29bd6e
+nextGaussian bfd99c930174b995
+nextIntBounded 1073741825 891314950
+nextLong 938437238802896873
+nextIntBounded 2147483647 662399648
+nextIntBounded 1431655765 116117362
+shuffle 5 2,4,1,0,3
+nextLong 7340763222242979228
+nextIntBounded 3 0
+nextInt 1236931583
+nextInt -598355411
+nextInt 779059402
+nextDouble 3fd55f52f2b6e348
+nextIntBounded 2 1
+nextBoolean false
+nextBoolean false
+nextBoolean false
+nextBytes 6 e8dd157bdee2
+nextIntBounded 2 1
+nextBytes 7 7cc72e574dc38a
+nextLong -427280261729536685
+nextBytes 6 d659d66c99e0
+nextGaussian 3ff3bce002936d1e
+nextInt 820565968
+nextGaussian 3fe16eb95388cc31
+nextDouble 3fca51f6382a0c34
+nextFloat 3f6ca739
+nextBoolean false
+nextFloat 3f613292
+nextBoolean false
+nextIntBounded 16 9
+nextIntBounded 7 2
+nextLong -8917421845367379659
+nextBytes 0 -
+nextIntBounded 5 4
+nextFloat 3eb657d6
+nextIntBounded 2147483647 1985915148
+nextBoolean true
+nextGaussian 3fe3b97737711778
+shuffle 9 1,4,3,0,7,8,6,2,5
+nextLong 34068351468897968
+nextFloat 3ef68596
+shuffle 6 2,0,4,1,3,5
+nextGaussian bfc4a4141ab6e1ea
+nextLong -8322547997954344213
+nextLong -6278478405774239551
+nextIntBounded 2 0
+nextBytes 1 62
+nextInt -1194350618
+nextBytes 2 8380
+nextLong -1160910905328975749
+nextIntBounded 1 0
+nextInt 1201627907
+nextFloat 3d8edd10
+nextIntBounded 10 0
+nextDouble 3fe6780af2966e98
+nextInt -312577679
+nextIntBounded 7 1
+nextGaussian bfdbeae5a855621c
+nextBytes 8 5e61b14e278a209c
+shuffle 2 1,0
+shuffle 5 4,0,1,2,3
+nextBytes 5 99fd2305f1
+shuffle 8 3,1,2,0,6,7,5,4
+nextLong 2120551511165814665
+nextBytes 4 9d93d74a
+nextFloat 3ed769b2
+nextBytes 1 4e
+nextDouble 3fe13341caf03c3a
+shuffle 7 0,4,3,5,2,1,6
+shuffle 8 6,0,5,2,3,7,1,4
+nextIntBounded 7 1
+shuffle 2 0,1
+nextLong 6904626641340772183
+nextInt 2044724760
+nextIntBounded 1073741825 853427085
+nextDouble 3fe758893248f70e
+nextIntBounded 1 0
+nextInt -831372187
+nextInt 1022255562
+nextIntBounded 7 4
+nextBytes 3 3beb6c
+nextLong 8739989851732047849
+nextBoolean true
+nextBoolean true
+nextIntBounded 256 144
+nextIntBounded 100 34
+nextFloat 3e82accc
+nextInt 1877292308
+nextGaussian bff3308ca56429e1
+nextGaussian bff38e9f72bcc051
+nextLong -2352159679211244114
+nextBoolean false
+nextGaussian 3fe92bc2b4c38110
+nextInt 1346136842
+nextGaussian bfc11a2505c0feda
+nextIntBounded 2147483646 646302602
+nextDouble 3fd1cd1d2752cc4e
+nextFloat 3efd0cb0
+nextGaussian 3ff93a9256fa70b5
+nextIntBounded 2147483646 1903885508
+nextFloat 3ef10e14
+nextFloat 3f23ecdb
+nextDouble 3fe6275ab0503f86
+nextGaussian 400480dc947a7e00
+nextBytes 2 95bb
+shuffle 7 2,5,1,0,4,6,3
+nextGaussian bfe6b74a35f154da
+nextBoolean true
+nextLong 8397855176099660083
+shuffle 10 4,3,7,0,8,1,2,5,9,6
+nextGaussian bffa6a5b4fdfe8e0
+nextBytes 8 70bd8dd6bd36f811
+nextBytes 1 d8
+nextFloat 3dfcc8c8
+nextDouble 3fe2508ccac40b05
+shuffle 11 9,10,5,0,6,3,2,4,7,1,8
+nextBytes 7 13fcd858d46188
+nextIntBounded 2147483646 468070592
+nextDouble 3fee4df47ccdf54c
+nextDouble 3feafe8de9ec18bc
+nextIntBounded 1000 980
+nextLong -6208747342569693395
+nextIntBounded 10 8
+nextInt 366859149
+nextBoolean true
+nextBytes 3 8c030f
+nextLong -9154596337245186421
+nextFloat 3eabb4b0
+nextLong 2580477169611387376
+nextLong 5567556107241900184
+nextInt 1598611245
+nextLong -4414629977702099290
+nextGaussian bfb7116b0b4f1852
+nextIntBounded 16 0
+nextIntBounded 2 1
+nextIntBounded 16 14
+nextLong 4835472193753299150
+nextInt 1252295155
+nextBytes 4 aca4d1b3
+nextBoolean true
+nextGaussian bff896367608fd95
+shuffle 6 4,3,5,0,1,2
+nextFloat 3f3277b6
+nextIntBounded 65536 57501
+nextGaussian bfc4782e356078fa
+shuffle 4 3,1,2,0
+shuffle 9 6,0,3,5,1,2,8,4,7
+nextBoolean true
+nextInt 1693761909
+nextLong 8983485599229312342
+nextInt -1219034711
+shuffle 9 3,7,8,0,6,1,5,4,2
+nextIntBounded 256 73
+nextDouble 3fe5da1eebfba8f5
+nextInt 1551377851
+nextIntBounded 100 70
+shuffle 8 3,7,2,4,0,1,5,6
+nextBoolean true
+nextInt 913361766
+nextIntBounded 1431655765 605717140
+nextIntBounded 100 80
+nextGaussian 3ff4426fbd6da881
+nextIntBounded 1073741825 46554154
+nextLong 2658880491876421163
+nextIntBounded 1431655765 1240272674
+shuffle 10 7,8,5,1,4,0,9,6,2,3
+nextBoolean true
+nextGaussian bf79c5a116425480
+nextFloat 3ee272b6
+nextInt -1037983386
+nextBoolean false
+nextBytes 2 0e21
+shuffle 5 2,3,4,1,0
+nextInt 1675545501
+shuffle 3 1,0,2
+nextIntBounded 3 1
+nextLong 1903390330710115168
+nextInt 707578597
+shuffle 6 1,4,5,0,3,2
+nextFloat 3de03ec8
+shuffle 7 6,1,4,3,2,5,0
+shuffle 0 -
+nextLong -6235675802025695850
+nextLong -7144696891131187712
+nextFloat 3f710e25
+nextBoolean true
+nextIntBounded 100 78
+shuffle 0 -
+nextIntBounded 1 0
+nextDouble 3fd77d8b831aeeb2
+nextDouble 3fe987dd9bea3310
+nextInt 1920392543
+nextGaussian bfd2bf4087d5d50a
+nextIntBounded 3 2
+setSeed 359635821
+nextLong 5471034936129949694
+seed 7
+shuffle 10 0,1,9,3,7,4,8,5,2,6
+nextGaussian 3fb6edb728486823
+nextDouble 3fd02b9ffd993e7a
+nextBoolean true
+nextBytes 3 02e34d
+nextIntBounded 1431655765 234738279
+nextIntBounded 65536 42048
+nextFloat 3ded9a20
+nextIntBounded 1 0
+nextGaussian 3fe2c2ec7aac3a0f
+nextInt -1107813193
+nextIntBounded 2147483647 1264798718
+nextFloat 3f325830
+nextBoolean false
+nextGaussian 3ff8b7598246b25c
+nextBoolean true
+nextFloat 3f454c61
+shuffle 6 4,5,1,2,0,3
+nextDouble 3febbbb50d79a326
+shuffle 2 1,0
+nextIntBounded 3 2
+nextBoolean false
+nextIntBounded 65536 18297
+nextGaussian 3ffb17ca8bd88a95
+nextLong -8806609805423055690
+nextInt 442817024
+nextInt -299850718
+nextInt -1729328743
+nextLong 1649444844207064009
+nextBoolean false
+nextGaussian bfd74e67d7304841
+nextBytes 3 b1c3a2
+nextBoolean true
+nextIntBounded 2147483647 963395226
+nextInt 1933714315
+nextDouble 3fed36d3c7a7a87d
+nextBoolean false
+shuffle 10 6,0,5,3,4,1,2,7,8,9
+nextGaussian 3ff20980e0c152d5
+nextIntBounded 256 199
+nextIntBounded 5 0
+nextBoolean false
+shuffle 1 0
+nextLong -240683544118378519
+nextBytes 1 9b
+nextFloat 3f6f20bc
+nextInt 1524225196
+nextIntBounded 16 5
+nextInt 1548770988
+nextFloat 3f77cd3f
+nextBoolean false
+nextBoolean false
+nextBytes 7 419a6512500fcb
+nextGaussian 3fb1a4a0303292df
+nextBytes 7 2a08574138340c
+shuffle 5 3,2,1,0,4
+nextIntBounded 1073741825 236575795
+nextDouble 3fd5838c64d1920c
+nextGaussian bff2bb640dd0f400
+nextFloat 3f6ad61c
+shuffle 9 6,0,4,3,7,5,8,2,1
+nextFloat 3f41bbbd
+nextInt -688290091
+nextFloat 3e08fb24
+nextBytes 7 0a5d0110261aba
+nextGaussian 3fdb31dd0d51060a
+nextDouble 3fdbe4f259801576
+nextLong -8574733350077290653
+nextGaussian 3fcee57a1a1ae1b1
+nextIntBounded 100 76
+nextIntBounded 1000 601
+nextGaussian 3febb560aa805743
+nextDouble 3fdcbfde2640bf96
+nextGaussian bfc5ec1bdf1cd445
+nextFloat 3ea89750
+nextInt -2064268911
+nextDouble 3fe811afe4f8cb11
+nextInt 397357838
+shuffle 7 3,4,1,5,2,0,6
+nextFloat 3edd8090
+nextLong -8906282285198996869
+nextGaussian bffd5807d4c70782
+nextBoolean true
+nextLong -8858775731910246393
+nextBoolean true
+nextFloat 3f06034d
+nextDouble 3fda75956c8cc3ac
+nextLong -61994951967482982
+nextGaussian bfc808abf8da5091
+nextBytes 0 -
+nextBoolean true
+nextDouble 3fdfa379df4363d2
+nextLong -1132972004957404430
+nextDouble 3fd73d43e1189afa
+shuffle 0 -
+shuffle 2 1,0
+nextGaussian 3fde94f9cacb436a
+nextBoolean false
+nextLong -7695318776156284288
+nextInt -1267766591
+nextInt 2070055764
+nextDouble 3fec94927e1982bf
+nextLong -3360011757610775728
+nextLong 3897628849619114190
+nextGaussian 3ff20571761357c7
+nextBytes 9 9ae07e29cf1ba7340a
+nextDouble 3fc723582e215f1c
+nextLong 5664714053407933845
+nextFloat 3f627dbb
+nextInt -192985359
+nextBoolean false
+nextGaussian bfdfef6771c992a2
+nextFloat 3f46d8d8
+nextInt 1691442346
+nextLong 3734393603610706799
+nextDouble 3fe25dd3f3516936
+nextIntBounded 255 193
+nextFloat 3f4338cc
+shuffle 1 0
+nextLong 8844814643699009000
+nextLong -4887371060087690552
+nextIntBounded 3 2
+nextBoolean false
+nextInt 1838175134
+nextLong 3350753633376754163
+nextBoolean false
+nextGaussian 3faa8f03607ba18e
+nextBoolean false
+shuffle 0 -
+nextGaussian bfe4eadbbfbd9d60
+nextFloat 3f3ac327
+nextBytes 7 9e8d182746b2a6
+nextInt 2117590957
+nextIntBounded 2147483647 795583680
+nextDouble 3fd3f61a395d9ec0
+nextDouble 3fdc6a5a3f08884e
+nextIntBounded 2 0
+nextDouble 3fe088efd9aced40
+nextInt 1704393101
+shuffle 5 4,1,0,2,3
+nextBytes 2 5d28
+nextDouble 3fd72d46b4f22c66
+nextIntBounded 10 0
+shuffle 8 7,2,1,3,0,4,5,6
+nextIntBounded 1 0
+nextGaussian 3ff2d0362f45b735
+nextIntBounded 2147483646 2102792754
+nextGaussian 3fe2f1d57602f15a
+nextIntBounded 2 1
+nextDouble 3feb8e9dd8b8a89a
+nextFloat 3f77c86f
+nextIntBounded 3 2
+nextLong 2742639305847218142
+nextFloat 3eb1be48
+nextLong 2790783984047748906
+nextGaussian bffd3521a4e7be9f
+nextInt -930432496
+nextDouble 3fe3c86085c2d874
+nextIntBounded 16 4
+nextInt 1563465124
+nextDouble 3fdb8a3fc2a435b8
+nextIntBounded 65536 65381
+shuffle 1 0
+nextDouble 3fe6bd5bb7185b64
+nextBoolean true
+nextIntBounded 7 5
+nextBoolean false
+nextFloat 3d03f390
+nextInt -189280729
+nextBoolean true
+nextIntBounded 100 40
+nextLong -7395593056483155450
+nextIntBounded 10 6
+nextLong 184205070599297137
+nextFloat 3f37e869
+nextBytes 6 6e61e68bb6c8
+nextIntBounded 5 1
+nextGaussian 3fb3df059e4283cc
+nextBoolean true
+nextDouble 3fac275d7a0ec330
+nextIntBounded 2 1
+nextLong -3122425333694139000
+nextBytes 0 -
+nextInt -1026840812
+nextIntBounded 256 249
+nextIntBounded 65536 48188
+nextIntBounded 256 61
+nextGaussian 3fd84b58d0b585a4
+nextBoolean true
+nextGaussian bfdf356e35b69fb8
+nextBytes 8 93f02af270697e37
+nextIntBounded 16 6
+nextInt 902164833
+shuffle 3 1,0,2
+shuffle 7 2,6,4,3,0,1,5
+nextDouble 3f9612d133782540
+nextDouble 3fea7c0ddeb2c582
+nextIntBounded 65536 33076
+nextGaussian 3fed288ea47f0392
+nextDouble 3fddb5b6e017df86
+nextFloat 3e7785cc
+nextIntBounded 256 10
+nextLong -2086427483113718667
+nextIntBounded 5 2
+nextFloat 3ea6d5b4
+nextLong 888946978243180263
+nextBoolean false
+nextGaussian 3fece808032636a1
+nextGaussian bfd2738fc29de510
+nextGaussian 3fca68bbe250a79b
+nextGaussian bff391402234de1c
+nextInt -1728290058
+nextLong -6419773463212867251
+nextBytes 4 faa63d24
+nextFloat 3e437824
+nextBytes 9 ba9522351dd9f787dc
+shuffle 3 1,2,0
+nextBoolean false
+nextGaussian 3febc676249bcba8
+nextGaussian bfe96b33c91b7200
+shuffle 6 0,5,1,2,3,4
+nextIntBounded 1073741825 464986786
+nextInt -1072670874
+nextInt 625486653
+nextDouble 3facefac271d1930
+nextInt 1326053249
+nextGaussian 3ff0b0e043925106
+nextFloat 3e8f60d2
+nextInt -1110186422
+nextGaussian 3ff490acfbfc9dcd
+shuffle 3 0,2,1
+nextBoolean false
+nextFloat 3f0c6c00
+nextGaussian bff298960e830f7a
+nextFloat 3ea5c8be
+nextGaussian 3fe4fb1af710d2c0
+nextIntBounded 1073741825 229695816
+nextIntBounded 3 0
+nextFloat 3f31ea4b
+nextIntBounded 1000 303
+nextIntBounded 2 0
+nextBoolean false
+nextIntBounded 256 204
+nextIntBounded 1073741824 795035148
+nextInt 1936005732
+nextGaussian 3ff48f9839606fa3
+shuffle 9 2,4,0,3,5,8,7,6,1
+nextGaussian bfe9d910f5979174
+nextIntBounded 3 1
+shuffle 8 0,3,7,4,1,6,2,5
+nextBytes 2 3386
+nextBoolean false
+nextGaussian 3fe82940124b26bc
+nextGaussian 3fd8598595fd77f9
+nextIntBounded 2147483646 2135891996
+nextInt 380142717
+nextBytes 5 d945d3e037
+nextBoolean false
+nextIntBounded 7 0
+nextBoolean true
+nextGaussian 3fee669e64bf12d5
+nextBoolean false
+nextDouble 3fbe06e4efa8b668
+nextBytes 2 ed3f
+nextIntBounded 255 10
+nextDouble 3fc386fa73485ebc
+nextGaussian bff83133238fe450
+nextIntBounded 1073741824 467977062
+nextFloat 3e4927e0
+nextBytes 5 9f99657177
+nextIntBounded 1431655765 661417894
+shuffle 8 1,3,7,6,2,5,0,4
+nextIntBounded 1 0
+nextIntBounded 2147483646 721029490
+nextDouble 3fdaf4a1a6e578c0
+nextGaussian 3fde4cdec713c5cc
+nextInt -146165555
+nextBytes 5 e628daccf6
+nextFloat 3ebd1488
+nextBytes 8 7ad9e91c789eae26
+nextIntBounded 1 0
+nextDouble 3fcaee15df096c00
+nextBytes 2 ef7c
+shuffle 6 3,4,2,0,5,1
+nextDouble 3fe22567f910a187
+nextLong 3536758515951949099
+nextInt -1201747129
+nextLong -5578012721844751819
+nextBoolean true
+nextInt 1423588908
+nextDouble 3faaae5cb4bb9b50
+shuffle 11 7,8,2,10,4,3,0,1,6,5,9
+nextInt 998073289
+nextBytes 2 e224
+nextIntBounded 1 0
+nextBytes 1 1a
+nextIntBounded 16 9
+nextGaussian 3fe6256e06a4d60c
+nextDouble 3febe72a014ca47f
+nextBytes 0 -
+setSeed 305419903
+nextLong 7588234464517471918

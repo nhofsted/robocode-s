@@ -405,7 +405,8 @@ robocode-s/
 ├── Cargo.toml                # workspace
 ├── crates/
 │   ├── engine/               # pure simulation
-│   ├── fdlibm/               # StrictMath port
+│   ├── fdlibm/               # StrictMath port (fdlibm 5.3)
+│   ├── java-random/          # java.util.Random port
 │   ├── protocol/             # generated + framing
 │   ├── server/
 │   ├── runner/

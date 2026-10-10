@@ -99,12 +99,23 @@ tasks.test {
     systemProperty("robocodes.difftest.oracleJvmArgs", oracleJvmArgs.joinToString(" "))
 }
 
-// Test vectors for the Rust port of java.util.Random (crates/engine/src/java_random.rs).
+// Test vectors for the Rust port of java.util.Random (crates/java-random).
 tasks.register<JavaExec>("javaRandomVectors") {
-    description = "Regenerates crates/engine/tests/data/java_random.txt from the running JDK."
+    description = "Regenerates crates/java-random/tests/data/java_random.txt from the running JDK."
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.github.nhofsted.robocodes.difftest.JavaRandomVectors"
-    val output = layout.settingsDirectory.file("crates/engine/tests/data/java_random.txt")
+    val output = layout.settingsDirectory.file("crates/java-random/tests/data/java_random.txt")
+    outputs.file(output)
+    args(output.asFile.path)
+    doFirst { output.asFile.parentFile.mkdirs() }
+}
+
+// Test vectors for the Rust fdlibm port (crates/fdlibm).
+tasks.register<JavaExec>("strictMathVectors") {
+    description = "Regenerates crates/fdlibm/tests/data/strictmath.txt from the running JDK."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.github.nhofsted.robocodes.difftest.StrictMathVectors"
+    val output = layout.settingsDirectory.file("crates/fdlibm/tests/data/strictmath.txt")
     outputs.file(output)
     args(output.asFile.path)
     doFirst { output.asFile.parentFile.mkdirs() }
