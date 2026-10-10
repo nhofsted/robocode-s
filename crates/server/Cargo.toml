@@ -1,0 +1,15 @@
+[package]
+name = "robocode-s-server"
+description = "Battle server: lockstep loop, time budgets, observers, recording"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-engine.workspace = true
+robocode-s-protocol.workspace = true

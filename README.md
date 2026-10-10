@@ -10,6 +10,23 @@ A reimplementation of [Robocode](https://robocode.sourceforge.io/) with a Rust b
 
 > Status: early design phase. See [docs/design.md](docs/design.md).
 
+## Building
+
+Requirements: Rust (stable, via [rustup](https://rustup.rs)), a C toolchain, and JDK 21.
+
+```sh
+cargo test --workspace     # engine, protocol, server, runner, cli
+./gradlew build            # Java compatibility library and sample robots
+```
+
+## Repository layout
+
+- `crates/`: Rust workspace (engine, fdlibm, protocol, server, runner, cli)
+- `proto/`: wire protocol schema
+- `clients/java-compat/`: drop-in replacement for classic `robocode.jar`
+- `robots/samples/`: classic sample robots (EPL-2.0)
+- `docs/`: [design](docs/design.md) and [architecture decision records](docs/adr/README.md)
+
 ## License
 
 [Eclipse Public License 2.0](LICENSE)

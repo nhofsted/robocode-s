@@ -1,0 +1,5 @@
+[versions]
+robocode-classic = "1.11.1"
+
+[libraries]
+robocode-classic-api = { module = "net.sf.robocode:robocode.api", version.ref = "robocode-classic" }

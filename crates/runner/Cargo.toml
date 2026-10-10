@@ -1,0 +1,14 @@
+[package]
+name = "robocode-s-runner"
+description = "Launches robot processes (local process, container, remote agent)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-protocol.workspace = true

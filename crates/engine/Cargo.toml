@@ -1,0 +1,14 @@
+[package]
+name = "robocode-s-engine"
+description = "Deterministic Robocode battle engine (classic-compatible rules and physics)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-fdlibm.workspace = true

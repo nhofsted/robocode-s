@@ -1,0 +1,12 @@
+# Architecture decision records
+
+| # | Decision |
+|---|---|
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions |
+| [0002](0002-out-of-process-robots.md) | Robots run out of process |
+| [0003](0003-bit-exact-classic-compatibility.md) | Bit-exact compatibility with classic Robocode, against StrictMath |
+| [0004](0004-protobuf-protocol.md) | Protocol Buffers with length-delimited framing |
+| [0005](0005-deterministic-mode.md) | Optional deterministic mode |
+| [0006](0006-cpu-time-budgets.md) | Time budgets measured in robot CPU time |
+| [0007](0007-own-rumble-on-aws-free-tier.md) | Own distributed rumble on the AWS free tier |
+| [0008](0008-licensing.md) | EPL-2.0 license; classic samples bundled under EPL-2.0 |

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "EPL-2.0"
+repository = "https://github.com/nhofsted/robocode-s"
+
+[workspace.dependencies]
+robocode-s-engine = { path = "crates/engine" }
+robocode-s-fdlibm = { path = "crates/fdlibm" }
+robocode-s-protocol = { path = "crates/protocol" }
+robocode-s-runner = { path = "crates/runner" }
+robocode-s-server = { path = "crates/server" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+float_cmp = "allow"  # bit-exact comparisons are intentional in this project

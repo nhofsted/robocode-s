@@ -1,0 +1,19 @@
+[package]
+name = "robocode-s-cli"
+description = "robocode-s command-line interface: headless battles and rumble client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "robocode-s"
+path = "src/main.rs"
+
+[dependencies]
+robocode-s-server.workspace = true
+robocode-s-runner.workspace = true

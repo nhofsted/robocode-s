@@ -1,0 +1,18 @@
+[package]
+name = "robocode-s-protocol"
+description = "robocode-s wire protocol: generated messages and framing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+prost = "0.14.4"
+
+[build-dependencies]
+prost-build = "0.14.4"
+protoc-bin-vendored = "=3.2.0"

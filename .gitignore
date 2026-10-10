@@ -24,3 +24,6 @@ obj/
 
 # Local copies of classic Robocode (not redistributed)
 /original/
+
+# Gradle
+.kotlin/

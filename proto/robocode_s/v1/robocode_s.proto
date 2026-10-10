@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: EPL-2.0
+//
+// robocode-s wire protocol (skeleton). See docs/design.md §5.
+// Messages are sent as a varint length prefix followed by the encoded message.
+
+syntax = "proto3";
+
+package robocode_s.v1;
+
+option java_package = "io.github.nhofsted.robocodes.protocol.v1";
+option java_multiple_files = true;
+option csharp_namespace = "RobocodeS.Protocol.V1";
+
+// ---------------------------------------------------------------------------
+// Handshake
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_ROBOT = 1;
+  ROLE_RUNNER = 2;
+  ROLE_OBSERVER = 3;
+}
+
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+}
+
+message Hello {
+  ProtocolVersion version = 1;
+  Role role = 2;
+  // One-time session token issued to the runner when the robot was launched.
+  string session_token = 3;
+  repeated string features = 4;
+}
+
+message HelloAck {
+  ProtocolVersion version = 1;
+  repeated string features = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Robot role: lockstep turn loop (design §5.3)
+// ---------------------------------------------------------------------------
+
+message RobotState {
+  double x = 1;
+  double y = 2;
+  double energy = 3;
+  double velocity = 4;
+  double body_heading = 5;
+  double gun_heading = 6;
+  double radar_heading = 7;
+  double gun_heat = 8;
+  double distance_remaining = 9;
+  double body_turn_remaining = 10;
+  double gun_turn_remaining = 11;
+  double radar_turn_remaining = 12;
+  uint32 others = 13;
+}
+
+// Events are filled in during M1 following the classic robocode.Event hierarchy.
+message Event {
+  int64 time = 1;
+  int32 priority = 2;
+  oneof kind {
+    ScannedRobot scanned_robot = 10;
+  }
+}
+
+message ScannedRobot {
+  string name = 1;
+  double energy = 2;
+  double bearing = 3;
+  double distance = 4;
+  double heading = 5;
+  double velocity = 6;
+}
+
+message TickEvent {
+  uint32 round = 1;
+  int64 turn = 2;
+  RobotState state = 3;
+  repeated Event events = 4;
+  // Remaining CPU budget for this turn, in nanoseconds.
+  uint64 budget_nanos = 5;
+}
+
+message TurnIntent {
+  int64 turn = 1;
+  optional double set_ahead = 2;
+  optional double set_turn_body = 3;
+  optional double set_turn_gun = 4;
+  optional double set_turn_radar = 5;
+  optional double set_fire = 6;
+  optional double set_max_velocity = 7;
+  optional double set_max_turn_rate = 8;
+  optional bool adjust_gun_for_body_turn = 9;
+  optional bool adjust_radar_for_gun_turn = 10;
+  optional bool adjust_radar_for_body_turn = 11;
+}
+
+// ---------------------------------------------------------------------------
+// Envelopes
+// ---------------------------------------------------------------------------
+
+message ClientMessage {
+  oneof msg {
+    Hello hello = 1;
+    TurnIntent turn_intent = 2;
+  }
+}
+
+message ServerMessage {
+  oneof msg {
+    HelloAck hello_ack = 1;
+    TickEvent tick = 2;
+  }
+}
