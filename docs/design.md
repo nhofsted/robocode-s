@@ -215,14 +215,16 @@ Robot-side CPU measurement is only trusted when the runner is trusted: a local r
 
 ## 8. Java compatibility library (`clients/java-compat`)
 
-- Published as a jar that provides the **exact public API of `robocode.jar` 1.11.1**: `robocode.*`, `robocode.util.*`, `robocode.robotinterfaces.*` and `robocode.robotinterfaces.peer.*`.
-- **Architecture mirrors classic:** classic robots talk to their engine through the `I*RobotPeer` interfaces. We implement those peers on top of the protocol, so `Robot`, `AdvancedRobot`, `TeamRobot`, `RateControlRobot`, `Droid`, `JuniorRobot` and robots implementing the interfaces directly all work unchanged.
-- The robot runs on its own thread, as in classic. The peer blocks that thread inside `execute()` until the next tick.
-- **Robot loading:** reads robot `.properties` from jars (including team `.team` files) and uses a class loader per robot.
-- **`getGraphics()` / `onPaint`:** a `Graphics2D` implementation that records drawing operations as protocol paint commands.
-- **Team messages:** `Serializable` objects are serialized with Java serialization and sent as opaque bytes through the server. Only robots in the same JVM language family can read them, as in classic.
-- **Sandboxing:** none in-process. `SecurityManager` is gone in modern JDKs, so isolation is done by the container or process (§6).
-- **Packaging:** robots built against classic `robocode.jar` link against our jar without recompiling.
+The **robot host** runs classic Java robots unchanged (ADR 0012). It does not reimplement the `robocode.*` API. Instead it runs **classic Robocode's own robot side** (`robocode.api`, `core`, `host`, `repository`, `battle` 1.11.1 from Maven Central, EPL): the robot proxies, event manager, blocking calls, custom events, team messages, data files and painting. Only the **peer** is replaced:
+
+- `RemotePeer` implements classic's `IRobotPeer`. Each `execute` becomes an `Execute` message; the next `Tick` becomes classic's `ExecResults`. Dead or halted robots get classic's `DeathException`, `WinException` or `AbortedException` after sending their final commands, exactly like classic's `RobotPeer.executeImpl`.
+- Crashed robots (`drainEnergy`) and misbehaving ones (`punishBadBehavior`) are reported in `Execute`.
+- The peer measures the robot thread's CPU time per turn (`ThreadMXBean`).
+- `RobotHost` (the main class) connects, receives its identity in `HelloAck`, configures the robot's random streams (ADR 0009, 0010), looks up the robot in its jar through classic's repository, creates classic's proxy and then drives rounds from the server's messages.
+- It runs with `NOSECURITY=true` (one class loader for classic's engine classes and the peer); isolation is the process or container (§6).
+- **Distribution:** `./gradlew :clients:java-compat:installDist` gives `robot-host/lib/` with the classic jars as separate files, because classic finds its modules by jar name.
+
+**Verification:** the live difftest (`crates/difftest`, `live`) fights recorded classic battles with real robot processes through the runner, robot host, server and engine, and compares every turn. All recorded battles are identical, top bots included.
 
 ## 9. Other client libraries
 

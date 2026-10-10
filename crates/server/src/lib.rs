@@ -478,11 +478,24 @@ impl<'a> BattleLoop<'a> {
         }
         link.awaiting = None;
         link.final_execute = false;
-        let (commands, passthrough) = convert::commands(&execute.commands.unwrap_or_default());
-        link.io_robot |= commands.io;
-        link.pending = Some(commands);
-        link.passthrough = passthrough;
         link.output.push_str(&execute.output);
+        if let Some(c) = &execute.commands {
+            let (commands, passthrough) = convert::commands(c);
+            link.io_robot |= commands.io;
+            link.pending = Some(commands);
+            link.passthrough = passthrough;
+        }
+        if execute.drain_energy {
+            self.battle.drain_energy(i);
+        }
+        if execute.disable {
+            self.battle.disable(i);
+        }
+        if execute.stopped {
+            let link = &mut self.links[i];
+            link.active = false;
+            self.battle.stop(i);
+        }
         // `checkSkippedTurn`: turns that ran since the Tick this robot answers.
         let skipped = self.battle.time - execute.turn;
         if skipped >= 1 {

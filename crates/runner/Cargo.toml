@@ -11,4 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-robocode-s-protocol.workspace = true
+ureq = "3.4.2"
+sha2 = "0.11.0"
+flate2 = "1.1.10"
+tar = "0.4.46"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }

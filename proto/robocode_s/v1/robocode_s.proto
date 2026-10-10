@@ -222,6 +222,13 @@ message Execute {
   repeated PaintOp paint = 4;
   // CPU time the robot used for this turn, measured by the runner or library (ns).
   uint64 cpu_nanos = 5;
+  // The robot's code crashed: classic drains its energy to 0 for good (drainEnergy).
+  bool drain_energy = 6;
+  // The robot's thread ended (crash or disable); no more Executes this round. Without
+  // commands, the previous command state stays in effect.
+  bool stopped = 7;
+  // The robot misbehaved and is disabled (classic's punishBadBehavior).
+  bool disable = 8;
 }
 
 message Tick {

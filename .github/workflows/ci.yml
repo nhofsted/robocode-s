@@ -46,7 +46,7 @@ jobs:
       - run: ./gradlew build
 
   difftest:
-    name: Engine replay against classic
+    name: Engine, server and live battles against classic
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,10 +57,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: ./gradlew :tools:difftest:installDist :robots:samples:jar :clients:java-determinism:jar
+      - run: ./gradlew :tools:difftest:installDist :robots:samples:jar :clients:java-determinism:jar :clients:java-compat:installDist
       - name: Record classic battles (sample robots)
         run: tools/difftest/record-samples.sh "$RUNNER_TEMP/recordings"
-      - name: Replay them in the engine
+      - name: Replay them in the engine and through the server
         run: cargo test --locked -p robocode-s-difftest
         env:
           ROBOCODES_RECORDINGS: ${{ runner.temp }}/recordings
+      - name: Fight them live with real robot processes
+        run: cargo run --locked --release -p robocode-s-difftest --bin live -- "$RUNNER_TEMP"/recordings/*.jsonl.gz
+        env:
+          ROBOCODES_JAVA: ${{ env.JAVA_HOME }}/bin/java

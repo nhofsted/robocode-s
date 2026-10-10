@@ -71,3 +71,14 @@ ROBOCODES_RECORDINGS=/tmp/recordings cargo test -p robocode-s-difftest
 ```
 
 CI records the sample corpus and replays it on every push (job "Engine replay against classic"). Top RoboRumble bots are not in CI: their jars belong to other authors. Pass them as the second argument of `record-samples.sh`, or record by hand with `--jars`.
+
+## Live battles
+
+`live` fights the battle of each recording with real robot processes: the server, the runner and one robot-host JVM per robot. It then compares every turn with the recording. The result must be identical.
+
+```sh
+./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
+cargo run --release -p robocode-s-difftest --bin live -- /tmp/recordings/*.jsonl.gz
+```
+
+`ROBOCODES_JAVA` selects the Java runtime; without it the pinned Temurin JRE is downloaded. `ROBOCODES_ROBOT_JARS` (a path list) adds robot jars, e.g. RoboRumble bots.

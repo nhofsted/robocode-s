@@ -13,9 +13,9 @@ workspace = true
 
 [dependencies]
 robocode-s-engine.workspace = true
+robocode-s-protocol.workspace = true
+robocode-s-server.workspace = true
+robocode-s-runner.workspace = true
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 flate2 = "1.1.10"
 
-[dev-dependencies]
-robocode-s-server.workspace = true
-robocode-s-protocol.workspace = true

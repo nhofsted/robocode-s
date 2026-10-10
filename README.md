@@ -21,9 +21,9 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 
 ## Repository layout
 
-- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, cli)
+- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli)
 - `proto/`: wire protocol schema
-- `clients/java-compat/`: drop-in replacement for classic `robocode.jar`
+- `clients/java-compat/`: the robot host for classic Java robots (classic's robot side over the robocode-s protocol)
 - `clients/java-determinism/`: Java agent for per-robot seeded randomness
 - `robots/samples/`: classic sample robots (EPL-2.0)
 - `tools/difftest/`: oracle that records classic battles for differential testing

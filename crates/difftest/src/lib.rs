@@ -7,10 +7,13 @@
 //! events. The replay feeds the same commands into the engine and compares everything,
 //! bit for bit. It stops at the first difference and describes it.
 
+pub mod live;
+
 use flate2::read::GzDecoder;
 use robocode_s_engine::{
     Battle, BattleRules, BulletCommand, Commands, Event, RobotSetup, TeamMessage,
 };
+use robocode_s_protocol::v1;
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::fs::File;
@@ -536,4 +539,175 @@ pub fn event_json(e: &Event) -> Value {
         }
         Event::SkippedTurn { turn } => json!({"type": "SkippedTurnEvent", "skippedTurn": turn}),
     }
+}
+
+// ---------------------------------------------------------------- shared by the server tests
+
+/// Reads all lines of a recording (`.jsonl` or `.jsonl.gz`).
+pub fn load(path: &Path) -> Vec<Value> {
+    let file = std::fs::File::open(path).unwrap();
+    let reader: Box<dyn Read> = if path.extension().is_some_and(|e| e == "gz") {
+        Box::new(GzDecoder::new(file))
+    } else {
+        Box::new(file)
+    };
+    BufReader::new(reader)
+        .lines()
+        .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+        .collect()
+}
+
+/// One round of a recording: its start line and turn lines (index = turn - 1).
+pub struct Round {
+    pub start: Value,
+    pub turns: Vec<Value>,
+}
+
+/// The recording's rounds.
+pub fn rounds(lines: &[Value]) -> Vec<Round> {
+    let mut rounds: Vec<Round> = Vec::new();
+    for line in lines {
+        match line["type"].as_str() {
+            Some("roundStart") => rounds.push(Round {
+                start: line.clone(),
+                turns: Vec::new(),
+            }),
+            Some("turn") => rounds.last_mut().unwrap().turns.push(line.clone()),
+            _ => {}
+        }
+    }
+    rounds
+}
+
+/// All recorded states in order: each round's start, then its turns.
+pub fn states(rounds: &[Round]) -> Vec<&Value> {
+    rounds
+        .iter()
+        .flat_map(|r| std::iter::once(&r.start).chain(r.turns.iter()))
+        .collect()
+}
+
+fn proto_bullet_json(b: &Option<v1::Bullet>) -> Value {
+    let b = b.clone().unwrap_or_default();
+    json!({"id": b.bullet_id, "owner": b.owner, "victim": b.victim.unwrap_or_else(|| "null".into()),
+           "heading": json_number(b.heading.unwrap_or_default()), "x": json_number(b.x.unwrap_or_default()), "y": json_number(b.y.unwrap_or_default()),
+           "power": json_number(b.power.unwrap_or_default()), "active": b.active})
+}
+
+/// The oracle's JSON form of a protocol event.
+pub fn proto_event_json(e: &v1::Event) -> Value {
+    use v1::event::Kind;
+    match e.kind.as_ref().unwrap() {
+        Kind::ScannedRobot(s) => {
+            json!({"type": "ScannedRobotEvent", "name": s.name, "energy": json_number(s.energy.unwrap_or_default()),
+            "bearing": json_number(s.bearing.unwrap_or_default()), "distance": json_number(s.distance.unwrap_or_default()),
+            "heading": json_number(s.heading.unwrap_or_default()), "velocity": json_number(s.velocity.unwrap_or_default()), "sentry": s.sentry})
+        }
+        Kind::HitWall(h) => {
+            json!({"type": "HitWallEvent", "bearing": json_number(h.bearing.unwrap_or_default())})
+        }
+        Kind::HitRobot(h) => {
+            json!({"type": "HitRobotEvent", "name": h.name, "bearing": json_number(h.bearing.unwrap_or_default()),
+            "energy": json_number(h.energy.unwrap_or_default()), "atFault": h.at_fault})
+        }
+        Kind::HitByBullet(h) => {
+            json!({"type": "HitByBulletEvent", "bearing": json_number(h.bearing.unwrap_or_default()),
+            "bullet": proto_bullet_json(&h.bullet)})
+        }
+        Kind::BulletHit(h) => {
+            json!({"type": "BulletHitEvent", "name": h.name, "energy": json_number(h.energy.unwrap_or_default()),
+            "bullet": proto_bullet_json(&h.bullet)})
+        }
+        Kind::BulletHitBullet(h) => {
+            json!({"type": "BulletHitBulletEvent", "bullet": proto_bullet_json(&h.bullet),
+            "hitBullet": proto_bullet_json(&h.hit_bullet)})
+        }
+        Kind::BulletMissed(h) => {
+            json!({"type": "BulletMissedEvent", "bullet": proto_bullet_json(&h.bullet)})
+        }
+        Kind::RobotDeath(d) => json!({"type": "RobotDeathEvent", "name": d.name}),
+        Kind::Death(_) => json!({"type": "DeathEvent"}),
+        Kind::Win(_) => json!({"type": "WinEvent"}),
+        Kind::RoundEnded(r) => {
+            json!({"type": "RoundEndedEvent", "round": r.round, "turns": r.turns,
+            "totalTurns": r.total_turns})
+        }
+        Kind::BattleEnded(b) => {
+            let r = b.results.clone().unwrap_or_default();
+            json!({"type": "BattleEndedEvent", "aborted": b.aborted, "rank": r.rank,
+                   "score": (r.score.unwrap_or_default() + 0.5) as i64, "survival": (r.survival.unwrap_or_default() + 0.5) as i64, "firsts": r.firsts})
+        }
+        Kind::SkippedTurn(s) => json!({"type": "SkippedTurnEvent", "skippedTurn": s.turn}),
+    }
+}
+
+/// Compares an observer snapshot with a recorded state line.
+pub fn compare_snapshot(snapshot: &v1::TurnSnapshot, line: &Value) -> Result<(), String> {
+    let at = format!("round {} turn {}", snapshot.round, snapshot.turn);
+    if line["turn"].as_i64() != Some(snapshot.turn)
+        || line["round"].as_i64() != Some(i64::from(snapshot.round))
+    {
+        return Err(format!(
+            "{at}: snapshot out of step with the recording ({}/{})",
+            line["round"], line["turn"]
+        ));
+    }
+    let states = ["ACTIVE", "HIT_WALL", "HIT_ROBOT", "DEAD"];
+    for (i, (r, e)) in line["robots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(&snapshot.robots)
+        .enumerate()
+    {
+        if r["state"].as_str() != Some(states[e.state as usize]) {
+            return Err(format!(
+                "{at}: robot {i} state: classic {}, server {}",
+                r["state"], states[e.state as usize]
+            ));
+        }
+        for (name, actual) in [
+            ("x", e.x.unwrap_or_default()),
+            ("y", e.y.unwrap_or_default()),
+            ("energy", e.energy.unwrap_or_default()),
+            ("velocity", e.velocity.unwrap_or_default()),
+            ("bodyHeading", e.body_heading.unwrap_or_default()),
+            ("gunHeading", e.gun_heading.unwrap_or_default()),
+            ("radarHeading", e.radar_heading.unwrap_or_default()),
+            ("gunHeat", e.gun_heat.unwrap_or_default()),
+            ("score", e.score.unwrap_or_default()),
+            ("totalScore", e.total_score.unwrap_or_default()),
+        ] {
+            if !same(number(&r[name]), actual) {
+                return Err(format!(
+                    "{at}: robot {i} {name}: classic {}, server {}",
+                    describe(number(&r[name])),
+                    describe(actual)
+                ));
+            }
+        }
+    }
+    let bullets = line["bullets"].as_array().unwrap();
+    if bullets.len() != snapshot.bullets.len() {
+        return Err(format!(
+            "{at}: {} bullets recorded, server sent {}",
+            bullets.len(),
+            snapshot.bullets.len()
+        ));
+    }
+    for (k, (b, e)) in bullets.iter().zip(&snapshot.bullets).enumerate() {
+        let ok = b["owner"].as_i64() == Some(i64::from(e.owner))
+            && b["id"].as_i64() == Some(i64::from(e.bullet_id))
+            && b["victim"].as_i64() == Some(i64::from(e.victim))
+            && same(number(&b["x"]), e.x.unwrap_or_default())
+            && same(number(&b["y"]), e.y.unwrap_or_default())
+            && same(number(&b["heading"]), e.heading.unwrap_or_default())
+            && same(number(&b["power"]), e.power.unwrap_or_default());
+        if !ok {
+            return Err(format!(
+                "{at}: bullet {k} differs: classic {b}, server {e:?}"
+            ));
+        }
+    }
+    Ok(())
 }

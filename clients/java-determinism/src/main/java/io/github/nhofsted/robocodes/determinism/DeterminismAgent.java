@@ -26,6 +26,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>{@code new Random()} first asks the {@code Supplier<Long>} hook for a
  *       seed and uses it unless it is null.</li>
  * </ul>
+ * It also prepends classic Robocode's {@code robocode.util.Utils.getRandom()} (when that
+ * class loads) so robot threads get their own generator (ADR 0010).
  * The hooks live in the system properties because code in {@code java.base}
  * cannot link against classes outside it. Without hooks the JDK behaves as usual.
  */
@@ -43,10 +45,76 @@ public final class DeterminismAgent {
         RobotRandomness.markAgentInstalled();
     }
 
+    /**
+     * Prepends to {@code Utils.getRandom()}: {@code Object h = hook; if (h instanceof Supplier)
+     * { Object r = h.get(); if (r != null) return (Random) r; }}.
+     */
+    private static byte[] patchUtils(byte[] classfileBuffer) {
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+                @Override
+                protected String getCommonSuperClass(String type1, String type2) {
+                    return "java/lang/Object";
+                }
+            };
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    if (!name.equals("getRandom") || !descriptor.equals("()Ljava/util/Random;")) {
+                        return mv;
+                    }
+                    patched[0]++;
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitCode() {
+                            super.visitCode();
+                            Label original = new Label();
+                            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
+                                    "()Ljava/util/Properties;", false);
+                            mv.visitLdcInsn(RobotRandomness.UTILS_RANDOM_KEY);
+                            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
+                                    "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                            mv.visitVarInsn(Opcodes.ASTORE, 0);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.INSTANCEOF, "java/util/function/Supplier");
+                            mv.visitJumpInsn(Opcodes.IFEQ, original);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Supplier");
+                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Supplier", "get",
+                                    "()Ljava/lang/Object;", true);
+                            mv.visitVarInsn(Opcodes.ASTORE, 0);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitJumpInsn(Opcodes.IFNULL, original);
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/Random");
+                            mv.visitInsn(Opcodes.ARETURN);
+                            mv.visitLabel(original);
+                        }
+                    };
+                }
+            }, 0);
+            if (patched[0] != 1) {
+                throw new IllegalStateException("expected Utils.getRandom(), found " + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("DeterminismAgent: could not patch Utils: " + t);
+            Runtime.getRuntime().halt(3);
+            return null;
+        }
+    }
+
     private static final class Transformer implements ClassFileTransformer {
         @Override
         public byte[] transform(Module module, ClassLoader loader, String className, Class<?> classBeingRedefined,
                 ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            if ("robocode/util/Utils".equals(className)) {
+                return patchUtils(classfileBuffer);
+            }
             if (!"java/lang/Math".equals(className) && !"java/lang/StrictMath".equals(className)
                     && !"java/util/Random".equals(className)) {
                 return null;

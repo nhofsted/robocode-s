@@ -937,6 +937,17 @@ impl Battle {
         self.robots[i].halted = true;
     }
 
+    /// The robot's code crashed (`drainEnergy`): energy 0, and it gains no energy anymore.
+    pub fn drain_energy(&mut self, i: usize) {
+        self.set_energy(i, 0.0);
+        self.robots[i].energy_drained = true;
+    }
+
+    /// The robot's thread ended: it no longer executes, its last commands stay in effect.
+    pub fn stop(&mut self, i: usize) {
+        self.robots[i].running = false;
+    }
+
     /// Takes the events generated for a robot since the last call.
     pub fn take_events(&mut self, i: usize) -> Vec<Event> {
         std::mem::take(&mut self.robots[i].events)
