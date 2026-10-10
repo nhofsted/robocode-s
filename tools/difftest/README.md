@@ -37,7 +37,7 @@ The oracle checks 1, 2, 4 and 5 at startup and refuses to run without them. The 
 
 Classic's security mode stays on, as in the RoboRumble. On Java 21 that means class-loading and thread checks only: there is no `SecurityManager` sandbox anymore, so only run robots you would also run in a RoboRumble client.
 
-### Format (version 1)
+### Format (version 2)
 
 One JSON object per line:
 
@@ -48,7 +48,12 @@ One JSON object per line:
 
 A state contains, per robot (in index order): `state`, `x`, `y`, `energy`, `velocity`, `bodyHeading`, `gunHeading`, `radarHeading`, `gunHeat`, `score`, `totalScore`; and per bullet: `owner`, `id`, `state`, `x`, `y`, `heading`, `power`, `victim`. Doubles are written in Java's shortest round-trip form, so parsing them gives the exact bits back.
 
-Events are not in classic's snapshots; recording them needs a robot-side hook (future work).
+Each `turn` line also has, per robot (in index order), what classic's engine did in that turn. These come from `ClassicPatches` hooks in `RobotPeer` (`OracleHooks`), which only observe:
+- `commands`: the command state loaded at the start of the turn (`performLoadCommands`, engine-spec §11.1). This includes the remaining values, adjust flags, max velocity and turn rate, `scan`, `io`, bullet commands (`id`, `power`, fire assist, `consumed`) and team messages (`sender`, `recipient`, `bytes`). A replay of these drives the robocode-s engine without real robots.
+- `remaining`: the remaining body/gun/radar turn and distance reported back at the end of the turn (`publishStatus`).
+- `events`: every event added to the robot's queue, in insertion order, with all fields (radians, bullets with id, owner, victim, position, power and active flag).
+
+Recording costs about 1% of the battle time.
 
 ### Known limits
 

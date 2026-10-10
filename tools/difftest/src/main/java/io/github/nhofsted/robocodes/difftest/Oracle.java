@@ -63,7 +63,7 @@ import java.util.zip.GZIPOutputStream;
 public final class Oracle {
 
     /** Version of the recording format; bump on incompatible changes. */
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
 
     public static void main(String[] args) throws Exception {
         Options options = Options.parse(args);
@@ -124,6 +124,7 @@ public final class Oracle {
                         names.add(robot.getNameAndVersion());
                     }
                     RobotRandomness.configure(options.seed, names);
+                    OracleHooks.enable(robots.length);
                     BattleSpecification battle = new BattleSpecification(
                             new BattlefieldSpecification(options.width, options.height),
                             options.rounds, 450, 0.1, 100, false, robots);
@@ -270,6 +271,23 @@ public final class Oracle {
                 }
                 json.end();
             }
+            OracleHooks.Turn hooks = OracleHooks.drain();
+            json.endArray().name("commands").beginArray();
+            for (String c : hooks.commands) {
+                raw(json, c);
+            }
+            json.endArray().name("remaining").beginArray();
+            for (String r : hooks.remaining) {
+                raw(json, r);
+            }
+            json.endArray().name("events").beginArray();
+            for (List<String> robotEvents : hooks.events) {
+                json.beginArray();
+                for (String e : robotEvents) {
+                    raw(json, e);
+                }
+                json.endArray();
+            }
             json.endArray().name("bullets").beginArray();
             for (IBulletSnapshot b : snapshot.getBullets()) {
                 json.begin()
@@ -284,6 +302,14 @@ public final class Oracle {
                         .end();
             }
             write(json.endArray().end());
+        }
+
+        private static void raw(Json json, String value) {
+            if (value == null) {
+                json.nullValue();
+            } else {
+                json.rawValue(value);
+            }
         }
 
         private void write(Json json) {
@@ -380,6 +406,7 @@ public final class Oracle {
         }
 
         Json beginArray() {
+            separator();
             sb.append('[');
             needComma = false;
             return this;
@@ -417,6 +444,27 @@ public final class Oracle {
             } else {
                 string(Double.toString(value)); // NaN and infinities are not valid JSON numbers
             }
+            needComma = true;
+            return this;
+        }
+
+        Json field(String name, boolean value) {
+            name(name);
+            sb.append(value);
+            needComma = true;
+            return this;
+        }
+
+        Json rawValue(String json) {
+            separator();
+            sb.append(json);
+            needComma = true;
+            return this;
+        }
+
+        Json nullValue() {
+            separator();
+            sb.append("null");
             needComma = true;
             return this;
         }

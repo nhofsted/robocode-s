@@ -32,6 +32,11 @@ import io.github.nhofsted.robocodes.determinism.RobotRandomness;
  * {@code Random} on robot threads, as robocode-s does (engine-spec §15.1). Classic
  * returns the engine's generator there, which robocode-s can't share with robots in
  * other processes. Other threads keep classic's behavior.
+ *
+ * <p>Finally, {@code RobotPeer.performLoadCommands}, {@code publishStatus} and
+ * {@code addEvent} call {@link OracleHooks} on entry, so the oracle can record the
+ * robots' commands, the remaining values and the events per turn. The hooks only
+ * observe.
  */
 public final class ClassicPatches {
 
@@ -136,13 +141,39 @@ public final class ClassicPatches {
             }
             try {
                 ClassReader reader = new ClassReader(classfileBuffer);
-                ClassWriter writer = new ClassWriter(reader, 0);
+                // The hooks add stack use at method entry; no branches, so frames stay valid.
+                ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
                 int[] replaced = new int[1];
+                int[] hooked = new int[1];
                 reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
                     @Override
                     public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
                             String[] exceptions) {
                         MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                        String hook = switch (name + descriptor) {
+                            case "performLoadCommands()V" -> "commandsLoaded";
+                            case "publishStatus(J)V" -> "statusPublished";
+                            case "addEvent(Lrobocode/Event;)V" -> "eventAdded";
+                            default -> null;
+                        };
+                        if (hook != null) {
+                            hooked[0]++;
+                            boolean withEvent = hook.equals("eventAdded");
+                            return new MethodVisitor(Opcodes.ASM9, mv) {
+                                @Override
+                                public void visitCode() {
+                                    super.visitCode();
+                                    mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                    if (withEvent) {
+                                        mv.visitVarInsn(Opcodes.ALOAD, 1);
+                                    }
+                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                            "io/github/nhofsted/robocodes/difftest/OracleHooks", hook,
+                                            withEvent ? "(Ljava/lang/Object;Ljava/lang/Object;)V" : "(Ljava/lang/Object;)V",
+                                            false);
+                                }
+                            };
+                        }
                         if (!name.equals("startRound")) {
                             return mv;
                         }
@@ -163,6 +194,9 @@ public final class ClassicPatches {
                         };
                     }
                 }, 0);
+                if (hooked[0] != 3) {
+                    throw new IllegalStateException("expected 3 hooked RobotPeer methods, found " + hooked[0]);
+                }
                 if (replaced[0] != 1) {
                     throw new IllegalStateException("expected one wait() in RobotPeer.startRound, found " + replaced[0]);
                 }
