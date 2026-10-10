@@ -152,6 +152,7 @@ server -> robot : RoundOver / BattleOver
 - Custom events (`Condition.test()`) run client-side. Because they run during the robot's turn, firing them only affects that robot's own event queue, as in classic.
 - The server sends ticks to all robots in parallel and waits up to the turn budget (§7). Robots that miss the deadline **skip the turn**, with the classic semantics: the previous command state stays in effect, a `SkippedTurn` event is sent, and the robot is disabled after too many skips.
 - Classic runs robots one after another by default. Since robots cannot see each other's commands before the engine step, parallel execution produces the same results.
+- A `Tick` with `halt` ends a robot's participation. A robot that is still alive (halted after winning, or disabled) sends **one final `Execute`**, whose commands still take effect: classic's `executeImpl` stores the commands before it throws. Dead robots just stop.
 - Debug painting is a list of vector operations (`PaintOp`), sent only while `Tick.paint_enabled` is set.
 - Framing: a varint length prefix, messages of at most 16 MiB (`crates/protocol`).
 

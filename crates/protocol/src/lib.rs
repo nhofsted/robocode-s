@@ -82,8 +82,8 @@ mod tests {
             msg: Some(server_message::Msg::Tick(Tick {
                 turn: 42,
                 status: Some(v1::RobotStatus {
-                    energy: 99.5,
-                    x: 18.000000000000004,
+                    energy: Some(99.5),
+                    x: Some(18.000000000000004),
                     time: 42,
                     ..Default::default()
                 }),
@@ -91,7 +91,7 @@ mod tests {
                     Event {
                         kind: Some(event::Kind::ScannedRobot(v1::ScannedRobot {
                             name: "sample.Fire (2)".into(),
-                            bearing: -std::f64::consts::PI,
+                            bearing: Some(-std::f64::consts::PI),
                             ..Default::default()
                         })),
                     },
@@ -152,9 +152,19 @@ mod tests {
             panic!("expected a tick");
         };
         assert_eq!(
-            t.status.unwrap().x.to_bits(),
+            t.status.unwrap().x.unwrap().to_bits(),
             18.000000000000004f64.to_bits()
         );
+    }
+
+    /// Doubles are `optional` in the proto because implicit presence loses -0.0 in prost.
+    #[test]
+    fn negative_zero_survives() {
+        let message = v1::HitWall {
+            bearing: Some(-0.0),
+        };
+        let decoded = v1::HitWall::decode(message.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.bearing.unwrap().to_bits(), (-0.0f64).to_bits());
     }
 
     #[test]

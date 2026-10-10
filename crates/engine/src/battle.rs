@@ -5,7 +5,7 @@
 //! The code follows classic Robocode 1.11.1 closely; comments name the classic method.
 //! Every random draw happens in classic's order (engine-spec §3).
 
-use crate::commands::Commands;
+use crate::commands::{Commands, TeamMessage};
 use crate::events::{BulletInfo, Event};
 use crate::java;
 use crate::rules::*;
@@ -128,6 +128,10 @@ pub struct Robot {
     pub commands: Commands,
     pub stats: Statistics,
     pub events: Vec<Event>,
+    /// Status updates of this robot's own bullets, in the order the engine made them.
+    pub bullet_updates: Vec<BulletStatus>,
+    /// Team messages delivered to this robot.
+    pub team_inbox: Vec<TeamMessage>,
     last_heading: f64,
     last_gun_heading: f64,
     last_radar_heading: f64,
@@ -163,6 +167,8 @@ impl Robot {
             commands: Commands::default(),
             stats: Statistics::default(),
             events: Vec::new(),
+            bullet_updates: Vec::new(),
+            team_inbox: Vec::new(),
             last_heading: 0.0,
             last_gun_heading: 0.0,
             last_radar_heading: 0.0,
@@ -185,6 +191,19 @@ impl Robot {
 
     pub fn is_dead(&self) -> bool {
         self.state == RobotState::Dead
+    }
+
+    /// Whether the robot still executes after each turn: not dead, halted or disabled.
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
+    pub fn is_winner(&self) -> bool {
+        self.is_winner
     }
 
     pub fn current_score(&self) -> f64 {
@@ -556,6 +575,38 @@ fn max_decel(speed: f64) -> f64 {
     java::min(1.0, decel_time) * DECELERATION + java::max(0.0, accel_time) * ACCELERATION
 }
 
+/// An update of a robot's own bullet (classic's `BulletStatus`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BulletStatus {
+    pub bullet_id: i32,
+    pub x: f64,
+    pub y: f64,
+    pub victim: Option<String>,
+    pub active: bool,
+}
+
+/// What a robot learns about itself after a turn (classic's `RobotStatus`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RobotStatus {
+    pub energy: f64,
+    pub x: f64,
+    pub y: f64,
+    pub body_heading: f64,
+    pub gun_heading: f64,
+    pub radar_heading: f64,
+    pub velocity: f64,
+    pub body_turn_remaining: f64,
+    pub radar_turn_remaining: f64,
+    pub gun_turn_remaining: f64,
+    pub distance_remaining: f64,
+    pub gun_heat: f64,
+    pub others: i32,
+    pub num_sentries: i32,
+    pub round: i32,
+    pub num_rounds: i32,
+    pub time: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BulletKind {
     Bullet,
@@ -802,6 +853,8 @@ impl Battle {
         r.scan = false;
         r.in_collision = false;
         r.events.clear();
+        r.bullet_updates.clear();
+        r.team_inbox.clear();
         r.commands = Commands::default();
     }
 
@@ -834,6 +887,54 @@ impl Battle {
     pub fn set_commands(&mut self, i: usize, mut commands: Commands) {
         commands.validate();
         self.robots[i].commands = commands;
+    }
+
+    /// Takes the robot's bullet updates since the last call.
+    pub fn take_bullet_updates(&mut self, i: usize) -> Vec<BulletStatus> {
+        std::mem::take(&mut self.robots[i].bullet_updates)
+    }
+
+    /// Takes the team messages delivered to the robot since the last call.
+    pub fn take_team_messages(&mut self, i: usize) -> Vec<TeamMessage> {
+        std::mem::take(&mut self.robots[i].team_inbox)
+    }
+
+    /// The robot's status (`publishStatus` / `startRound`).
+    pub fn status(&self, i: usize) -> RobotStatus {
+        let r = &self.robots[i];
+        let others = if self.time == 0 {
+            // `startRound`: alive robots don't count themselves.
+            self.active_participants - i32::from(r.is_alive())
+        } else {
+            self.active_participants - i32::from(!(r.is_dead() || r.setup.sentry))
+        };
+        RobotStatus {
+            energy: r.energy,
+            x: r.x,
+            y: r.y,
+            body_heading: r.body_heading,
+            gun_heading: r.gun_heading,
+            radar_heading: r.radar_heading,
+            velocity: r.velocity,
+            body_turn_remaining: r.commands.body_turn_remaining,
+            radar_turn_remaining: r.commands.radar_turn_remaining,
+            gun_turn_remaining: r.commands.gun_turn_remaining,
+            distance_remaining: r.commands.distance_remaining,
+            gun_heat: r.gun_heat,
+            others,
+            num_sentries: self.active_sentries,
+            round: self.round,
+            num_rounds: self.rules.num_rounds,
+            time: self.time,
+        }
+    }
+
+    /// Disables a robot (`punishBadBehavior`), e.g. after too many skipped turns: it dies,
+    /// scores nothing more this round, and its thread stops.
+    pub fn disable(&mut self, i: usize) {
+        self.kill(i);
+        self.robots[i].stats.set_inactive();
+        self.robots[i].halted = true;
     }
 
     /// Takes the events generated for a robot since the last call.
@@ -972,6 +1073,19 @@ impl Battle {
         }
         if let Some(b) = self.bullet_index(key) {
             self.bullets[b].update_state();
+        }
+        // `owner.addBulletStatus(createStatus())`: only while the owner is alive.
+        let b = self.bullet(key);
+        let owner = b.owner;
+        if self.robots[owner].is_alive() {
+            let status = BulletStatus {
+                bullet_id: b.id,
+                x: b.x,
+                y: b.y,
+                victim: b.victim.map(|v| self.bullet_name_for_event(owner, v)),
+                active: b.state.is_active(),
+            };
+            self.robots[owner].bullet_updates.push(status);
         }
     }
 
@@ -1370,11 +1484,43 @@ impl Battle {
                 (r.last_gun_heading == r.last_radar_heading) && (r.gun_heading == r.radar_heading);
             r.scan = false;
         }
-        // Team messages are delivered by the server; the engine does not need them.
+        self.dispatch_team_messages(i);
         let r = &mut self.robots[i];
         r.last_heading = -1.0;
         r.last_gun_heading = -1.0;
         r.last_radar_heading = -1.0;
+    }
+
+    /// Team messages from this turn's commands go to the matching teammates
+    /// (`performScan`, engine-spec §7).
+    fn dispatch_team_messages(&mut self, i: usize) {
+        let Some(team) = self.robots[i].setup.team else {
+            return;
+        };
+        if !self.robots[i].setup.team_robot {
+            return;
+        }
+        let messages = self.robots[i].commands.messages.clone();
+        for message in messages {
+            for member in self.teams[team].clone() {
+                if self.dispatch_to(i, member, message.recipient.as_deref()) {
+                    self.robots[member].team_inbox.push(message.clone());
+                }
+            }
+        }
+    }
+
+    /// `checkDispatchToMember`: alive, and either a broadcast to others or the
+    /// recipient is a prefix of the member's name or full class name.
+    fn dispatch_to(&self, sender: usize, member: usize, recipient: Option<&str>) -> bool {
+        let m = &self.robots[member];
+        if !m.is_alive() {
+            return false;
+        }
+        match recipient {
+            None => member != sender,
+            Some(r) => m.setup.name.starts_with(r) || m.setup.full_class_name.starts_with(r),
+        }
     }
 
     /// `RobotPeer.scan` (engine-spec §7).

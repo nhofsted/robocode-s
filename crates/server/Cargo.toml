@@ -13,3 +13,7 @@ workspace = true
 [dependencies]
 robocode-s-engine.workspace = true
 robocode-s-protocol.workspace = true
+prost = "0.14.4"
+
+[dev-dependencies]
+robocode-s-engine.workspace = true

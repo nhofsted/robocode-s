@@ -11,12 +11,14 @@ pub mod commands;
 pub mod events;
 mod java;
 pub mod rules;
-mod stats;
+pub mod stats;
 pub mod utils;
 
 pub use battle::{
-    Battle, BattleRules, Bullet, BulletKind, BulletState, Robot, RobotSetup, RobotState,
+    Battle, BattleRules, Bullet, BulletKind, BulletState, BulletStatus, Robot, RobotSetup,
+    RobotState, RobotStatus,
 };
 pub use commands::{BulletCommand, Commands, TeamMessage};
 pub use events::{BulletInfo, Event, Results};
 pub use robocode_s_java_random as java_random;
+pub use stats::Statistics;

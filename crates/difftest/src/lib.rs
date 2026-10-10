@@ -154,7 +154,8 @@ fn fail(round: i64, turn: i64, message: &str) -> Mismatch {
     }
 }
 
-fn rules(h: &Value) -> BattleRules {
+/// The battle rules from a recording header.
+pub fn rules(h: &Value) -> BattleRules {
     BattleRules {
         width: h["width"].as_i64().unwrap_or(800) as i32,
         height: h["height"].as_i64().unwrap_or(600) as i32,
@@ -166,7 +167,8 @@ fn rules(h: &Value) -> BattleRules {
     }
 }
 
-fn setups(h: &Value) -> Vec<RobotSetup> {
+/// The robots from a recording header (format 3).
+pub fn setups(h: &Value) -> Vec<RobotSetup> {
     h["robotInfo"]
         .as_array()
         .map(|robots| {
@@ -195,7 +197,7 @@ fn setups(h: &Value) -> Vec<RobotSetup> {
 }
 
 /// A double from the recording: a JSON number, or "NaN" / "Infinity" / "-Infinity".
-fn number(v: &Value) -> f64 {
+pub fn number(v: &Value) -> f64 {
     match v {
         Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
         Value::String(s) => match s.as_str() {
@@ -208,7 +210,7 @@ fn number(v: &Value) -> f64 {
 }
 
 /// The JSON form of a double, as the oracle writes it.
-fn json_number(d: f64) -> Value {
+pub fn json_number(d: f64) -> Value {
     if d.is_finite() {
         json!(d)
     } else if d.is_nan() {
@@ -220,7 +222,8 @@ fn json_number(d: f64) -> Value {
     }
 }
 
-fn parse_commands(c: &Value) -> Commands {
+/// Recorded commands (`OracleHooks.commandsLoaded`).
+pub fn parse_commands(c: &Value) -> Commands {
     let bullets = c["bullets"]
         .as_array()
         .map(|bs| {
@@ -274,11 +277,11 @@ fn hex(s: &str) -> Vec<u8> {
 }
 
 /// Exact comparison of doubles; NaN equals NaN.
-fn same(expected: f64, actual: f64) -> bool {
+pub fn same(expected: f64, actual: f64) -> bool {
     expected.to_bits() == actual.to_bits() || (expected.is_nan() && actual.is_nan())
 }
 
-fn describe(d: f64) -> String {
+pub fn describe(d: f64) -> String {
     format!("{d:?} (bits {:016x})", d.to_bits())
 }
 
@@ -442,7 +445,7 @@ fn compare_events(battle: &mut Battle, line: &Value) -> Result<usize, String> {
 }
 
 /// Equal JSON, with numbers compared as exact doubles.
-fn events_equal(a: &[Value], b: &[Value]) -> bool {
+pub fn events_equal(a: &[Value], b: &[Value]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| values_equal(x, y))
 }
 
@@ -479,7 +482,7 @@ fn bullet_json(b: &robocode_s_engine::BulletInfo) -> Value {
 }
 
 /// The oracle's JSON form of an event (`OracleHooks.describe`).
-fn event_json(e: &Event) -> Value {
+pub fn event_json(e: &Event) -> Value {
     match e {
         Event::ScannedRobot {
             name,

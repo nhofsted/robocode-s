@@ -12,6 +12,11 @@
 //
 // Units: distances in pixels, angles in radians (0 = north, clockwise), unless a
 // field says otherwise. Colors are ARGB.
+//
+// All double fields are `optional`, so they are always written when set. With
+// implicit presence some implementations (Rust's prost) skip -0.0, because it
+// compares equal to the default 0.0; the protobuf spec says -0.0 must be sent, and
+// robocode-s needs every bit (ADR 0003).
 
 syntax = "proto3";
 
@@ -106,7 +111,7 @@ message BattleRules {
   int32 battlefield_width = 1;
   int32 battlefield_height = 2;
   int32 num_rounds = 3;
-  double gun_cooling_rate = 4;
+  optional double gun_cooling_rate = 4;
   int64 inactivity_time = 5;
   bool hide_enemy_names = 6;
   int32 sentry_border_size = 7;
@@ -158,17 +163,17 @@ message RobotType {
 // The robot's command state (classic's ExecCommands). The robot sends all of it
 // with every Execute; the server returns its updated copy in Tick.
 message RobotCommands {
-  double body_turn_remaining = 1;
-  double gun_turn_remaining = 2;
-  double radar_turn_remaining = 3;
-  double distance_remaining = 4;
+  optional double body_turn_remaining = 1;
+  optional double gun_turn_remaining = 2;
+  optional double radar_turn_remaining = 3;
+  optional double distance_remaining = 4;
   bool adjust_gun_for_body_turn = 5;
   bool adjust_radar_for_gun_turn = 6;
   bool adjust_radar_for_body_turn = 7;
   // Whether the robot set adjust_radar_for_body_turn itself (classic API detail).
   bool adjust_radar_for_body_turn_set = 8;
-  double max_turn_rate = 9;
-  double max_velocity = 10;
+  optional double max_turn_rate = 9;
+  optional double max_velocity = 10;
   Colors colors = 11;
   // The rest is only sent by robots, never returned.
   bool scan = 12;
@@ -187,10 +192,10 @@ message Colors {
 
 message BulletCommand {
   int32 bullet_id = 1;
-  double power = 2;
+  optional double power = 2;
   // Fire assist (basic robots): aim here if the radar turned with the gun.
   bool fire_assist_valid = 3;
-  double fire_assist_angle = 4;
+  optional double fire_assist_angle = 4;
 }
 
 message TeamMessage {
@@ -229,7 +234,9 @@ message Tick {
   repeated Event events = 4;
   repeated TeamMessage team_messages = 5;
   repeated BulletStatus bullet_updates = 6;
-  // The robot must stop (round over or halted).
+  // The robot stops (dead, halted, or the round is over). A robot that is still alive
+  // and halted sends one final Execute; its commands take effect, as in classic
+  // (executeImpl stores the commands before it throws).
   bool halt = 7;
   // The robot should keep waiting for the battle to end instead of stopping.
   bool should_wait = 8;
@@ -248,18 +255,18 @@ message BattleOver {
 
 // classic's RobotStatus
 message RobotStatus {
-  double energy = 1;
-  double x = 2;
-  double y = 3;
-  double body_heading = 4;
-  double gun_heading = 5;
-  double radar_heading = 6;
-  double velocity = 7;
-  double body_turn_remaining = 8;
-  double radar_turn_remaining = 9;
-  double gun_turn_remaining = 10;
-  double distance_remaining = 11;
-  double gun_heat = 12;
+  optional double energy = 1;
+  optional double x = 2;
+  optional double y = 3;
+  optional double body_heading = 4;
+  optional double gun_heading = 5;
+  optional double radar_heading = 6;
+  optional double velocity = 7;
+  optional double body_turn_remaining = 8;
+  optional double radar_turn_remaining = 9;
+  optional double gun_turn_remaining = 10;
+  optional double distance_remaining = 11;
+  optional double gun_heat = 12;
   int32 others = 13;
   int32 num_sentries = 14;
   int32 round = 15;
@@ -270,8 +277,8 @@ message RobotStatus {
 // An update of one of the robot's own bullets.
 message BulletStatus {
   int32 bullet_id = 1;
-  double x = 2;
-  double y = 3;
+  optional double x = 2;
+  optional double y = 3;
   optional string victim = 4;
   bool active = 5;
 }
@@ -302,42 +309,42 @@ message Bullet {
   int32 bullet_id = 1;
   string owner = 2;
   optional string victim = 3;
-  double heading = 4;
-  double x = 5;
-  double y = 6;
-  double power = 7;
+  optional double heading = 4;
+  optional double x = 5;
+  optional double y = 6;
+  optional double power = 7;
   bool active = 8;
 }
 
 message ScannedRobot {
   string name = 1;
-  double energy = 2;
-  double bearing = 3;
-  double distance = 4;
-  double heading = 5;
-  double velocity = 6;
+  optional double energy = 2;
+  optional double bearing = 3;
+  optional double distance = 4;
+  optional double heading = 5;
+  optional double velocity = 6;
   bool sentry = 7;
 }
 
 message HitWall {
-  double bearing = 1;
+  optional double bearing = 1;
 }
 
 message HitRobot {
   string name = 1;
-  double bearing = 2;
-  double energy = 3;
+  optional double bearing = 2;
+  optional double energy = 3;
   bool at_fault = 4;
 }
 
 message HitByBullet {
-  double bearing = 1;
+  optional double bearing = 1;
   Bullet bullet = 2;
 }
 
 message BulletHit {
   string name = 1;
-  double energy = 2;
+  optional double energy = 2;
   Bullet bullet = 3;
 }
 
@@ -377,13 +384,13 @@ message SkippedTurn {
 message Results {
   string name = 1;
   int32 rank = 2;
-  double score = 3;
-  double survival = 4;
-  double last_survivor_bonus = 5;
-  double bullet_damage = 6;
-  double bullet_damage_bonus = 7;
-  double ram_damage = 8;
-  double ram_damage_bonus = 9;
+  optional double score = 3;
+  optional double survival = 4;
+  optional double last_survivor_bonus = 5;
+  optional double bullet_damage = 6;
+  optional double bullet_damage_bonus = 7;
+  optional double ram_damage = 8;
+  optional double ram_damage_bonus = 9;
   int32 firsts = 10;
   int32 seconds = 11;
   int32 thirds = 12;
@@ -415,24 +422,24 @@ message Shape {
 }
 
 message Line {
-  double x1 = 1;
-  double y1 = 2;
-  double x2 = 3;
-  double y2 = 4;
+  optional double x1 = 1;
+  optional double y1 = 2;
+  optional double x2 = 3;
+  optional double y2 = 4;
 }
 
 message Rect {
-  double x = 1;
-  double y = 2;
-  double width = 3;
-  double height = 4;
+  optional double x = 1;
+  optional double y = 2;
+  optional double width = 3;
+  optional double height = 4;
 }
 
 // An arc of the ellipse in the frame; angles in degrees as java.awt.geom.Arc2D.
 message ArcShape {
   Rect frame = 1;
-  double start = 2;
-  double extent = 3;
+  optional double start = 2;
+  optional double extent = 3;
 }
 
 message Polygon {
@@ -442,8 +449,8 @@ message Polygon {
 
 message DrawString {
   string text = 1;
-  double x = 2;
-  double y = 3;
+  optional double x = 2;
+  optional double y = 3;
 }
 
 // ============================================================================
@@ -528,16 +535,16 @@ enum RobotState {
 
 message RobotSnapshot {
   RobotState state = 1;
-  double x = 2;
-  double y = 3;
-  double energy = 4;
-  double velocity = 5;
-  double body_heading = 6;
-  double gun_heading = 7;
-  double radar_heading = 8;
-  double gun_heat = 9;
-  double score = 10;
-  double total_score = 11;
+  optional double x = 2;
+  optional double y = 3;
+  optional double energy = 4;
+  optional double velocity = 5;
+  optional double body_heading = 6;
+  optional double gun_heading = 7;
+  optional double radar_heading = 8;
+  optional double gun_heat = 9;
+  optional double score = 10;
+  optional double total_score = 11;
   Colors colors = 12;
   // Console output this turn.
   string output = 13;
@@ -559,10 +566,10 @@ message BulletSnapshot {
   int32 owner = 1;
   int32 bullet_id = 2;
   BulletState state = 3;
-  double x = 4;
-  double y = 5;
-  double heading = 6;
-  double power = 7;
+  optional double x = 4;
+  optional double y = 5;
+  optional double heading = 6;
+  optional double power = 7;
   int32 victim = 8;  // -1 without a victim
   bool explosion = 9;
   int32 frame = 10;
