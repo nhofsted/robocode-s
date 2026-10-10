@@ -12,4 +12,5 @@ workspace = true
 
 [dependencies]
 robocode-s-fdlibm.workspace = true
+robocode-s-geom.workspace = true
 robocode-s-java-random.workspace = true

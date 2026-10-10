@@ -1,0 +1,17 @@
+[package]
+name = "robocode-s-geom"
+description = "Geometry tests of classic Robocode (bounding boxes, bullet lines, radar arcs), matching java.awt.geom behavior"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-fdlibm.workspace = true
+
+[dev-dependencies]
+robocode-s-java-random.workspace = true

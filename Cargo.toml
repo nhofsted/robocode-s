@@ -12,6 +12,7 @@ repository = "https://github.com/nhofsted/robocode-s"
 [workspace.dependencies]
 robocode-s-engine = { path = "crates/engine" }
 robocode-s-fdlibm = { path = "crates/fdlibm" }
+robocode-s-geom = { path = "crates/geom" }
 robocode-s-java-random = { path = "crates/java-random" }
 robocode-s-protocol = { path = "crates/protocol" }
 robocode-s-runner = { path = "crates/runner" }

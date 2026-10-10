@@ -21,7 +21,7 @@ val determinismAgent = configurations.create("determinismAgent") {
 dependencies {
     implementation(libs.robocode.classic.api)
     runtimeOnly(libs.robocode.classic.core)
-    runtimeOnly(libs.robocode.classic.battle)
+    implementation(libs.robocode.classic.battle) // BoundingRectangle for GeometryVectors
     runtimeOnly(libs.robocode.classic.host)
     runtimeOnly(libs.robocode.classic.repository)
     implementation(project(":clients:java-determinism"))
@@ -116,6 +116,18 @@ tasks.register<JavaExec>("strictMathVectors") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.github.nhofsted.robocodes.difftest.StrictMathVectors"
     val output = layout.settingsDirectory.file("crates/fdlibm/tests/data/strictmath.txt")
+    outputs.file(output)
+    args(output.asFile.path)
+    doFirst { output.asFile.parentFile.mkdirs() }
+}
+
+// Test vectors for the Rust geometry crate (crates/geom).
+tasks.register<JavaExec>("geometryVectors") {
+    description = "Regenerates crates/geom/tests/data/geometry.txt from the running JDK."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.github.nhofsted.robocodes.difftest.GeometryVectors"
+    jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-InlineMathNatives")
+    val output = layout.settingsDirectory.file("crates/geom/tests/data/geometry.txt")
     outputs.file(output)
     args(output.asFile.path)
     doFirst { output.asFile.parentFile.mkdirs() }

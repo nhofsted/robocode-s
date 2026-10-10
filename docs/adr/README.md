@@ -12,3 +12,4 @@
 | [0008](0008-licensing.md) | EPL-2.0 license; classic samples bundled under EPL-2.0 |
 | [0009](0009-per-robot-random-streams.md) | Per-robot random streams via a Java agent |
 | [0010](0010-per-robot-utils-random.md) | `Utils.getRandom()` returns a per-robot generator |
+| [0011](0011-independent-geometry.md) | Independent implementation of the JDK geometry, verified against the JDK |

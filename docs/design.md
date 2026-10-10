@@ -407,6 +407,7 @@ robocode-s/
 │   ├── engine/               # pure simulation
 │   ├── fdlibm/               # StrictMath port (fdlibm 5.3)
 │   ├── java-random/          # java.util.Random port
+│   ├── geom/                 # java.awt.geom behavior (boxes, lines, radar arcs)
 │   ├── protocol/             # generated + framing
 │   ├── server/
 │   ├── runner/
@@ -460,7 +461,7 @@ robocode-s/
 - **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
 - **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
-- **O12** JDK geometry (`Rectangle2D`, `Arc2D`) in scanning and collisions: OpenJDK's code is GPL and can't be copied. Independent implementation verified by differential tests (recommended), a GPL secondary license for one module, or clean-room? See engine-spec §15.2.
+- **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
 
 ## 18. Decisions so far

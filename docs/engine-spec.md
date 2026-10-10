@@ -410,7 +410,13 @@ Because they stay in the list, hit bullets and explosions **affect every shuffle
   - left if `px < box.x`, right if `px > box.x + (double) box.width`;
   - top if `py < box.y`, bottom if `py > box.y + (double) box.height`.
 - **Point containment** (`Rectangle2D.contains(px, py)`): inside the half-open box `[x, x+w) × [y, y+h)`, after widening.
-- **Arc–box** intersection (`Arc2D.intersects`): the JDK's algorithm for a `PIE` arc. Open question O12 (§15.2).
+- **Arc–box** intersection (`Arc2D.intersects`, `PIE`) and the arc's start point: see §7 and ADR 0011. Observed JDK behavior:
+  - an extent of 0 never intersects;
+  - the radial edges count as closed segments, also for full ellipses;
+  - the curved edge is excluded;
+  - the start ray belongs to the arc and the end ray doesn't.
+
+  Implemented and verified in `crates/geom`.
 
 ### 9.2 Energy changes
 
@@ -588,20 +594,13 @@ In classic, `robocode.util.Utils.getRandom()` returns the **engine's** generator
 
 **Decision:** `Utils.getRandom()` returns one `Random` per robot, seeded with `mix64(base ^ 0x5554494C53524E44)` (ADR 0010). The oracle patches classic's `Utils.getRandom()` the same way for robot threads (`ClassicPatches`), so recordings stay comparable. None of the six top bots checked, and none of the samples, use it.
 
-### 15.2 O12: JDK geometry and licensing
+### 15.2 JDK geometry and licensing (ADR 0011)
 
 Scanning and collisions depend on `java.awt.geom`:
 - `Rectangle2D.intersects`, `intersectsLine` and `contains` (§9.1);
 - `Arc2D.Double.setArc`, `getStartPoint` and `intersects` (§7).
 
-Bit-exact results need the same floating-point algorithms. OpenJDK is GPLv2 with the Classpath Exception, which doesn't allow copying its code into an EPL-2.0 project.
-
-Options:
-- **(a)** Implement these tests independently from their documented behavior, then verify them against the JDK with large randomized differential tests, focusing on boundary cases.
-- **(b)** Declare GPL-2.0-with-Classpath-Exception as an EPL-2.0 "Secondary License" for the geometry module.
-- **(c)** A clean-room process: one person writes an algorithm description, another implements it.
-
-Recommendation: (a), because the box tests are simple comparisons and clipping, and the arc test only needs the same boolean answer. Decision pending.
+OpenJDK's code is GPL and can't be copied. **Decision:** `crates/geom` is an independent implementation, with its behavior established by black-box experiments on the JDK. It is verified against JDK vectors: ~24,000 explicit edge cases and 5 million random cases, all matching. Details of the observed behavior are in ADR 0011.
 
 ### 15.3 Other notes
 

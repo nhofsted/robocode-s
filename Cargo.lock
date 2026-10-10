@@ -341,6 +341,7 @@ name = "robocode-s-engine"
 version = "0.1.0"
 dependencies = [
  "robocode-s-fdlibm",
+ "robocode-s-geom",
  "robocode-s-java-random",
 ]
 
@@ -348,6 +349,14 @@ dependencies = [
 name = "robocode-s-fdlibm"
 version = "0.1.0"
 dependencies = [
+ "robocode-s-java-random",
+]
+
+[[package]]
+name = "robocode-s-geom"
+version = "0.1.0"
+dependencies = [
+ "robocode-s-fdlibm",
  "robocode-s-java-random",
 ]
 
