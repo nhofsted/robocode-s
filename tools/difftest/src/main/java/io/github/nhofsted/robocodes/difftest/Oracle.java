@@ -49,7 +49,8 @@ import java.util.zip.GZIPOutputStream;
  * <p>Robots' own randomness ({@code Math.random()}, {@code new Random()}) is not
  * seeded by classic on modern JVMs. The robocode-s determinism agent
  * ({@code -javaagent}) gives each robot its own stream derived from the battle
- * seed and the robot's name, the same way robocode-s runners do.
+ * seed and the robot's name, the same way robocode-s runners do. The difftest jar
+ * itself is a second agent with a timing-only fix for classic ({@link ClassicPatches}).
  *
  * <p>Usage: {@code Oracle --robots sample.Fire,sample.Walls --seed 42 --rounds 10
  * --out battle.jsonl.gz [--width 800] [--height 600] [--jars a.jar:b.jar] [--with-output]}.
@@ -73,6 +74,10 @@ public final class Oracle {
 
     /** Fails unless classic will run deterministically with StrictMath semantics. */
     static void checkJvmSetup() {
+        if (!ClassicPatches.isInstalled()) {
+            throw new IllegalStateException("the difftest jar must also be loaded as an agent "
+                    + "(-javaagent:<difftest jar>) for classic's startRound timing fix, see ClassicPatches");
+        }
         if (!RobotRandomness.isAgentInstalled()) {
             throw new IllegalStateException("the robocode-s determinism agent is required: run with "
                     + "-javaagent:<java-determinism jar> (design §7.2)");
@@ -145,11 +150,14 @@ public final class Oracle {
         return new BufferedWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8), 1 << 16);
     }
 
-    private static void deleteRecursively(Path dir) throws IOException {
+    /** Best effort: on Windows, classic may still hold the robot jars open. */
+    private static void deleteRecursively(Path dir) {
         try (Stream<Path> paths = Files.walk(dir)) {
             for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(p);
             }
+        } catch (IOException | UncheckedIOException e) {
+            System.err.println("warning: could not delete " + dir + ": " + e);
         }
     }
 

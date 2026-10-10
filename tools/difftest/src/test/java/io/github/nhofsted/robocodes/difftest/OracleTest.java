@@ -34,8 +34,8 @@ class OracleTest {
     void sameSeedGivesByteIdenticalRecordings() throws Exception {
         Path a = dir.resolve("a.jsonl");
         Path b = dir.resolve("b.jsonl");
-        assertEquals(0, runOracle(oracleJvmArgs(), MELEE, 1, 3, a).exitCode);
-        assertEquals(0, runOracle(oracleJvmArgs(), MELEE, 1, 3, b).exitCode);
+        assertSucceeded(runOracle(oracleJvmArgs(), MELEE, 1, 3, a));
+        assertSucceeded(runOracle(oracleJvmArgs(), MELEE, 1, 3, b));
         assertEquals(-1, Files.mismatch(a, b), "recordings with the same seed differ");
     }
 
@@ -43,15 +43,15 @@ class OracleTest {
     void differentSeedGivesDifferentRecording() throws Exception {
         Path a = dir.resolve("a.jsonl");
         Path b = dir.resolve("b.jsonl");
-        assertEquals(0, runOracle(oracleJvmArgs(), MELEE, 1, 1, a).exitCode);
-        assertEquals(0, runOracle(oracleJvmArgs(), MELEE, 2, 1, b).exitCode);
+        assertSucceeded(runOracle(oracleJvmArgs(), MELEE, 1, 1, a));
+        assertSucceeded(runOracle(oracleJvmArgs(), MELEE, 2, 1, b));
         assertNotEquals(-1, Files.mismatch(a, b));
     }
 
     @Test
     void recordingHasHeaderRoundsTurnsAndResults() throws Exception {
         Path out = dir.resolve("battle.jsonl");
-        assertEquals(0, runOracle(oracleJvmArgs(), "sample.Fire,sample.Walls", 3, 2, out).exitCode);
+        assertSucceeded(runOracle(oracleJvmArgs(), "sample.Fire,sample.Walls", 3, 2, out));
         List<String> lines = Files.readAllLines(out);
         assertTrue(lines.get(0).startsWith("{\"type\":\"header\",\"format\":1,\"robotRandomness\":\"robocode-s/1\","
                 + "\"classic\":\"1.11.1\""), lines.get(0));
@@ -110,6 +110,10 @@ class OracleTest {
     private record Result(int exitCode, String stderr) {
     }
 
+    private static void assertSucceeded(Result result) {
+        assertEquals(0, result.exitCode, () -> "oracle failed; stderr:\n" + result.stderr);
+    }
+
     private Result runOracle(List<String> jvmArgs, String robots, long seed, int rounds, Path out)
             throws IOException, InterruptedException {
         return runOracle(jvmArgs, true, robots, seed, rounds, out);
@@ -124,6 +128,7 @@ class OracleTest {
         if (withAgent) {
             command.add("-javaagent:" + System.getProperty("robocodes.difftest.agentJar"));
         }
+        command.add("-javaagent:" + System.getProperty("robocodes.difftest.patchesJar"));
         command.add("-Drobocodes.difftest.robotJars=" + System.getProperty("robocodes.difftest.robotJars"));
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));

@@ -25,6 +25,7 @@ dependencies {
     runtimeOnly(libs.robocode.classic.host)
     runtimeOnly(libs.robocode.classic.repository)
     implementation(project(":clients:java-determinism"))
+    implementation(libs.asm)
     sampleRobots(project(":robots:samples"))
     determinismAgent(project(":clients:java-determinism"))
 
@@ -69,14 +70,31 @@ class AgentArgument(
         else listOf("-javaagent:${agent.singleFile}")
 }
 
+class PathProperty(
+    @get:Input val name: String,
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE) val files: FileCollection,
+) : CommandLineArgumentProvider {
+    override fun asArguments() = listOf("-D$name=${files.asPath}")
+}
+
+// The difftest jar doubles as an agent with timing fixes for classic (ClassicPatches).
+tasks.jar {
+    manifest {
+        attributes("Premain-Class" to "io.github.nhofsted.robocodes.difftest.ClassicPatches")
+    }
+}
+val patchesAgent: FileCollection = files(tasks.jar)
+
 tasks.named<JavaExec>("run") {
     jvmArgumentProviders.add(RobotJarsArgument(sampleRobots))
     jvmArgumentProviders.add(AgentArgument(determinismAgent, false))
+    jvmArgumentProviders.add(AgentArgument(patchesAgent, false))
 }
 
 tasks.test {
     useJUnitPlatform()
     jvmArgumentProviders.add(RobotJarsArgument(sampleRobots))
     jvmArgumentProviders.add(AgentArgument(determinismAgent, true))
+    jvmArgumentProviders.add(PathProperty("robocodes.difftest.patchesJar", patchesAgent))
     systemProperty("robocodes.difftest.oracleJvmArgs", oracleJvmArgs.joinToString(" "))
 }
