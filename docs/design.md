@@ -26,12 +26,13 @@ It runs on Windows, Linux and macOS.
 5. **Optional determinism.** A deterministic mode in which the same seed and robots always give the same result, independent of machine load.
 6. **Cross-platform.** First-class support on Windows, Linux and macOS (x86-64 and arm64).
 7. **GUI.** Battle setup, a live viewer with robot debug painting, recording and replay.
-8. **Our own RoboRumble**: distributed battle execution, verifiable results, a web interface with in-browser replays (§12). Contributing to classic LiteRumble is optional.
+8. **Our own RoboRumble**: distributed battle execution, verifiable results, a web interface with in-browser replays (§12). Contributing to classic LiteRumble is a non-goal.
 
 ### Non-goals (for now)
 
 - A built-in robot editor or compiler (use an IDE).
 - Changing the classic game rules. Rule variants may come later behind explicit flags; the default is always classic.
+- Contributing results to classic LiteRumble.
 - Wire compatibility with Robocode Tank Royale. An adapter may be added later (§14).
 
 ### Relationship to Robocode Tank Royale
@@ -74,7 +75,7 @@ Components:
 | `gui` | Rust (wgpu + egui) | Battle setup, viewer, debug painting, replay. Connects as an observer and can embed a server. |
 | `cli` | Rust | Headless battles, batch runs, recordings, rumble client. |
 | `rumble/*` | Rust (Lambdas) | Rumble backend: work assignment, result intake, auth, submission, rankings. AWS never runs battles. |
-| `web` | TypeScript + WASM | Rumble website and in-browser replay viewer. |
+| `web` | SvelteKit (static) + WASM | Rumble website and in-browser replay viewer. |
 | `infra` | TypeScript (CDK) | AWS infrastructure for the rumble. |
 | `clients/java-compat` | Java | Drop-in replacement for `robocode.jar`, implementing the classic API on top of the protocol. |
 | `clients/*` | various | Native robot APIs for Java/Kotlin, Python, .NET, Rust and C/C++. |
@@ -106,10 +107,10 @@ The exact order is taken from the 1.11.1 sources and pinned down by differential
 
 Classic Robocode calls `java.lang.Math.sin/cos/atan2/...`. On HotSpot these may run as intrinsics, which may differ by up to 1 ulp from `StrictMath` (fdlibm) and can vary between JVMs and CPUs. That means classic itself is only bit-exact per platform and JVM.
 
-Strategy:
-1. Port fdlibm (`StrictMath`) to Rust for the engine, and use it everywhere.
-2. Run the differential harness with classic on a pinned JDK. Measure divergence: first exact-equality failures, then error bounds.
-3. If HotSpot intrinsics cause observable divergence, decide whether "bit-exact" means "bit-exact vs StrictMath". If so, classic running with intrinsics disabled is the oracle, which is effectively fdlibm. Record the decision in an ADR.
+**Decision: "bit-exact" means bit-exact against classic Robocode running with `StrictMath` semantics (fdlibm).**
+1. The engine uses a Rust port of fdlibm (`crates/fdlibm`) for every transcendental function. It's exact on every platform.
+2. The difftest oracle runs classic with StrictMath-equivalent math: `Math` intrinsics disabled, or engine math calls patched to `StrictMath`. The exact mechanism is chosen in M1.
+3. Classic running on a JVM with intrinsics may differ from us in rare cases. That is classic's own platform nondeterminism, not a compatibility bug.
 
 Robot-side math runs in the robot's own runtime and is not affected.
 
@@ -154,7 +155,7 @@ robot  → server: TurnIntent { set_ahead/turn/gun/radar/fire/..., adjust flags,
 
 | Mode | Use case | Isolation | Notes |
 |---|---|---|---|
-| **Local process** | Development, fast rumble runs with trusted robots | Low: OS process only. Memory limited through runtime flags (e.g. `-Xmx`); optionally Job Objects on Windows or cgroups on Linux. | Requires local runtimes; a JRE can be downloaded and managed by robocode-s. |
+| **Local process** | Development, fast rumble runs with trusted robots | Low: OS process only. Memory limited through runtime flags (e.g. `-Xmx`); optionally Job Objects on Windows or cgroups on Linux. | The JRE is **downloaded on demand**: on first use, a pinned Eclipse Temurin JRE for the platform is fetched into the robocode-s data dir and its checksum verified. Other runtimes follow the same pattern where possible. |
 | **Container** | Untrusted robots, tournaments | High: CPU, memory, pids, read-only rootfs, no general network | Requires Docker (Docker Desktop on Windows/macOS). |
 | **Remote agent** | Distributed tournaments, spreading load | Whatever the remote host's launcher provides | `runner` in agent mode, authenticated to the server. |
 | *WASM (future)* | Native and new-language robots | High, plus deterministic fuel metering | wasmtime embedded in the runner (§14). |
@@ -168,7 +169,7 @@ robot  → server: TurnIntent { set_ahead/turn/gun/radar/fire/..., adjust flags,
 
 ### 6.3 Container network isolation
 
-A robot must reach the server and nothing else. Proposal (open question O3): put robot containers on an `--internal` Docker network that also contains a tiny relay container. The relay forwards only to the server's robot port. This works the same on all three platforms and needs no host firewall rules.
+A robot must reach the server and nothing else. **Decision:** robot containers sit on an `--internal` Docker network that also contains a tiny relay container. The relay forwards only to the server's robot port. This works the same on all three platforms and needs no host firewall rules.
 
 ### 6.4 One process per robot
 
@@ -233,7 +234,7 @@ Native APIs for new robots, all generated from the same `.proto`:
 
 ## 12. robocode-s Rumble
 
-We run our own distributed rumble. Volunteers run battles with the robocode-s rumble client, and a serverless AWS backend collects results, computes rankings and serves a web interface for browsing results and replaying battles. Taking part in classic LiteRumble stays an optional extra (O1).
+We run our own distributed rumble. Volunteers run battles with the robocode-s rumble client, and a serverless AWS backend collects results, computes rankings and serves a web interface for browsing results and replaying battles. We do not contribute to classic LiteRumble.
 
 **Hard constraint: the backend stays within the AWS free tier.** AWS never runs a battle or a robot. All simulation is done by volunteer clients; AWS only coordinates, stores and serves.
 
@@ -257,6 +258,7 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 - **Lambdas in Rust** (`cargo-lambda`, arm64), so they share the protocol and recording code with the rest of the project. Rust Lambdas start quickly and use little memory, so GB-seconds stay low.
 - **No API Gateway.** The HTTP API is only free for the first 12 months. Lambda **function URLs** sit behind CloudFront (origin access control), and everything is served from one domain, `rumble.planethofstede.be`. That means one certificate (ACM, us-east-1), no CORS and no separate API domain.
 - **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
+- **Website:** SvelteKit built with `adapter-static`, as a single-page app on S3 + CloudFront. Ranking pages read pre-computed JSON. Interactive features (login, bot submission, "watch", reputation and account pages) call the `/api` Lambdas from the browser, and those Lambdas read and write DynamoDB. Unknown paths fall back to `index.html` (CloudFront custom error response), so client-side routes like `/bot/<id>` work.
 - **Deployment:** the owner's AWS account, region **eu-west-1** (Ireland), DNS zone `planethofstede.be` in Route 53. The alias record is created by CDK via `HostedZone.fromLookup`. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack.
 
 ### 12.2 Free-tier budget
@@ -372,19 +374,19 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 - **Battle replay in the browser:** the engine and viewer are compiled to **WebAssembly** (WebGPU, with WebGL2 fallback) and play the recordings. Scrubbing works the same as in the desktop GUI (§11).
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 
-### 12.9 Classic LiteRumble (optional)
-
-Contributing to classic LiteRumble from robocode-s still depends on community acceptance (O1). The plan is unchanged: approach the community only after difftest shows bit-exact agreement over a large rumble corpus.
-
 ## 13. Compatibility reference and differential testing
 
-- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. Still, the version currently used by most RoboRumble clients must be confirmed (O2). If it differs, the harness also runs against that version.
+- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. The version used by current RoboRumble clients will be investigated in M1 (O2). Robots are tuned against that version, so if it differs in rule-relevant ways, the harness also runs against it.
 - **Harness (`tools/difftest`):**
   1. Runs a battle in classic Robocode via the `robocode.control` API (`RobocodeEngine`, `BattleListener`, `ITurnSnapshot`) with `RANDOMSEED`.
   2. Runs the same battle in robocode-s, deterministic mode, with the same seed.
   3. Compares per-turn snapshots field by field (positions, headings, energy, gun heat, bullets, events) and reports the first divergence with a diff of both states.
-- **Corpus:** the classic sample robots first, then a growing set of RoboRumble robots (1v1, melee, teams).
+- **Corpus:** the classic sample robots first (bundled, see §13.1), then a growing set of RoboRumble robots (1v1, melee, teams).
 - **CI:** the sample corpus runs on every PR, and the large corpus runs nightly.
+
+### 13.1 Bundled classic sample robots
+
+The 27 classic sample robots (`sample`, `sampleex`, `samplesentry`, `sampleteam`; Copyright 2001–2025 Mathew A. Nelson and Robocode contributors) are all EPL-1.0. They are **bundled in the repo and installer under EPL-2.0**, using EPL-1.0 §7, which allows distribution under a later version of the Agreement. The original copyright lines are kept, and each header gets a note that the file was relicensed from EPL-1.0. They serve as test corpus, examples and opponents for new users.
 
 ## 14. Future work
 
@@ -411,7 +413,7 @@ robocode-s/
 │   ├── api/                  # work, results, auth, submit, admin
 │   ├── codesize/             # class-file parser for weight classes
 │   └── rankings/
-├── web/                      # rumble website (static SPA)
+├── web/                      # rumble website (SvelteKit, adapter-static)
 ├── infra/                    # AWS CDK (TypeScript)
 ├── proto/                    # .proto schema (source of truth)
 ├── clients/
@@ -443,17 +445,17 @@ robocode-s/
 
 ## 17. Open questions
 
-- **O1** Will classic LiteRumble accept results from robocode-s? This is now optional, since we run our own rumble.
-- **O2** Which classic version do current rumble clients use? Are there rule-relevant differences from 1.11.1?
-- **O3** Container network isolation: is the relay approach acceptable, or are there simpler cross-platform options?
-- **O4** `Math` vs `StrictMath` divergence (§4.3): what exactly does "bit-exact" mean?
-- **O5** JRE distribution in local mode: bundle via `jlink`, download on demand, or require a user-installed Java?
-- **O6** Licensing of bundled classic sample robots. They are EPL-1.0, which permits distribution under later EPL versions; this needs confirmation for each file.
+- **O1** ~~LiteRumble contribution~~ Decided: no; it's a non-goal.
+- **O2** Which classic version do current rumble clients use? Are there rule-relevant differences from 1.11.1? *To investigate in M1.*
+- **O3** ~~Container network isolation~~ Decided: relay container on an internal Docker network (§6.3).
+- **O4** ~~Meaning of bit-exact~~ Decided: exact against classic with StrictMath (fdlibm) semantics (§4.3).
+- **O5** ~~JRE distribution~~ Decided: a pinned Temurin JRE, downloaded on demand (§6.1).
+- **O6** ~~Sample robot licensing~~ Decided: bundled under EPL-2.0. All 27 files were checked and carry the EPL-1.0 header (§13.1).
 - **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The API is served under `/api` on the same domain.
 - **O8** ~~Cross-check fraction~~ Decided: reputation-based, verified by volunteers only (§12.4). The exact numbers (start rate, floor, curve) get tuned once real data exists.
 - **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
+- **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
-- **O10** Frontend framework for `web/` (e.g. Svelte or React with Vite).
 
 ## 18. Decisions so far
 
@@ -470,6 +472,12 @@ robocode-s/
 | Remote robots | Supported (authenticated, TLS) |
 | GUI scope | Setup and viewer, recording and replay, rumble client |
 | Design doc location | In repo (`docs/design.md`) |
+| Classic LiteRumble | Not contributing (non-goal) |
+| Bit-exact definition | Against classic with StrictMath/fdlibm semantics |
+| Container network | Relay container on an internal Docker network |
+| Java runtime (local mode) | Pinned Temurin JRE, downloaded on demand |
+| Classic sample robots | Bundled under EPL-2.0 |
+| Rumble frontend | SvelteKit, static, with browser-side API calls |
 | Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
 | Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |
 | Robot jars | Mirrored to S3, with a takedown policy |
