@@ -1,13 +1,17 @@
 <script lang="ts">
 	// "Robocode" in classic's logo letters (classic-logo.ts), optionally followed by the S.
+	import FighterText from '#lib/components/FighterText.svelte';
 	import { ROBOCODE_D, ROBOCODE_WIDTH, S_D, S_OFFSET, S_WIDTH } from './classic-logo.ts';
 
 	interface Props {
 		height?: number;
 		/** Classic's translucent green with a glow, or solid fills (crisper when small). */
 		look?: 'glow' | 'solid';
-		/** Where the S goes: after the word, raised like an exponent, or left out. */
-		s?: 'inline' | 'super' | 'none';
+		/**
+		 * The S: in the letters' style after the word, raised like an exponent, the flame S of
+		 * FighterText, or left out.
+		 */
+		s?: 'inline' | 'super' | 'fighter' | 'none';
 		sColor?: string;
 	}
 	let { height = 32, look = 'glow', s = 'inline', sColor = '#ffb31f' }: Props = $props();
@@ -19,11 +23,12 @@
 	);
 </script>
 
+<span class="mark" role="img" aria-label="robocode-s" style:--h="{height}px">
+
 <svg
 	viewBox="{-PAD} {-PAD} {width + 2 * PAD} {46 + 2 * PAD}"
 	style:height="{height}px"
-	role="img"
-	aria-label="robocode-s"
+	aria-hidden="true"
 >
 	{#if look === 'glow'}
 		<defs>
@@ -40,7 +45,7 @@
 			stroke={look === 'glow' ? 'rgb(0 255 0 / 0.85)' : 'none'}
 			stroke-width="1.5"
 		/>
-		{#if s !== 'none'}
+		{#if s === 'inline' || s === 'super'}
 			<path
 				d={S_D}
 				transform={s === 'inline' ? `translate(${S_OFFSET} 0)` : `translate(${S_OFFSET} -2) scale(0.62)`}
@@ -51,8 +56,24 @@
 		{/if}
 	</g>
 </svg>
+{#if s === 'fighter'}
+	<span class="fighter"><FighterText text="S" height="{height * 1.75}px" /></span>
+{/if}
+</span>
 
 <style>
+	.mark {
+		display: inline-flex;
+		align-items: center;
+		white-space: nowrap;
+	}
+	/* The flame tails run under the end of the word. */
+	.fighter {
+		display: flex;
+		margin-left: calc(var(--h) * -0.62);
+		position: relative;
+		top: calc(var(--h) * 0.04);
+	}
 	svg {
 		display: inline-block;
 		vertical-align: middle;

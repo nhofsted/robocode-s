@@ -3,12 +3,13 @@
 	// decorations and the "Robocode" letters, optionally with the S and classic's tanks and
 	// explosions around it. 570 × 213, like the original.
 	import { drawTank, loadImage, loadSprites } from '#lib/components/sprites.ts';
+	import FighterText from '#lib/components/FighterText.svelte';
 	import { ROBOCODE_D, S_D, S_OFFSET } from './classic-logo.ts';
 
 	interface Props {
 		width?: number;
 		/** The S after "Robocode" inside the ellipse, as a seal on the ellipse's rim, or none. */
-		s?: 'inline' | 'badge' | 'none';
+		s?: 'inline' | 'badge' | 'fighter' | 'none';
 		tanks?: boolean;
 		sColor?: string;
 	}
@@ -23,7 +24,7 @@
 	for (let deg = 120; deg <= 335; deg += 4.8) rays.push(deg);
 
 	// With the S inline the letters move left so the word stays inside the inner ellipse.
-	const textX = $derived(s === 'inline' ? 101 : 121);
+	const textX = $derived(s === 'inline' ? 101 : s === 'fighter' ? 104 : 121);
 
 	const EXPLOSION = import.meta.glob<string>('../assets/classic/explosion/explosion1-{1,6,8,9}.png', {
 		eager: true,
@@ -153,6 +154,12 @@
 			</g>
 		{/if}
 	</svg>
+	{#if s === 'fighter'}
+		<!-- The flame S after "Robocode", overlapping the inner ellipse's rim. -->
+		<div class="fighter" style:left="{((textX + 318) / W) * 100}%" style:top="{(66 / H) * 100}%" style:height="{(84 / H) * 100}%">
+			<FighterText text="S" height="100%" />
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -161,6 +168,10 @@
 		display: inline-block;
 		background: #000;
 		border-radius: 4px;
+	}
+	.fighter {
+		position: absolute;
+		display: flex;
 	}
 	canvas,
 	svg {
