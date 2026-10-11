@@ -3,6 +3,7 @@
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
+	import { css } from '#lib/components/sprites.ts';
 	import { formatNumber, rumbleName, shortName } from '#lib/rumble/format.ts';
 	import type { PageProps } from './$types';
 
@@ -33,7 +34,7 @@
 	<section class="duel panel">
 		{#each sides as s, i (s.bot.id)}
 			<div class="side" class:right={i === 1}>
-				<Tank colors={tankColors(s.bot.id)} size={64} heading={i === 0 ? 90 : 270} />
+				<Tank colors={tankColors(s.bot.id)} size={88} heading={i === 0 ? 90 : 270} />
 				<div>
 					<a class="name" href={botHref(s.bot.id)}>{shortName(s.bot.id)}</a>
 					<div class="mono muted small">{s.bot.versions[0].version} · #{s.entry.rank}</div>
@@ -51,10 +52,10 @@
 			role="img"
 			aria-label="{shortName(data.a.id)} {formatNumber(scoreA, 1)}%, {shortName(data.b.id)} {formatNumber(100 - scoreA, 1)}%"
 		>
-			<div class="fill a" style:width="{scoreA}%" style:background={tankColors(data.a.id).body}>
+			<div class="fill a" style:width="{scoreA}%" style:background={css(tankColors(data.a.id).body)}>
 				<span>{formatNumber(scoreA, 1)}%</span>
 			</div>
-			<div class="fill b" style:width="{100 - scoreA}%" style:background={tankColors(data.b.id).body}>
+			<div class="fill b" style:width="{100 - scoreA}%" style:background={css(tankColors(data.b.id).body)}>
 				<span>{formatNumber(100 - scoreA, 1)}%</span>
 			</div>
 		</div>

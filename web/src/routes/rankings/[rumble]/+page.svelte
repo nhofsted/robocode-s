@@ -91,10 +91,7 @@
 				{data.summary.rounds} rounds on {data.summary.battlefield.width}×{data.summary.battlefield
 					.height} ·
 			{/if}
-			updated {formatDate(data.rankings.generatedAt)}
-			{#if data.rankings.fullMetricsAt}
-				(Glicko-2, ANPP and Vote {formatDate(data.rankings.fullMetricsAt)})
-			{/if}
+			updated daily, last {formatDate(data.rankings.generatedAt)}
 		</p>
 		<label class="search">
 			<span class="visually-hidden">Filter bots</span>
@@ -152,7 +149,7 @@
 						<td class="num change {c.cls}" title={c.label}>{c.text}</td>
 						<td class="bot">
 							<a href={resolve('/bot/[id]', { id: r.id }) + `?rumble=${data.rankings.rumble}`}>
-								<Tank colors={tankColors(r.id)} size={20} heading={90} />
+								<Tank colors={tankColors(r.id)} size={28} heading={90} />
 								<span class="name">{shortName(r.id)}</span>
 								<span class="pkg">{packageName(r.id)}</span>
 								<span class="ver mono">{r.version}</span>
@@ -162,7 +159,7 @@
 						{#each METRICS as m (m.key)}
 							<td class="num" class:key={m.key === sortKey}>{formatNumber(r[m.key], m.digits)}</td>
 						{/each}
-						<td class="num" class:incomplete={r.pairings < opponents}>
+						<td class="num" class:incomplete={r.pairings < 0.9 * opponents}>
 							{formatCount(r.pairings)}
 						</td>
 						<td class="num">{formatCount(r.battles)}</td>
@@ -174,8 +171,8 @@
 		</table>
 	</div>
 	<p class="muted legend">
-		Pairing counts in amber: the bot hasn't met every opponent yet, so its scores are still
-		settling. <a href={resolve('/docs/rumble')}>How scores are computed</a>
+		Pairing counts in amber: the bot has met fewer than 90% of its opponents, so its scores are
+		still settling. <a href={resolve('/docs/rumble')}>How scores are computed</a>
 	</p>
 </div>
 
@@ -228,7 +225,7 @@
 		text-decoration: none;
 		white-space: nowrap;
 	}
-	.bot :global(svg) {
+	.bot :global(canvas) {
 		align-self: center;
 	}
 	.name {

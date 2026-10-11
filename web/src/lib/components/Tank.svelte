@@ -1,7 +1,8 @@
 <script lang="ts">
-	// A top-down tank in the classic sprite's proportions. Headings in degrees, Robocode style:
-	// 0 is up (north), clockwise. Gun and radar headings are absolute, like getGunHeading().
-	import type { TankColors } from './tank-colors.ts';
+	// A robot drawn with classic Robocode's own sprites, recoloured like classic (sprites.ts).
+	// Headings in degrees, Robocode style: 0 is up, clockwise; gun and radar headings are absolute.
+	// `size` is the CSS size of a square frame that fits the tank with its gun in any direction.
+	import { drawTank, loadSprites, type TankColors } from './sprites.ts';
 
 	interface Props {
 		colors: TankColors;
@@ -13,38 +14,45 @@
 	}
 
 	let { colors, size = 32, heading = 0, gunHeading, radarHeading, label }: Props = $props();
-	const gun = $derived(gunHeading ?? heading);
-	const radar = $derived(radarHeading ?? gun);
+
+	/** Frame in sprite pixels: the turret image is 54 px long, centred on the tank. */
+	const FRAME = 56;
+	const RAD = Math.PI / 180;
+
+	let canvas: HTMLCanvasElement;
+
+	$effect(() => {
+		const gun = gunHeading ?? heading;
+		const radar = radarHeading ?? gun;
+		const px = Math.round(size * Math.min(3, devicePixelRatio || 1));
+		const c = colors;
+		const h = heading;
+		let cancelled = false;
+		loadSprites().then((sprites) => {
+			if (cancelled) return;
+			canvas.width = px;
+			canvas.height = px;
+			const ctx = canvas.getContext('2d')!;
+			ctx.clearRect(0, 0, px, px);
+			ctx.imageSmoothingQuality = 'high';
+			ctx.scale(px / FRAME, px / FRAME);
+			drawTank(ctx, sprites, c, FRAME / 2, FRAME / 2, h * RAD, gun * RAD, radar * RAD);
+		});
+		return () => (cancelled = true);
+	});
 </script>
 
-<svg
-	width={size}
-	height={size}
-	viewBox="-20 -20 40 40"
+<canvas
+	bind:this={canvas}
+	style:width="{size}px"
+	style:height="{size}px"
 	role={label ? 'img' : undefined}
 	aria-label={label}
 	aria-hidden={label ? undefined : 'true'}
->
-	<g transform="rotate({heading})">
-		<rect x="-16" y="-17" width="8" height="34" rx="1.5" fill="#262a26" />
-		<rect x="8" y="-17" width="8" height="34" rx="1.5" fill="#262a26" />
-		{#each [-13, -7, -1, 5, 11] as y (y)}
-			<rect x="-15" {y} width="6" height="2.5" fill="#3d433d" />
-			<rect x="9" {y} width="6" height="2.5" fill="#3d433d" />
-		{/each}
-		<rect x="-9" y="-13" width="18" height="26" rx="2" fill={colors.body} />
-	</g>
-	<g transform="rotate({gun})">
-		<rect x="-1.6" y="-21" width="3.2" height="16" fill={colors.gun} />
-		<circle r="6" fill={colors.gun} stroke="#0008" stroke-width="0.8" />
-	</g>
-	<g transform="rotate({radar})">
-		<path d="M -5 -1 Q 0 -6 5 -1 L 3 0.5 Q 0 -3 -3 0.5 Z" fill={colors.radar} />
-	</g>
-</svg>
+></canvas>
 
 <style>
-	svg {
+	canvas {
 		display: inline-block;
 		vertical-align: middle;
 		flex: none;

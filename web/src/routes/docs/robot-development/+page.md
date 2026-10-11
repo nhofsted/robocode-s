@@ -88,9 +88,11 @@ Battles are random: start positions and a lot of robot behavior differ every rou
 -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=localhost:5005
 ```
 
-> **Status:** planned: an option for the runner and GUI to start one robot with that flag and wait for your IDE.
+> **Status:** planned ([#17](https://github.com/nhofsted/robocode-s/issues/17)): an option for the runner and GUI to start one robot with that flag and wait for your IDE.
 
-Use deterministic mode while debugging. In classic mode, a robot paused at a breakpoint misses its turns and gets disabled; in deterministic mode the engine waits for your robot, so you can step through a turn and continue the same battle. (Deterministic mode still disables a robot that exceeds a hard limit per turn; the planned debug option lifts that limit for the robot being debugged.) Combine it with a seed to stop at the exact turn where things go wrong.
+Use deterministic mode while debugging. In classic mode, a robot paused at a breakpoint misses its turns and gets disabled. In deterministic mode budgets count the work your code does, not time, and a paused robot does no work, so you can step through a turn and continue the same battle; the debug option only switches off the server's wall-clock safety check for that robot.
+
+One caveat: debugger features that run your code (watch expressions, `toString()` in the variables view) count as work and can change your robot's state, so the battle may then go differently than without the debugger. Combine it with a seed to stop at the exact turn where things go wrong.
 
 **Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. Replays in the browser (M5b) show what happened; a local re-run under your debugger shows why.
 

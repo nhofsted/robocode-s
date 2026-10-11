@@ -1,5 +1,5 @@
-// The rumble data contract, version 1: the JSON files the rankings Lambda writes to S3
-// and the website reads (docs/rumble-data.md). This file is the source of truth for the
+// The rumble data contract, version 1: the JSON files the rankings Lambda writes to S3 once
+// a day, and the website reads (docs/rumble-data.md). This file is the source of truth for the
 // field semantics; the Rust side mirrors it.
 //
 // Conventions: percentages are numbers in 0–100, timestamps are ISO 8601 UTC strings,
@@ -46,21 +46,20 @@ export interface Metrics {
 	pwin: number;
 	/** Average percentage of rounds survived. */
 	survival: number;
-	/** Glicko-2 rating. Recomputed by the daily full pass; null until the first one. */
-	glicko: number | null;
+	/** Glicko-2 rating. */
+	glicko: number;
 	/** Glicko-2 rating deviation. */
-	glickoRd: number | null;
+	glickoRd: number;
 	/**
 	 * Average normalised percentage pairs: per opponent, this bot's pairing score scaled
 	 * between the lowest (0) and highest (100) score any bot got against that opponent.
-	 * Daily full pass; null until the first one.
 	 */
-	anpp: number | null;
+	anpp: number;
 	/**
 	 * Every bot votes for the opponent that scores best against it; this is the share of all
-	 * votes. Daily full pass; null until the first one.
+	 * votes.
 	 */
-	vote: number | null;
+	vote: number;
 }
 
 /** `/data/v1/rankings/<rumble>.json` */
@@ -68,8 +67,6 @@ export interface Rankings {
 	schema: typeof SCHEMA_VERSION;
 	rumble: RumbleId;
 	generatedAt: string;
-	/** When `glicko`, `anpp` and `vote` were last computed (null: never). */
-	fullMetricsAt: string | null;
 	/** Sorted by APS, best first. */
 	bots: RankingRow[];
 }
@@ -137,12 +134,12 @@ export interface Pairing {
 	/** Average percentage of rounds this bot survived. */
 	survival: number;
 	/** The pairing score normalised against all bots' scores vs this opponent (see `anpp`). */
-	normalized: number | null;
+	normalized: number;
 }
 
 export interface HistoryPoint {
 	date: string;
 	rank: number;
 	aps: number;
-	glicko: number | null;
+	glicko: number;
 }

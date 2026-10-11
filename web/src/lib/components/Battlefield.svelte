@@ -1,7 +1,21 @@
 <script lang="ts">
 	// Decorative battlefield for the home page: a few tanks wander, sweep their radars and fire.
-	// Not the engine (that arrives as WebAssembly for replays, design §12.8), just a backdrop.
+	// Not the engine (that arrives as WebAssembly for replays, design §12.8), just a backdrop,
+	// drawn with classic Robocode's sprites and bullet explosion.
 	// One still frame with prefers-reduced-motion; paused while off-screen.
+	import { drawTank, loadImage, loadSprites, type RGB, type Sprites } from './sprites.ts';
+
+	const EXPLOSION = Object.values(
+		import.meta.glob<string>('../assets/classic/explosion/*.png', {
+			eager: true,
+			query: '?url',
+			import: 'default'
+		})
+	).sort((a, b) => frameNo(a) - frameNo(b));
+
+	function frameNo(url: string): number {
+		return Number(/explosion1-(\d+)/.exec(url)?.[1] ?? 0);
+	}
 
 	interface Props {
 		tanks?: number;
@@ -10,12 +24,12 @@
 
 	let canvas: HTMLCanvasElement;
 
-	const COLORS = [
-		['#3f8a4f', '#9fd4a8', '#ffd75e'],
-		['#8a3f3f', '#d9a0a0', '#5ee3d6'],
-		['#3f5f8a', '#a4bde0', '#ffb35e'],
-		['#7a6a35', '#d8cc98', '#ff7af0'],
-		['#5a3f8a', '#c0a8e6', '#9cff5e']
+	const COLORS: [RGB, RGB, RGB][] = [
+		[[63, 138, 79], [159, 212, 168], [255, 215, 94]],
+		[[160, 50, 50], [217, 160, 160], [94, 227, 214]],
+		[[50, 90, 160], [164, 189, 224], [255, 179, 94]],
+		[[150, 125, 40], [216, 204, 152], [255, 122, 240]],
+		[[100, 60, 160], [192, 168, 230], [156, 255, 94]]
 	];
 
 	interface Bot {
@@ -27,8 +41,7 @@
 		speed: number;
 		turn: number;
 		heat: number;
-		energy: number;
-		colors: string[];
+		colors: [RGB, RGB, RGB];
 		target: number;
 	}
 	interface Bullet {
@@ -43,7 +56,7 @@
 		x: number;
 		y: number;
 		t: number;
-		size: number;
+		scale: number;
 	}
 
 	$effect(() => {
@@ -57,6 +70,8 @@
 		const bots: Bot[] = [];
 		const bullets: Bullet[] = [];
 		const blasts: Blast[] = [];
+		let sprites: Sprites | undefined;
+		let frames: HTMLImageElement[] = [];
 		let seed = 7;
 		const rand = () => {
 			seed = (seed * 16807) % 2147483647;
@@ -83,7 +98,6 @@
 				speed: 0,
 				turn: 0,
 				heat: 1 + rand() * 2,
-				energy: 100,
 				colors: COLORS[i % COLORS.length],
 				target: (i + 1) % tanks
 			});
@@ -136,22 +150,20 @@
 					(b, i) => i !== u.owner && Math.abs(b.x - u.x) < 18 && Math.abs(b.y - u.y) < 18
 				);
 				if (hit >= 0 || u.x < 0 || u.y < 0 || u.x > width || u.y > height) {
-					if (hit >= 0) blasts.push({ x: u.x, y: u.y, t: 0, size: 8 + u.power * 4 });
+					// Classic's scale for a bullet explosion.
+					if (hit >= 0) blasts.push({ x: u.x, y: u.y, t: 0, scale: Math.sqrt(1000 * u.power) / 128 });
 					bullets.splice(k, 1);
 				}
 			}
 			for (let k = blasts.length - 1; k >= 0; k--) {
-				blasts[k].t += 0.06 * dt;
-				if (blasts[k].t >= 1) blasts.splice(k, 1);
+				blasts[k].t += 0.5 * dt;
+				if (blasts[k].t >= EXPLOSION.length) blasts.splice(k, 1);
 			}
 		};
 
-		const drawTank = (b: Bot) => {
-			const [body, gun, radar] = b.colors;
+		const drawBeam = (b: Bot) => {
 			ctx.save();
 			ctx.translate(b.x, b.y);
-			// Radar beam.
-			ctx.save();
 			ctx.rotate(b.radar);
 			const beam = ctx.createLinearGradient(0, 0, 0, -220);
 			beam.addColorStop(0, 'rgba(94,227,138,0.18)');
@@ -163,33 +175,17 @@
 			ctx.closePath();
 			ctx.fill();
 			ctx.restore();
-
-			ctx.rotate(b.heading);
-			ctx.fillStyle = '#262a26';
-			ctx.fillRect(-16, -17, 8, 34);
-			ctx.fillRect(8, -17, 8, 34);
-			ctx.fillStyle = '#3d433d';
-			for (let y = -13; y <= 11; y += 6) {
-				ctx.fillRect(-15, y, 6, 2.5);
-				ctx.fillRect(9, y, 6, 2.5);
-			}
-			ctx.fillStyle = body;
-			ctx.fillRect(-9, -13, 18, 26);
-			ctx.rotate(b.gun - b.heading);
-			ctx.fillStyle = gun;
-			ctx.fillRect(-1.6, -21, 3.2, 16);
-			ctx.beginPath();
-			ctx.arc(0, 0, 6, 0, Math.PI * 2);
-			ctx.fill();
-			ctx.rotate(b.radar - b.gun);
-			ctx.fillStyle = radar;
-			ctx.fillRect(-5, -3, 10, 2.5);
-			ctx.restore();
 		};
 
 		const draw = () => {
 			ctx.clearRect(0, 0, width, height);
-			for (const b of bots) drawTank(b);
+			for (const b of bots) drawBeam(b);
+			if (sprites) {
+				for (const b of bots) {
+					const [body, gun, radar] = b.colors;
+					drawTank(ctx, sprites, { body, gun, radar }, b.x, b.y, b.heading, b.gun, b.radar);
+				}
+			}
 			ctx.fillStyle = '#ffc25c';
 			for (const u of bullets) {
 				ctx.beginPath();
@@ -197,10 +193,11 @@
 				ctx.fill();
 			}
 			for (const e of blasts) {
-				ctx.fillStyle = `rgba(255, ${Math.round(200 - 140 * e.t)}, 80, ${1 - e.t})`;
-				ctx.beginPath();
-				ctx.arc(e.x, e.y, e.size * (0.4 + e.t), 0, Math.PI * 2);
-				ctx.fill();
+				const img = frames[Math.floor(e.t)];
+				if (!img) continue;
+				const w = img.naturalWidth * e.scale;
+				const h = img.naturalHeight * e.scale;
+				ctx.drawImage(img, e.x - w / 2, e.y - h / 2, w, h);
 			}
 		};
 
@@ -214,6 +211,12 @@
 			}
 			frame = requestAnimationFrame(loop);
 		};
+
+		Promise.all([loadSprites(), Promise.all(EXPLOSION.map(loadImage))]).then(([s, f]) => {
+			sprites = s;
+			frames = f;
+			if (reduce) draw();
+		});
 
 		if (reduce) {
 			for (let i = 0; i < 90; i++) step(1);
