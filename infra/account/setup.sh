@@ -76,6 +76,17 @@ fi
 echo "$USER_NAME has $PERMISSION_SET"
 
 step "SCP $SCP_NAME"
+# SCPs must be enabled on the root first. That attaches FullAWSAccess everywhere, which changes no
+# permissions, and SCPs never apply to the management account.
+ROOT_ID=$(mgmt organizations list-roots --query 'Roots[0].Id' --output text)
+scp_status() {
+	mgmt organizations list-roots \
+		--query "Roots[0].PolicyTypes[?Type=='SERVICE_CONTROL_POLICY'].Status | [0]" --output text
+}
+if [[ $(scp_status) == None ]]; then
+	mgmt organizations enable-policy-type --root-id "$ROOT_ID" --policy-type SERVICE_CONTROL_POLICY >/dev/null
+fi
+until [[ $(scp_status) == ENABLED ]]; do sleep 5; done
 POLICY_ID=$(mgmt organizations list-policies --filter SERVICE_CONTROL_POLICY \
 	--query "Policies[?Name=='$SCP_NAME'].Id | [0]" --output text)
 if [[ $POLICY_ID == None ]]; then
