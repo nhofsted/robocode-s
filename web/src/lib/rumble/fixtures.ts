@@ -43,6 +43,7 @@ export interface Fixtures {
 interface Bot {
 	id: BotId;
 	author: string;
+	country: string | null;
 	skill: number;
 	style: number;
 	versions: BotVersion[];
@@ -99,6 +100,8 @@ const NAME_FIRST = ['Iron', 'Silent', 'Crimson', 'Rapid', 'Lunar', 'Neon', 'Ghos
 const NAME_SECOND = ['Viper', 'Comet', 'Tortoise', 'Mirage', 'Hornet', 'Bastion', 'Specter', 'Lancer', 'Gecko', 'Raven', 'Golem', 'Wisp', 'Falcon', 'Badger', 'Kestrel', 'Puma', 'Orbit', 'Sentry', 'Drifter', 'Moth', 'Pike', 'Yeti', 'Beetle', 'Nomad'];
 const TEAM_SUFFIX = ['Team', 'Squad', 'Pack', 'Crew'];
 const AUTHOR_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night'];
+/** Authors' countries, weighted roughly like a programming community; '' is no flag. */
+const COUNTRIES = ['us', 'us', 'us', 'br', 'br', 'de', 'de', 'nl', 'be', 'gb', 'gb', 'fr', 'pl', 'cz', 'fi', 'se', 'ca', 'au', 'nz', 'jp', 'cn', 'kr', 'in', 'ru', 'ua', 'es', 'it', 'pt', 'ar', 'za', '', '', ''];
 const AUTHOR_SECOND = ['coder', 'gunner', 'wave', 'tank', 'robo', 'owl', 'fox', 'shark', 'surfer', 'smith'];
 
 export function createFixtures(options: FixtureOptions = {}): Fixtures {
@@ -150,7 +153,7 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		return {
 			schema: SCHEMA_VERSION,
 			id,
-			author: { name: b.author, github: hash(id) % 3 === 0 ? b.author : null },
+			author: { name: b.author, github: hash(id) % 3 === 0 ? b.author : null, country: b.country },
 			description: hash(id) % 4 === 0 ? null : `${shortName(id)}: a ${b.weightClass} bot.`,
 			homepage: hash(id) % 2 === 0 ? `https://robowiki.net/wiki/${shortName(id)}` : null,
 			versions: b.versions,
@@ -187,6 +190,7 @@ function createBots(rand: () => number, size: number, now: Date): Bot[] {
 		bots.push({
 			id,
 			author,
+			country: author === 'Mathew A. Nelson' ? 'us' : COUNTRIES[hash(author) % COUNTRIES.length] || null,
 			skill: strength,
 			style: rand() * Math.PI * 2,
 			versions,
@@ -342,6 +346,21 @@ function buildRumble(
 	const rankOf = new Int32Array(n);
 	order.forEach((i, r) => (rankOf[i] = r + 1));
 
+	// KNN-PBI: score minus the average score of the neighbours by APS against the same opponent.
+	const halfK = Math.ceil(Math.sqrt(n) / 2);
+	const pbi = (i: number, j: number): number => {
+		const r = rankOf[i] - 1;
+		let sum = 0;
+		let count = 0;
+		for (let q = Math.max(0, r - halfK); q <= Math.min(n - 1, r + halfK); q++) {
+			const nb = order[q];
+			if (nb === i || Number.isNaN(score[nb][j])) continue;
+			sum += score[nb][j];
+			count++;
+		}
+		return count ? score[i][j] - sum / count : 0;
+	};
+
 	const details = new Map<BotId, BotRumble>();
 	const rows: RankingRow[] = order.map((i) => {
 		const bot = members[i];
@@ -361,7 +380,8 @@ function buildRumble(
 				normalized: round(
 					maxVs[j] > minVs[j] ? (100 * (s - minVs[j])) / (maxVs[j] - minVs[j]) : 50,
 					2
-				)
+				),
+				pbi: round(pbi(i, j), 2)
 			});
 		}
 		const rounded = roundMetrics(m);
@@ -370,6 +390,7 @@ function buildRumble(
 			id: bot.id,
 			version: bot.versions[0].version,
 			author: bot.author,
+			country: bot.country,
 			rank: rankOf[i],
 			...rounded,
 			pairings: m.pairings,

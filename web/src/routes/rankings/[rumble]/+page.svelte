@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import Flag from '#lib/components/Flag.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
@@ -155,7 +156,7 @@
 								<span class="ver mono">{r.version}</span>
 							</a>
 						</td>
-						<td class="author">{r.author}</td>
+						<td class="author"><Flag code={r.country} /> {r.author}</td>
 						{#each METRICS as m (m.key)}
 							<td class="num" class:key={m.key === sortKey}>{formatNumber(r[m.key], m.digits)}</td>
 						{/each}

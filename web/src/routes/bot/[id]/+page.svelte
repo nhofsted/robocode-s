@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import HistoryChart from '#lib/components/HistoryChart.svelte';
+	import { goto } from '$app/navigation';
+	import Flag from '#lib/components/Flag.svelte';
 	import PairingStrip from '#lib/components/PairingStrip.svelte';
+	import ScatterChart from '#lib/components/ScatterChart.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
@@ -35,6 +38,35 @@
 
 	const best = $derived([...pairings].sort((a, b) => b.score - a.score).slice(0, 5));
 	const worst = $derived([...pairings].sort((a, b) => a.score - b.score).slice(0, 5));
+	const problems = $derived([...pairings].sort((a, b) => a.pbi - b.pbi).slice(0, 5));
+
+	// LiteRumble's bot charts: how this bot does against each opponent, by opponent strength.
+	const opponents = $derived(new Map(data.rankings.bots.map((r) => [r.id, r])));
+	const dots = (y: (p: Row) => number, x: (o: { aps: number; survival: number }) => number) =>
+		pairings.flatMap((p) => {
+			const o = opponents.get(p.opponent);
+			return o
+				? [{ id: p.opponent, name: shortName(p.opponent), x: x(o), y: y(p), href: pairingHref(p.opponent) }]
+				: [];
+		});
+	const scoreDots = $derived(dots((p) => p.score, (o) => o.aps));
+	const survivalDots = $derived(dots((p) => p.survival, (o) => o.survival));
+	const pbiDots = $derived(dots((p) => p.pbi, (o) => o.aps));
+	const pbiRange = $derived.by((): [number, number] => {
+		const m = Math.max(10, ...pairings.map((p) => Math.abs(p.pbi)));
+		const r = Math.ceil(m / 10) * 10;
+		return [-r, r];
+	});
+
+	let compareWith = $state('');
+	const compareIds = $derived(new Set(data.rankings.bots.map((r) => r.id)));
+	function compare(event: SubmitEvent) {
+		event.preventDefault();
+		const other = compareWith.trim();
+		if (compareIds.has(other) && other !== bot.id) {
+			goto(resolve('/compare/[rumble]/[a]/[b]', { rumble, a: bot.id, b: other }));
+		}
+	}
 
 	const HISTORY = [
 		{ key: 'aps', label: 'APS', digits: 2, invert: false },
@@ -48,7 +80,7 @@
 	);
 	const releases = $derived(bot.versions.map((v) => ({ date: v.addedAt, label: `v${v.version}` })));
 
-	type SortKey = 'opponentRank' | 'opponent' | 'score' | 'survival' | 'normalized' | 'battles';
+	type SortKey = 'opponentRank' | 'opponent' | 'score' | 'survival' | 'normalized' | 'pbi' | 'battles';
 	let sortKey: SortKey = $state('score');
 	let direction: 'asc' | 'desc' = $state('desc');
 	let query = $state('');
@@ -88,6 +120,7 @@
 			<h1>{shortName(bot.id)} <span class="version mono">{current.version}</span></h1>
 			<p class="sub">
 				<span class="mono muted">{packageName(bot.id)}</span> · by
+				<Flag code={bot.author.country} />
 				{#if bot.author.github}
 					<a href="https://github.com/{bot.author.github}">{bot.author.name}</a>
 				{:else}
@@ -165,10 +198,33 @@
 		<h2>Pairings</h2>
 		<PairingStrip bot={bot.id} {rumble} {pairings} />
 
+		<div class="scatters">
+			<ScatterChart title="Score by opponent strength" dots={scoreDots} xLabel="Opponent APS" yLabel="Score" />
+			<ScatterChart
+				title="Survival by opponent survival"
+				dots={survivalDots}
+				xLabel="Opponent survival"
+				yLabel="Survival"
+			/>
+			<ScatterChart
+				title="Problem bots (KNN-PBI)"
+				dots={pbiDots}
+				xLabel="Opponent APS"
+				yLabel="Score vs. similar bots"
+				yDomain={pbiRange}
+				ref={0}
+				signed
+			/>
+		</div>
+		<p class="muted note">
+			KNN-PBI compares this bot's score against each opponent with the scores of the bots ranked
+			closest to it: below zero, the opponent is a problem bot for this one.
+		</p>
+
 		<div class="extremes">
-			{#each [{ title: 'Best', list: best }, { title: 'Worst', list: worst }] as group (group.title)}
+			{#each [{ title: 'Best pairings', list: best }, { title: 'Worst pairings', list: worst }] as group (group.title)}
 				<div class="panel">
-					<h3>{group.title} pairings</h3>
+					<h3>{group.title}</h3>
 					<ol>
 						{#each group.list as p (p.opponent)}
 							<li>
@@ -179,6 +235,33 @@
 					</ol>
 				</div>
 			{/each}
+		</div>
+
+		<div class="extremes problems">
+			<div class="panel">
+				<h3>Problem bots <span class="muted">(lowest KNN-PBI)</span></h3>
+				<ol>
+					{#each problems as p (p.opponent)}
+						<li>
+							<a href={pairingHref(p.opponent)}>{shortName(p.opponent)}</a>
+							<span class="num score" style:background={scoreHeat(50 + p.pbi)}>{p.pbi > 0 ? '+' : ''}{formatNumber(p.pbi, 1)}</span>
+						</li>
+					{/each}
+				</ol>
+			</div>
+			<form class="panel compare" onsubmit={compare}>
+				<h3>Compare</h3>
+				<label for="compare-with">Compare {shortName(bot.id)} with another bot, opponent by opponent:</label>
+				<div class="row">
+					<input id="compare-with" type="search" list="compare-bots" placeholder="Bot name" bind:value={compareWith} />
+					<button type="submit" disabled={!compareIds.has(compareWith.trim()) || compareWith.trim() === bot.id}>Compare</button>
+				</div>
+				<datalist id="compare-bots">
+					{#each data.rankings.bots as r (r.id)}
+						{#if r.id !== bot.id}<option value={r.id}></option>{/if}
+					{/each}
+				</datalist>
+			</form>
 		</div>
 
 		<div class="table-tools">
@@ -197,6 +280,7 @@
 						<th class="num" title="This bot's percent score against the opponent"><button class="sort" aria-pressed={sortKey === 'score'} onclick={() => sortBy('score')}>Score {arrow('score')}</button></th>
 						<th class="num" title="Rounds survived"><button class="sort" aria-pressed={sortKey === 'survival'} onclick={() => sortBy('survival')}>Surv {arrow('survival')}</button></th>
 						<th class="num" title="Score normalised against all bots' scores vs this opponent"><button class="sort" aria-pressed={sortKey === 'normalized'} onclick={() => sortBy('normalized')}>NPP {arrow('normalized')}</button></th>
+						<th class="num" title="Score minus the score of the bots ranked closest to this one, against this opponent"><button class="sort" aria-pressed={sortKey === 'pbi'} onclick={() => sortBy('pbi')}>PBI {arrow('pbi')}</button></th>
 						<th class="num"><button class="sort" aria-pressed={sortKey === 'battles'} onclick={() => sortBy('battles')}>Battles {arrow('battles')}</button></th>
 					</tr>
 				</thead>
@@ -207,12 +291,14 @@
 							<td>
 								<a class="opp" href={pairingHref(p.opponent)}>
 									<Tank colors={tankColors(p.opponent)} size={26} heading={270} />
+									<Flag code={opponents.get(p.opponent)?.country} />
 									{shortName(p.opponent)} <span class="mono muted">{p.opponentVersion}</span>
 								</a>
 							</td>
 							<td class="num score" style:background={scoreHeat(p.score)}>{formatNumber(p.score, 2)}</td>
 							<td class="num">{formatNumber(p.survival, 1)}</td>
 							<td class="num">{formatNumber(p.normalized, 1)}</td>
+							<td class="num">{p.pbi > 0 ? '+' : ''}{formatNumber(p.pbi, 1)}</td>
 							<td class="num">{p.battles}</td>
 						</tr>
 					{/each}
@@ -359,6 +445,34 @@
 		padding: 0 0.4rem;
 		border-radius: 3px;
 		font-size: 0.85rem;
+	}
+	.scatters {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+		gap: 1rem;
+		margin-top: 1.2rem;
+		padding: 1rem;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+	}
+	.note {
+		font-size: 0.8rem;
+	}
+	.compare label {
+		display: block;
+		font-size: 0.85rem;
+		color: var(--text-2);
+		margin-bottom: 0.5rem;
+	}
+	.compare .row {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.compare input {
+		flex: 1;
+		min-width: 10rem;
 	}
 	.table-tools {
 		display: flex;

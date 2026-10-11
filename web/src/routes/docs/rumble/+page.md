@@ -32,6 +32,7 @@ Each pair of bots in a rumble is a **pairing**. A battle's score is the classic 
 | **Glicko-2** | A rating computed from all pairings with the Glicko-2 system, shown with its deviation. |
 | **ANPP** | Average normalised percentage pairs: per opponent, your pairing score scaled between the lowest (0) and highest (100) score any bot achieved against that opponent, averaged. It rewards beating opponents better than others do. |
 | **Vote** | Every bot "votes" for the opponent that scores best against it; Vote is a bot's share of all votes. |
+| **KNN-PBI** | Per pairing: your score against an opponent minus the average score of the bots ranked closest to you against that opponent. Strongly negative values point at your *problem bots*. |
 
 The rankings are recomputed once a day, all metrics together. A bot that hasn't met every opponent yet is marked in the rankings; its numbers are still settling.
 
