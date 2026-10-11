@@ -49,11 +49,12 @@
 
 /* No background on html: the body's background then paints the whole canvas, beneath the home
    page's battlefield layer (z-index -1). */
-/* Always reserve the scrollbar's gutter, so the centered layout (and the logo) sits at the same
-   x on pages that scroll and pages that don't. */
+/* Always show the scrollbar, so the centered layout (and the logo) sits at the same x on pages
+   that scroll and pages that don't. Not scrollbar-gutter: an empty gutter misses the fixed
+   floor tiles and shows as a bare strip. */
 html {
 	-webkit-text-size-adjust: 100%;
-	scrollbar-gutter: stable;
+	overflow-y: scroll;
 }
 
 body {
