@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import FighterText from '#lib/components/FighterText.svelte';
+	import Flag from '#lib/components/Flag.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
 	import { css } from '#lib/components/sprites.ts';
@@ -38,7 +39,10 @@
 				<Tank colors={tankColors(s.bot.id)} size={88} heading={i === 0 ? 90 : 270} />
 				<div>
 					<a class="name" href={botHref(s.bot.id)}>{shortName(s.bot.id)}</a>
-					<div class="mono muted small">{s.bot.versions[0].version} · #{s.entry.rank}</div>
+					<div class="muted small">
+						<Flag code={s.bot.author.country} /> {s.bot.author.name} ·
+						<span class="mono">{s.bot.versions[0].version} · #{s.entry.rank}</span>
+					</div>
 				</div>
 			</div>
 			{#if i === 0}<div class="vs"><FighterText text="VS" height="3.2rem" /></div>{/if}
@@ -95,6 +99,12 @@
 			</table>
 		</div>
 	{/if}
+
+	<p>
+		<a href={resolve('/compare/[rumble]/[a]/[b]', { rumble, a: data.a.id, b: data.b.id })}
+			>Compare {shortName(data.a.id)} and {shortName(data.b.id)} against all their opponents</a
+		>
+	</p>
 
 	<section class="replay panel">
 		<h2>Watch a battle</h2>

@@ -55,8 +55,7 @@
 			robocode-s is open source under the
 			<a href="https://www.eclipse.org/legal/epl-2.0/">Eclipse Public License 2.0</a>.
 			It reimplements <a href="https://robocode.sourceforge.io/">Robocode</a>, created by
-			Mathew A. Nelson and maintained by Flemming N. Larsen and contributors; it is an
-			independent project, not affiliated with them.
+			Mathew A. Nelson and maintained by Flemming N. Larsen and contributors.
 		</p>
 	</div>
 </footer>

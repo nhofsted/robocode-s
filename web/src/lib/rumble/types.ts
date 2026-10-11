@@ -75,6 +75,8 @@ export interface RankingRow extends Metrics {
 	id: BotId;
 	version: string;
 	author: string;
+	/** The author's country (see `Author.country`). */
+	country: string | null;
 	/** Rank by APS, 1-based. */
 	rank: number;
 	/** Opponents this bot has fought at least once. */
@@ -103,6 +105,8 @@ export interface Author {
 	name: string;
 	/** GitHub login, once the author has claimed the bot. */
 	github: string | null;
+	/** Country the author chose for their flag, ISO 3166-1 alpha-2 in lower case; null: none. */
+	country: string | null;
 }
 
 export interface BotVersion {
@@ -139,6 +143,12 @@ export interface Pairing {
 	survival: number;
 	/** The pairing score normalised against all bots' scores vs this opponent (see `anpp`). */
 	normalized: number;
+	/**
+	 * Problem-bot index (LiteRumble's KNN-PBI): this bot's score against the opponent minus the
+	 * average score of its neighbours by APS (⌈√n / 2⌉ ranks on either side) against the same
+	 * opponent. Negative: a problem bot for this bot; positive: it does better than expected.
+	 */
+	pbi: number;
 }
 
 export interface HistoryPoint {
