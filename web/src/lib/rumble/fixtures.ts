@@ -134,7 +134,6 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			schema: SCHEMA_VERSION,
 			rumble,
 			generatedAt,
-			fullMetricsAt: isoDay(now, 0) + 'T03:00:00.000Z',
 			bots: r.rows
 		};
 	};
@@ -325,15 +324,14 @@ function buildRumble(
 			norm += maxVs[j] > minVs[j] ? (100 * (s - minVs[j])) / (maxVs[j] - minVs[j]) : 50;
 		}
 		const aps = pairings ? sum / pairings : 50;
-		const settled = bot.addedDay >= 1;
 		return {
 			aps,
 			pwin: pairings ? (100 * wins) / pairings : 0,
 			survival: pairings ? surv / pairings : 0,
-			glicko: settled ? 1500 + (aps - 50) * 14 + 6 * gaussian(rand) : null,
-			glickoRd: settled ? 18 + 60 / Math.sqrt(1 + total / 40) : null,
-			anpp: settled && pairings ? norm / pairings : null,
-			vote: settled ? (100 * votes[i]) / n : null,
+			glicko: 1500 + (aps - 50) * 14 + 6 * gaussian(rand),
+			glickoRd: 18 + 60 / Math.sqrt(1 + total / 40),
+			anpp: pairings ? norm / pairings : 50,
+			vote: (100 * votes[i]) / n,
 			battles: total,
 			pairings
 		};
@@ -359,10 +357,10 @@ function buildRumble(
 				battles: battles[i][j],
 				score: round(s, 2),
 				survival: round(survival[i][j], 2),
-				normalized:
-					m.anpp === null
-						? null
-						: round(maxVs[j] > minVs[j] ? (100 * (s - minVs[j])) / (maxVs[j] - minVs[j]) : 50, 2)
+				normalized: round(
+					maxVs[j] > minVs[j] ? (100 * (s - minVs[j])) / (maxVs[j] - minVs[j]) : 50,
+					2
+				)
 			});
 		}
 		const rounded = roundMetrics(m);
@@ -414,13 +412,13 @@ function createHistory(
 			date: isoDay(now, -k),
 			rank: Math.round(r),
 			aps: round(aps, 2),
-			glicko: glicko === null ? null : round(glicko, 1)
+			glicko: round(glicko, 1)
 		});
 		// Younger versions settle from noisier early estimates.
 		const jitter = k > days - 10 ? 1.5 : 0.25;
 		aps = clamp(aps + jitter * gaussian(rand) * 0.4, 0, 100);
 		r = clamp(r + jitter * gaussian(rand) * Math.max(1, n / 200), 1, n);
-		if (glicko !== null) glicko += jitter * gaussian(rand) * 4;
+		glicko += jitter * gaussian(rand) * 4;
 	}
 	return points.reverse();
 }
@@ -430,10 +428,10 @@ function roundMetrics(m: Metrics): Metrics {
 		aps: round(m.aps, 2),
 		pwin: round(m.pwin, 2),
 		survival: round(m.survival, 2),
-		glicko: m.glicko === null ? null : round(m.glicko, 1),
-		glickoRd: m.glickoRd === null ? null : round(m.glickoRd, 1),
-		anpp: m.anpp === null ? null : round(m.anpp, 2),
-		vote: m.vote === null ? null : round(m.vote, 2)
+		glicko: round(m.glicko, 1),
+		glickoRd: round(m.glickoRd, 1),
+		anpp: round(m.anpp, 2),
+		vote: round(m.vote, 2)
 	};
 }
 

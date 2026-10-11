@@ -8,7 +8,7 @@
 
 	let { children }: LayoutProps = $props();
 
-	const LOGO = { body: '#3f8a4f', gun: '#9fd4a8', radar: '#ffc25c' };
+	const LOGO = { body: [63, 138, 79], gun: [159, 212, 168], radar: [255, 194, 92] } as const;
 
 	const nav = [
 		{ href: '/rankings', label: 'Rankings' },
@@ -21,7 +21,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="icon" href="/favicon.png" type="image/png" />
 </svelte:head>
 
 <a class="skip" href="#main">Skip to content</a>
@@ -29,7 +29,7 @@
 <header>
 	<div class="container bar">
 		<a class="logo" href={resolve('/')} aria-label="robocode-s home">
-			<Tank colors={LOGO} size={28} heading={0} gunHeading={45} radarHeading={80} />
+			<Tank colors={LOGO} size={36} heading={0} gunHeading={45} radarHeading={80} />
 			<span class="pixel">robocode-s</span>
 		</a>
 		<nav aria-label="Main">

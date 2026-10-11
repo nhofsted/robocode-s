@@ -289,7 +289,7 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 | Lambda | 1M requests + 400k GB-s / month | Rust on arm64 with small memory; clients fetch work and upload results in **batches**, not one request per battle |
 | DynamoDB | 25 GB storage, 25 RCU + 25 WCU **provisioned** | Provisioned mode (on-demand is not covered by the free tier) and no auto-scaling beyond 25; aggregates instead of per-battle rows (§12.6) |
 | CloudFront | 1 TB transfer + 10M requests / month | Site, ranking JSON, jars and recordings are all served through CloudFront and cached |
-| EventBridge Scheduler | 14M invocations / month | A few scheduled ranking runs per day |
+| EventBridge Scheduler | 14M invocations / month | One scheduled ranking run per day |
 | CloudWatch Logs | 5 GB ingestion | Low log level and short retention (7 days) |
 | SSM Parameter Store | Standard parameters free | GitHub OAuth secret stored there (not Secrets Manager, which costs $0.40/month per secret) |
 | ACM | Public certificates free | — |
@@ -356,8 +356,7 @@ DynamoDB holds only aggregates; there are no per-battle rows.
 Write cost: a battle costs roughly 4–10 WCU (transactional), so 25 WCU sustains about 3 battles/s, more than 200k battles/day. Batching uploads smooths out spikes.
 
 Rankings:
-- **Cheap metrics** (APS, PWIN, survival) come from per-bot aggregates. A scheduled Lambda writes them as JSON to S3 a few times per day.
-- **Metrics that need all pairings** (Glicko-2, ANPP, Vote, pairing matrices) come from a slow, rate-limited scan once a day, kept inside the free read capacity. The output is per-division JSON files plus per-bot pairing files.
+- **Once a day** a scheduled Lambda computes all metrics together: APS, PWIN and survival from the per-bot aggregates; Glicko-2, ANPP, Vote and pairing matrices from a slow, rate-limited scan of the pairing statistics, kept inside the free read capacity. It writes the data files of `docs/rumble-data.md`: per-rumble rankings and per-bot files with pairings and history. The website shows the rumble as of that run.
 - **History:** a daily snapshot of each bot's rank and score, appended to small per-bot JSON files, for trend charts.
 
 ### 12.7 Recordings and replays

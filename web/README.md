@@ -37,4 +37,4 @@ Library imports use `#lib/...` with the file extension (SvelteKit 3).
 
 - **Pretty URLs:** prerendered pages are `docs/about.html` etc. A CloudFront Function maps an extensionless path to `<path>.html` (and `/` to `/index.html`).
 - **SPA fallback:** 403/404 from S3 → `/200.html` with status 200, so `/bot/<id>` and other data pages render in the browser. Data requests under `/data/` must keep their 404.
-- **Caching:** `_app/immutable/*` forever; HTML and `data/*` short (minutes).
+- **Caching:** `_app/immutable/*` forever; HTML short (minutes); `data/*` until shortly after the next daily rankings run.

@@ -6,9 +6,9 @@ export const METRICS: { key: MetricKey; label: string; title: string; digits: nu
 	{ key: 'aps', label: 'APS', title: 'Average percent score over all pairings', digits: 2 },
 	{ key: 'pwin', label: 'PWIN', title: 'Percentage of pairings won', digits: 1 },
 	{ key: 'survival', label: 'Surv', title: 'Average percentage of rounds survived', digits: 1 },
-	{ key: 'glicko', label: 'Glicko-2', title: 'Glicko-2 rating (daily)', digits: 0 },
-	{ key: 'anpp', label: 'ANPP', title: 'Average normalised percentage pairs (daily)', digits: 1 },
-	{ key: 'vote', label: 'Vote', title: 'Share of opponents this bot scores best against (daily)', digits: 2 }
+	{ key: 'glicko', label: 'Glicko-2', title: 'Glicko-2 rating', digits: 0 },
+	{ key: 'anpp', label: 'ANPP', title: 'Average normalised percentage pairs', digits: 1 },
+	{ key: 'vote', label: 'Vote', title: 'Share of votes: each bot votes for the opponent that scores best against it', digits: 2 }
 ];
 
 export const DIVISION_NAMES: Record<Division, string> = {

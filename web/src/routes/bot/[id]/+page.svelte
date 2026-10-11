@@ -82,7 +82,7 @@
 	</p>
 
 	<header class="head">
-		<Tank colors={tankColors(bot.id)} size={72} heading={20} gunHeading={60} radarHeading={100} />
+		<Tank colors={tankColors(bot.id)} size={88} heading={20} gunHeading={60} radarHeading={100} />
 		<div>
 			<h1>{shortName(bot.id)} <span class="version mono">{current.version}</span></h1>
 			<p class="sub">
@@ -126,7 +126,7 @@
 				<span class="label">{m.label}</span>
 				<span class="value mono">
 					{formatNumber(entry[m.key], m.digits)}
-					{#if m.key === 'glicko' && entry.glickoRd !== null}<small>±{formatNumber(entry.glickoRd, 0)}</small>{/if}
+					{#if m.key === 'glicko'}<small>±{formatNumber(entry.glickoRd, 0)}</small>{/if}
 				</span>
 			</div>
 		{/each}
@@ -204,7 +204,7 @@
 							<td class="num">{p.opponentRank ?? '–'}</td>
 							<td>
 								<a class="opp" href={pairingHref(p.opponent)}>
-									<Tank colors={tankColors(p.opponent)} size={18} heading={270} />
+									<Tank colors={tankColors(p.opponent)} size={26} heading={270} />
 									{shortName(p.opponent)} <span class="mono muted">{p.opponentVersion}</span>
 								</a>
 							</td>
