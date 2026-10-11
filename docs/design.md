@@ -1,6 +1,6 @@
 # robocode-s — Design Document
 
-Status: **Draft** · Last updated: 2026-10-10
+Status: **Draft** · Last updated: 2026-10-11
 
 ## 1. Summary
 
@@ -75,7 +75,7 @@ Components:
 | `gui` | Rust (wgpu + egui) | Battle setup, viewer, debug painting, replay. Connects as an observer and can embed a server. |
 | `cli` | Rust | Headless battles, batch runs, recordings, rumble client. |
 | `rumble/*` | Rust (Lambdas) | Rumble backend: work assignment, result intake, auth, submission, rankings. AWS never runs battles. |
-| `web` | SvelteKit (static) + WASM | Rumble website and in-browser replay viewer. |
+| `web` | SvelteKit (static) + WASM | Rumble website, user documentation and in-browser replay viewer. |
 | `infra` | TypeScript (CDK) | AWS infrastructure for the rumble. |
 | `clients/java-compat` | Java | Drop-in replacement for `robocode.jar`, implementing the classic API on top of the protocol. |
 | `clients/*` | various | Native robot APIs for Java/Kotlin, Python, .NET, Rust and C/C++. |
@@ -279,7 +279,7 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 - **Lambdas in Rust** (`cargo-lambda`, arm64), so they share the protocol and recording code with the rest of the project. Rust Lambdas start quickly and use little memory, so GB-seconds stay low.
 - **No API Gateway.** The HTTP API is only free for the first 12 months. Lambda **function URLs** sit behind CloudFront (origin access control), and everything is served from one domain, `rumble.planethofstede.be`. That means one certificate (ACM, us-east-1), no CORS and no separate API domain.
 - **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
-- **Website:** SvelteKit built with `adapter-static`, as a single-page app on S3 + CloudFront. Ranking pages read pre-computed JSON. Interactive features (login, bot submission, "watch", reputation and account pages) call the `/api` Lambdas from the browser, and those Lambdas read and write DynamoDB. Unknown paths fall back to `index.html` (CloudFront custom error response), so client-side routes like `/bot/<id>` work.
+- **Website:** SvelteKit built with `adapter-static` on S3 + CloudFront (ADR 0015). It also hosts the user documentation. The home page and docs are prerendered; ranking, bot and pairing pages render in the browser from pre-computed JSON (`docs/rumble-data.md`). Interactive features (login, bot submission, "watch", reputation and account pages) call the `/api` Lambdas from the browser, and those Lambdas read and write DynamoDB. Unknown paths fall back to `200.html` (CloudFront custom error response), so client-side routes like `/bot/<id>` work; a CloudFront Function maps extensionless URLs to the prerendered `.html` files (`web/README.md`).
 - **Deployment:** the owner's AWS account, region **eu-west-1** (Ireland), DNS zone `planethofstede.be` in Route 53. The alias record is created by CDK via `HostedZone.fromLookup`. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack.
 
 ### 12.2 Free-tier budget
@@ -394,6 +394,9 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 - Pairing pages: per-pairing statistics and a "watch a battle" button (§12.7).
 - **Battle replay in the browser:** the engine and viewer are compiled to **WebAssembly** (WebGPU, with WebGL2 fallback) and play the recordings. Scrubbing works the same as in the desktop GUI (§11).
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
+- **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
+- **Data contract:** the rankings Lambda writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). Until it exists, the site's dev server serves seeded synthetic data in the same format.
+- **Look:** retro Robocode: the dark battlefield, radar green, a pixel display font.
 
 ## 13. Compatibility reference and differential testing
 
@@ -477,7 +480,7 @@ robocode-s/
 - **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The API is served under `/api` on the same domain.
 - **O8** ~~Cross-check fraction~~ Decided: reputation-based, verified by volunteers only (§12.4). The exact numbers (start rate, floor, curve) get tuned once real data exists.
 - **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
-- **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1).
+- **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1, ADR 0015).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
@@ -502,7 +505,7 @@ robocode-s/
 | Container network | Relay container on an internal Docker network |
 | Java runtime (local mode) | Pinned Temurin JRE, downloaded on demand |
 | Classic sample robots | Bundled under EPL-2.0 |
-| Rumble frontend | SvelteKit, static, with browser-side API calls |
+| Rumble frontend | SvelteKit, static, with browser-side API calls; also hosts the user documentation |
 | Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
 | Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |
 | Robot jars | Mirrored to S3, with a takedown policy |
