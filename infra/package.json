@@ -1,0 +1,27 @@
+{
+	"name": "robocode-s-infra",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"build:site": "pnpm -C ../web build && node ../web/tools/sample-data.ts .sample-data",
+		"synth": "cdk synth --quiet",
+		"diff": "cdk diff --profile robocode-s",
+		"deploy": "pnpm build:site && cdk deploy --all --profile robocode-s",
+		"typecheck": "tsc -p tsconfig.json",
+		"test": "node --test 'test/**/*.test.ts'"
+	},
+	"dependencies": {
+		"aws-cdk-lib": "^2.271.0",
+		"constructs": "^10.8.1"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0",
+		"aws-cdk": "^2.1145.0",
+		"typescript": "^7.0.2"
+	},
+	"packageManager": "pnpm@12.6.0",
+	"engines": {
+		"node": ">=24"
+	}
+}

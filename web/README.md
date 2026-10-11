@@ -33,7 +33,7 @@ Library imports use `#lib/...` with the file extension (SvelteKit 3).
 
 ## Hosting
 
-`build/` is uploaded to the site bucket; the rankings Lambda writes `data/v1/` next to it. CloudFront needs:
+`build/` is uploaded to the site bucket; the rankings Lambda writes `data/v1/` next to it. Until it runs, `node tools/sample-data.ts <dir>` writes the sample data as files, which the deploy publishes there. The stacks are in `infra/` (`infra/README.md`). CloudFront needs:
 
 - **Pretty URLs:** prerendered pages are `docs/about.html` etc. A CloudFront Function maps an extensionless path to `<path>.html` (and `/` to `/index.html`).
 - **SPA fallback:** 403/404 from S3 → `/200.html` with status 200, so `/bot/<id>` and other data pages render in the browser. Data requests under `/data/` must keep their 404.
