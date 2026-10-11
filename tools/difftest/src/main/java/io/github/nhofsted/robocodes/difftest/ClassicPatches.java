@@ -26,6 +26,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * as {@code RobotPeer.waitSleeping} already is. It changes timing only, never the
  * outcome of a battle.
  *
+ * <p>{@code RobotPeer.waitWakeup} waits at most 10 seconds for a robot thread to wake
+ * up, also in debug mode. Under heavy load the robot can still count as asleep then: the
+ * battle moves on without it, the robot skips turns and, after 30, is disabled. The patch
+ * waits until the robot is awake, so recordings don't depend on the machine's load.
+ *
  * <p>(The per-robot {@code Utils.getRandom()} of ADR 0010 is done by the determinism
  * agent, which the robocode-s Java robot host uses too.)
  *
@@ -60,6 +65,21 @@ public final class ClassicPatches {
         if (!((AtomicBoolean) isSleeping).get()) {
             isSleeping.wait(millis, nanos);
         }
+    }
+
+    /** How long the battle waits at most for a robot thread to wake up (classic: 10 seconds). */
+    static final long WAKEUP_MILLIS = 600_000;
+
+    /**
+     * Replacement for {@code isSleeping.wait(10000)} in {@code RobotPeer.waitWakeup}: the same
+     * wait for the robot thread's notification that it woke up, but at most 10 minutes (as
+     * debug mode waits elsewhere) instead of 10 seconds. Classic gives up after 10 seconds
+     * of wall-clock time, even in debug mode; under heavy load the robot then still counts
+     * as asleep, the battle moves on without it and the robot skips turns. (Not a loop on
+     * the flag: a fast robot is already asleep again for the next turn when this wakes.)
+     */
+    public static void waitUntilAwake(Object isSleeping, long millis) throws InterruptedException {
+        isSleeping.wait(Math.max(millis, WAKEUP_MILLIS));
     }
 
     private static final class Transformer implements ClassFileTransformer {
@@ -106,6 +126,23 @@ public final class ClassicPatches {
                                 }
                             };
                         }
+                        if (name.equals("waitWakeup") && descriptor.equals("()V")) {
+                            return new MethodVisitor(Opcodes.ASM9, mv) {
+                                @Override
+                                public void visitMethodInsn(int opcode, String owner, String method, String desc,
+                                        boolean isInterface) {
+                                    if (opcode == Opcodes.INVOKEVIRTUAL && owner.equals("java/lang/Object")
+                                            && method.equals("wait") && desc.equals("(J)V")) {
+                                        replaced[0]++;
+                                        super.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                                "io/github/nhofsted/robocodes/difftest/ClassicPatches",
+                                                "waitUntilAwake", "(Ljava/lang/Object;J)V", false);
+                                    } else {
+                                        super.visitMethodInsn(opcode, owner, method, desc, isInterface);
+                                    }
+                                }
+                            };
+                        }
                         if (!name.equals("startRound")) {
                             return mv;
                         }
@@ -138,8 +175,9 @@ public final class ClassicPatches {
                 if (hooked[0] != 5) {
                     throw new IllegalStateException("expected 5 hooked RobotPeer methods, found " + hooked[0]);
                 }
-                if (replaced[0] != 1) {
-                    throw new IllegalStateException("expected one wait() in RobotPeer.startRound, found " + replaced[0]);
+                if (replaced[0] != 2) {
+                    throw new IllegalStateException("expected one wait() each in RobotPeer.startRound and waitWakeup, found "
+                            + replaced[0]);
                 }
                 return writer.toByteArray();
             } catch (Throwable t) {

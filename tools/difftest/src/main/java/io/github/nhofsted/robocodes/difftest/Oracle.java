@@ -43,8 +43,7 @@ import java.util.zip.GZIPOutputStream;
  * <p>The recording is the reference ("oracle") for differential tests against
  * the robocode-s engine (design §13). Classic must run deterministically and
  * with StrictMath semantics (ADR 0003), which requires these JVM flags:
- * {@code -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives -XX:+UnlockExperimentalVMOptions
- * -XX:hashCode=2 -Ddebug=true}.
+ * {@code -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives -Ddebug=true}.
  * They are verified at startup. Classic's security mode stays on, as in the RoboRumble.
  *
  * <p>Robots' own randomness ({@code Math.random()}, {@code new Random()}) is not
@@ -85,11 +84,6 @@ public final class Oracle {
         }
         if (!"true".equals(System.getProperty("debug"))) {
             throw new IllegalStateException("-Ddebug=true is required: without it, classic skips turns based on timing");
-        }
-        // Identity hash codes must not depend on thread creation order (ADR 0013).
-        if (new Object().hashCode() != 1 || new Object().hashCode() != 1) {
-            throw new IllegalStateException("identity hash codes must be constant: run with "
-                    + "-XX:+UnlockExperimentalVMOptions -XX:hashCode=2 (ADR 0013)");
         }
         // With math intrinsics enabled, Math.sin differs from StrictMath.sin for a few
         // percent of inputs; 10,000 samples will find a difference with certainty.

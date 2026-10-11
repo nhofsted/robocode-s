@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.WeakHashMap;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -27,6 +28,8 @@ import java.util.function.Supplier;
  *   Math.random: new java.util.Random(mix64(base ^ 0x4D41544852414E44L)).nextDouble()
  *   k-th new Random() (k = 1, 2, ...): seed = mix64(base + k * 0x9E3779B97F4A7C15L)
  *   Utils.getRandom(): one new java.util.Random(mix64(base ^ 0x5554494C53524E44L)) per robot
+ *   k-th identity hash code (k = 1, 2, ...):
+ *     h = (int) (mix64((base ^ 0x4944454E54495459L) + k * 0x9E3779B97F4A7C15L) >>> 33), 1 if 0
  * </pre>
  * where {@code mix64} is the SplitMix64 finalizer. Calls from threads that do
  * not belong to a robot keep the JDK's normal behavior.
@@ -48,12 +51,90 @@ public final class RobotRandomness {
      * patch that reads this hook.
      */
     public static final String UTILS_RANDOM_KEY = "robocodes.determinism.utilsRandom";
+    /**
+     * System property key of the identity hash hook (a {@code ToIntFunction<Object>}), used
+     * by robot classes and {@code Enum.hashCode()} as rewritten by the agent (ADR 0013).
+     */
+    static final String IDENTITY_HASH_KEY = "robocodes.determinism.identityHash";
+    /** Hook giving robot classes their robot's work counter (a {@code Function<ClassLoader, long[]>}). */
+    static final String FUEL_KEY = "robocodes.determinism.fuel";
+    /** Virtual {@code System.nanoTime()} for robot code (a {@code ToLongFunction<long[]>}). */
+    static final String CLOCK_NANOS_KEY = "robocodes.determinism.clockNanos";
+    /** Virtual {@code System.currentTimeMillis()} for robot code (a {@code ToLongFunction<long[]>}). */
+    static final String CLOCK_MILLIS_KEY = "robocodes.determinism.clockMillis";
+    /** Called by classic's robot side on every turn of a robot thread (a {@code Runnable}). */
+    static final String TURN_KEY = "robocodes.determinism.turn";
+
+    /*
+     * The virtual clock (ADR 0014). Part of the deterministic rules: changing a constant
+     * changes what time-reading robots do.
+     */
+    /** Virtual time per counted instruction, in picoseconds (calibrated, #15). */
+    public static final long PICOS_PER_INSTRUCTION = 1000;
+    /** Virtual time per turn besides the robot's own work: waiting for the others. */
+    public static final long TURN_NANOS = 1_000_000;
+    /** Value of the virtual {@code nanoTime()} before the robot did anything. */
+    public static final long NANO_ORIGIN = 1_000_000_000_000L;
+    /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
+    public static final long EPOCH_MILLIS = 1_767_225_600_000L;
+
+    /** Work counters, one per robot class loader (in classic: one per robot). */
+    private static final Map<ClassLoader, long[]> FUEL = new WeakHashMap<>();
 
     private static final long MATH_SALT = 0x4D41544852414E44L; // "MATHRAND"
     private static final long UTILS_SALT = 0x5554494C53524E44L; // "UTILSRND"
+    private static final long HASH_SALT = 0x4944454E54495459L; // "IDENTITY"
     private static final long GOLDEN_GAMMA = 0x9E3779B97F4A7C15L;
 
     private static volatile boolean agentInstalled;
+    /**
+     * Diagnostics: with {@code -Drobocodes.traceDeterminism=<file>}, every identity hash,
+     * {@code new Random()} and virtual clock read of a robot is appended to the file with a
+     * short stack, to compare runs (e.g. classic and robocode-s) where they diverge.
+     */
+    private static final String TRACE = System.getProperty("robocodes.traceDeterminism");
+
+    private static final ThreadLocal<Boolean> TRACING = ThreadLocal.withInitial(() -> false);
+
+    private static void trace(String what) {
+        // Writing the trace hashes JDK objects itself; don't trace that.
+        if (TRACE == null || TRACING.get()) {
+            return;
+        }
+        TRACING.set(true);
+        try {
+            traceLine(what);
+        } finally {
+            TRACING.set(false);
+        }
+    }
+
+    private static void traceLine(String what) {
+        StringBuilder b = new StringBuilder(Thread.currentThread().getThreadGroup().getName()).append(' ').append(what);
+        int shown = 0;
+        for (StackTraceElement e : new Throwable().getStackTrace()) {
+            String c = e.getClassName();
+            if (c.startsWith("io.github.nhofsted.robocodes.determinism") || c.startsWith("java.")) {
+                continue;
+            }
+            b.append(" < ").append(c).append('.').append(e.getMethodName());
+            if (++shown == 3) {
+                break;
+            }
+        }
+        b.append('\n');
+        synchronized (RobotRandomness.class) {
+            try {
+                java.nio.file.Files.writeString(java.nio.file.Path.of(TRACE), b,
+                        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }
+    }
+
+    /** The configured battle, for the identity hash hook (installed before configuration). */
+    private static volatile RobotRandomness current;
 
     private final long battleSeed;
     private final List<String> robotNames;
@@ -79,6 +160,31 @@ public final class RobotRandomness {
         System.getProperties().put(MATH_RANDOM_KEY, (DoubleSupplier) randomness::mathRandom);
         System.getProperties().put(RANDOM_SEED_KEY, (Supplier<Long>) randomness::nextSeed);
         System.getProperties().put(UTILS_RANDOM_KEY, (Supplier<Random>) randomness::utilsRandom);
+        current = randomness;
+    }
+
+    /**
+     * The identity hash code for an object first hashed now: for the robot's own objects
+     * (classes its class loader defined) on a robot thread, the next value of the robot's
+     * identity hash stream; otherwise the JVM's own. Other enum constants, e.g. the JDK's,
+     * keep the JVM's: they are also hashed by code that isn't the robot's (in robocode-s,
+     * the robot host's protocol code runs on the robot thread), which would shift the
+     * robot's sequence.
+     */
+    static int identityHash(Object o) {
+        if (!IdentityHashes.isRobotClassLoader(o.getClass().getClassLoader())) {
+            return System.identityHashCode(o);
+        }
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream == null) {
+            return System.identityHashCode(o);
+        }
+        int hash = stream.nextHash();
+        if (TRACE != null) {
+            trace("hash " + o.getClass().getName() + " " + hash);
+        }
+        return hash;
     }
 
     /** Whether the agent rewrote {@code Math.random()} and {@code new Random()}. */
@@ -99,7 +205,14 @@ public final class RobotRandomness {
     /** Seed for a robot's next {@code new Random()}, or null outside robot threads. */
     private Long nextSeed() {
         Stream stream = currentStream();
-        return stream == null ? null : stream.nextSeed();
+        if (stream == null) {
+            return null;
+        }
+        long seed = stream.nextSeed();
+        if (TRACE != null) {
+            trace("newRandom " + seed);
+        }
+        return seed;
     }
 
     /** The robot's {@code Utils.getRandom()} instance, or null outside robot threads. */
@@ -149,6 +262,58 @@ public final class RobotRandomness {
         return mix64(baseSeed ^ UTILS_SALT);
     }
 
+    /** The work counter of the robot whose classes {@code loader} defines. */
+    static Object fuel(Object loader) {
+        synchronized (FUEL) {
+            return FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
+        }
+    }
+
+    /** One more turn for the robot of the current thread. */
+    static void turn() {
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream != null) {
+            stream.turn();
+        }
+    }
+
+    /** Virtual time a robot has spent: its turns and its counted work. */
+    public static long elapsedNanos(long turns, long instructions) {
+        return turns * TURN_NANOS + instructions * PICOS_PER_INSTRUCTION / 1000;
+    }
+
+    private static long elapsedNanos(Object fuel) {
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        return elapsedNanos(stream == null ? 0 : stream.turns(), ((long[]) fuel)[0]);
+    }
+
+    static long virtualNanos(Object fuel) {
+        long nanos = NANO_ORIGIN + elapsedNanos(fuel);
+        if (TRACE != null) {
+            trace("nanoTime " + nanos);
+        }
+        return nanos;
+    }
+
+    static long virtualMillis(Object fuel) {
+        long millis = EPOCH_MILLIS + elapsedNanos(fuel) / 1_000_000;
+        if (TRACE != null) {
+            trace("currentTimeMillis " + millis);
+        }
+        return millis;
+    }
+
+    /**
+     * The k-th (1-based) identity hash code a robot hands out. Like HotSpot's: 31 bits,
+     * never 0.
+     */
+    public static int identityHashCode(long baseSeed, long k) {
+        int hash = (int) (mix64((baseSeed ^ HASH_SALT) + k * GOLDEN_GAMMA) >>> 33);
+        return hash == 0 ? 1 : hash;
+    }
+
     /** SplitMix64 finalizer. */
     static long mix64(long z) {
         z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
@@ -171,6 +336,8 @@ public final class RobotRandomness {
         private final Random math;
         final Random utils;
         private long created;
+        private long hashed;
+        private long turns;
 
         Stream(long base) {
             this.base = base;
@@ -184,6 +351,18 @@ public final class RobotRandomness {
 
         synchronized long nextSeed() {
             return randomSeed(base, ++created);
+        }
+
+        synchronized int nextHash() {
+            return identityHashCode(base, ++hashed);
+        }
+
+        synchronized void turn() {
+            turns++;
+        }
+
+        synchronized long turns() {
+            return turns;
         }
     }
 }

@@ -12,6 +12,8 @@ repositories {
 
 dependencies {
     implementation(libs.asm)
+    implementation(libs.asm.commons)
+    implementation(libs.asm.tree)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

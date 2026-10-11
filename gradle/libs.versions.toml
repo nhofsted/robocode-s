@@ -14,6 +14,8 @@ kotlin-stdlib-classic = { module = "org.jetbrains.kotlin:kotlin-stdlib", version
 robocode-classic-host = { module = "net.sf.robocode:robocode.host", version.ref = "robocode-classic" }
 robocode-classic-repository = { module = "net.sf.robocode:robocode.repository", version.ref = "robocode-classic" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
+asm-commons = { module = "org.ow2.asm:asm-commons", version.ref = "asm" }
+asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

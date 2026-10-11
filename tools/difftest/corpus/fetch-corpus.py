@@ -3,6 +3,7 @@
 """A reproducible corpus of RoboRumble robots for differential testing (#11).
 
   fetch-corpus.py select --manifest corpus.json --jars DIR [--seed N --duel N --melee N --teams N]
+                         [--avoid earlier.json ...]
       Picks robots at random (seeded) from the current RoboWiki participant lists,
       downloads and validates them, and writes the manifest (names, sources, SHA-256).
   fetch-corpus.py download --manifest corpus.json --jars DIR
@@ -67,6 +68,10 @@ def select(args):
     jars.mkdir(parents=True, exist_ok=True)
     rng = random.Random(args.seed)
     chosen, names = [], {}
+    # Robots already tested in earlier batches (by name, any version) are skipped.
+    tested = set()
+    for m in args.avoid:
+        tested |= {r["name"] for r in json.loads(Path(m).read_text())["robots"]}
     for pool, count in [("duel", args.duel), ("melee", args.melee), ("teams", args.teams)]:
         entries = participants(LISTS[pool])
         rng.shuffle(entries)
@@ -74,6 +79,8 @@ def select(args):
         for e in entries:
             if picked == count:
                 break
+            if e["name"] in tested:
+                continue
             if e["name"] in names:
                 # Already chosen for another pool: reuse it if it's the same version.
                 c = names[e["name"]]
@@ -131,6 +138,7 @@ def main():
     s.add_argument("--duel", type=int, default=40)
     s.add_argument("--melee", type=int, default=20)
     s.add_argument("--teams", type=int, default=8)
+    s.add_argument("--avoid", nargs="*", default=[], help="manifests of earlier batches")
     d = sub.add_parser("download")
     d.add_argument("--manifest", required=True)
     d.add_argument("--jars", required=True)

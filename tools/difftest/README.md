@@ -95,7 +95,11 @@ python3 tools/difftest/corpus/run-corpus.py --manifest tools/difftest/corpus/rum
   --jars /tmp/corpus-jars --out /tmp/corpus-run --check-oracle
 ```
 
-`fetch-corpus.py select` draws a new selection from the current RoboWiki participant lists. Each result is one of:
+`fetch-corpus.py select --avoid <earlier manifests>` draws a new batch of robots that weren't tested before (e.g. `batch-2.json`).
+
+The runner works in two phases:
+- **Classic recordings** run with `--oracle-jobs` parallelism (default 4). Classic is only reproducible at moderate load (#16), and a recording is stopped after 15 minutes (a robot stuck in a loop).
+- **Live battles** run with `--jobs` parallelism. Robot JVMs need memory, so `--big-jobs` limits the melee and team battles running at once. Each result is one of:
 - **`OK`:** identical.
 - **`FAIL`:** a robocode-s difference.
 - **`RACE`:** a known classic race (engine-spec §15.3). Only the rounds before it count.

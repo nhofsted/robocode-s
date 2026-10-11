@@ -54,10 +54,6 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     if launch.deterministic {
         args.push("-XX:+UnlockDiagnosticVMOptions".into());
         args.push("-XX:-InlineMathNatives".into());
-        // Identity hash codes all 1: iteration order of identity-keyed hash collections
-        // then depends only on the robot's own actions (ADR 0013).
-        args.push("-XX:+UnlockExperimentalVMOptions".into());
-        args.push("-XX:hashCode=2".into());
         args.push(format!("-javaagent:{}", host.agent_jar.display()));
     }
     args.push("-cp".into());
@@ -201,7 +197,6 @@ mod tests {
         };
         let args = jvm_args(&host, &launch);
         assert!(args.contains(&"-XX:-InlineMathNatives".to_string()));
-        assert!(args.contains(&"-XX:hashCode=2".to_string()));
         assert!(args.contains(&"-javaagent:/opt/agent.jar".to_string()));
         assert!(args.windows(2).any(|w| w[0] == "--seed" && w[1] == "42"));
         launch.deterministic = false;

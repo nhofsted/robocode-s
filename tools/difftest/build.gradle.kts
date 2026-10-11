@@ -45,8 +45,6 @@ val oracleJvmArgs = listOf(
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
     "-XX:+UnlockDiagnosticVMOptions",
     "-XX:-InlineMathNatives",
-    "-XX:+UnlockExperimentalVMOptions",
-    "-XX:hashCode=2",
     "-Ddebug=true",
 )
 

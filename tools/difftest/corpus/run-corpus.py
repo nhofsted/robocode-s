@@ -11,10 +11,11 @@ Needs: ./gradlew :tools:difftest:installDist :robots:samples:jar \\
 The oracle uses `java` from PATH; the live battles use ROBOCODES_JAVA if set, else the
 pinned Temurin JRE (a different JVM build is part of the test).
 """
-import argparse, concurrent.futures, gzip, itertools, json, os, random, re, subprocess, sys, time
+import argparse, concurrent.futures, gzip, itertools, json, os, random, re, subprocess, sys, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+ORACLE_TIMEOUT = 15 * 60
 
 
 def plan(manifest, seed, duels, melees, team_battles):
@@ -61,8 +62,7 @@ def oracle(battle, jars, recordings, suffix=""):
     cmd = ["java", "-Xmx1g",
            "--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED",
            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-           "-XX:+UnlockDiagnosticVMOptions", "-XX:-InlineMathNatives",
-           "-XX:+UnlockExperimentalVMOptions", "-XX:hashCode=2", "-Ddebug=true",
+           "-XX:+UnlockDiagnosticVMOptions", "-XX:-InlineMathNatives", "-Ddebug=true",
            f"-javaagent:{agent}", f"-javaagent:{next(lib.glob('difftest-*.jar'))}",
            f"-Drobocodes.difftest.robotJars={samples}", "-cp", f"{lib}/*",
            "io.github.nhofsted.robocodes.difftest.Oracle",
@@ -71,7 +71,11 @@ def oracle(battle, jars, recordings, suffix=""):
            "--out", str(out.with_suffix(".tmp.gz"))]
     log = recordings / f"{battle['name']}{suffix}.oracle.log"
     with open(log, "w") as f:
-        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=f)
+        try:
+            # A robot stuck in an endless loop makes classic wait 10 minutes per turn.
+            r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=f, timeout=ORACLE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None, f"oracle timed out after {ORACLE_TIMEOUT} s (a robot stuck in a loop?), see {log}"
     if r.returncode != 0:
         return None, f"oracle failed (exit {r.returncode}), see {log}"
     out.with_suffix(".tmp.gz").rename(out)
@@ -134,7 +138,12 @@ def main():
     p.add_argument("--duels", type=int, default=28)
     p.add_argument("--melees", type=int, default=4)
     p.add_argument("--team-battles", type=int, default=4)
-    p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) // 2))
+    p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) // 2),
+                   help="live battles at once")
+    p.add_argument("--oracle-jobs", type=int, default=4,
+                   help="classic recordings at once (classic is sensitive to load, #16)")
+    p.add_argument("--big-jobs", type=int, default=2,
+                   help="at most this many melee and team battles at once (each runs many JVMs)")
     p.add_argument("--check-oracle", action="store_true",
                    help="record every battle twice in classic and require identical recordings")
     args = p.parse_args()
@@ -147,29 +156,56 @@ def main():
     battles = plan(manifest, args.seed, args.duels, args.melees, args.team_battles)
     (out / "plan.json").write_text(json.dumps(battles, indent=1) + "\n")
     total_rounds = sum(b["rounds"] for b in battles)
-    print(f"{len(battles)} battles, {total_rounds} rounds; {args.jobs} jobs", flush=True)
+    print(f"{len(battles)} battles, {total_rounds} rounds; {args.oracle_jobs} classic and {args.jobs} live jobs",
+          flush=True)
 
     results = {}
     start = time.time()
 
-    def run(battle):
+    def report(name, result):
+        results[name] = result
+        first = result.splitlines()[0] if result else "(no output)"
+        print(f"[{time.time() - start:6.0f}s] {name}: {first[:300]}", flush=True)
+
+    # Phase 1: classic. Its timing depends on the machine's load (#16), so it runs with
+    # limited parallelism.
+    def record(battle):
         recording, error = oracle(battle, jars, recordings)
         if error:
-            return battle["name"], "ORACLE-FAIL " + error
+            return battle, None, "ORACLE-FAIL " + error
         if args.check_oracle:
             again, error = oracle(battle, jars, recordings, ".check")
             if error:
-                return battle["name"], "ORACLE-FAIL " + error
+                return battle, None, "ORACLE-FAIL " + error
             differs = same_recording(recording, again)
             if differs:
-                return battle["name"], differs
+                return battle, None, differs
+        return battle, recording, None
+
+    recorded = []
+    with concurrent.futures.ThreadPoolExecutor(args.oracle_jobs) as pool:
+        for battle, recording, problem in pool.map(record, battles):
+            if problem:
+                report(battle["name"], problem)
+            else:
+                recorded.append((battle, recording))
+    print(f"[{time.time() - start:6.0f}s] classic recordings done; live battles next", flush=True)
+
+    # Phase 2: robocode-s, deterministic under any load. Melee and team battles start
+    # many JVMs each, so fewer of them run at once.
+    big = threading.Semaphore(args.big_jobs)
+
+    def fight(item):
+        battle, recording = item
+        if len(battle["robots"]) > 2:
+            with big:
+                return battle["name"], live(recording, jars, out)
         return battle["name"], live(recording, jars, out)
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        for name, result in pool.map(run, battles):
-            results[name] = result
-            first = result.splitlines()[0] if result else "(no output)"
-            print(f"[{time.time() - start:6.0f}s] {name}: {first[:300]}", flush=True)
+        for name, result in pool.map(fight, recorded):
+            report(name, result)
+    results = {b["name"]: results[b["name"]] for b in battles}
     (out / "summary.json").write_text(json.dumps(results, indent=1) + "\n")
     verified, kinds = 0, {}
     for b in battles:

@@ -206,7 +206,8 @@ Classic robots get a per-robot data directory with a quota (`getDataFile`, `Robo
 - All engine randomness is seeded.
 - Robots' own randomness is seeded **per robot**: `Math.random()` and `new Random()` draw from streams derived from the battle seed and the robot's name (ADR 0009). For JVM robots, a Java agent (`clients/java-determinism`) does this. Classic itself can't: its `RANDOMSEED` only seeds `Math.random()` on old JVMs, as a single stream shared by all robots.
 - Robot JVMs run with `-XX:-InlineMathNatives`, so robots' own trigonometry is identical on every platform (§4.3). Otherwise volunteers on different hardware could get different results for the same seed.
-- They also run with `-XX:hashCode=2` (constant identity hash codes), so robots iterating over identity-keyed hash collections behave the same in every run (ADR 0013).
+- The determinism agent also gives robot objects deterministic identity hash codes, so robots iterating over identity-keyed hash collections behave the same in every run (ADR 0013).
+- It counts the work of robot code and gives it a virtual clock, so robots that read the time behave the same everywhere (ADR 0014).
 - Known limit: robots that read the clock to budget their own computation can still behave differently between runs.
 - Under WASM, budgets become instruction fuel, which makes even the time limits deterministic.
 

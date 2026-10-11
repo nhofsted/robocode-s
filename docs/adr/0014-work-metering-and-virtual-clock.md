@@ -1,0 +1,26 @@
+# 0014. Work metering and a virtual clock for robots
+
+- Status: Accepted (calibration pending, #15)
+- Date: 2026-10-11
+
+## Context
+
+Robots read the clock: to seed their own generators (`new Random(System.currentTimeMillis())`), and to limit their work to a time budget (`while (System.nanoTime() - start < budget)`). Wall-clock time makes a robot's behavior depend on the machine and its load. In the RoboRumble corpus, such robots made classic itself non-reproducible (#11). ADR 0009 called this a known limit. Deterministic mode also needs a deterministic measure of a robot's work for CPU budgets later.
+
+## Decision
+
+In deterministic mode the determinism agent **counts the work** of robot code and gives robot code a **virtual clock**:
+- **Counting:** at the start of every straight-line block of bytecode in robot classes (defined by classic's robot class loader), `fuel[0] += n`. Here `n` is the block's instructions plus `JDK_CALL_COST` (10) per call into the JDK. `fuel` is one counter per robot class loader (in classic: one per robot).
+- **Clock:** in robot code, `System.nanoTime()` and `System.currentTimeMillis()` read
+  `elapsed = turns × TURN_NANOS + fuel × PICOS_PER_INSTRUCTION / 1000`.
+  It starts at `NANO_ORIGIN` and `EPOCH_MILLIS` (2026-01-01T00:00Z). Turns are counted in classic's robot-side `executeImpl` and `waitForBattleEndImpl`.
+- **The constants are part of the deterministic rules:** `TURN_NANOS` = 1 ms, `PICOS_PER_INSTRUCTION` = 1000 for now. They will be calibrated against a reference machine (#15). Every language gets its own counting and calibration.
+
+The values depend only on what the robot executes, the same in classic's oracle and in robocode-s, on every machine.
+
+## Consequences
+
+- **Deterministic time:** robots that seed from or budget by the clock are deterministic. Budget loops always terminate and do a fixed amount of work.
+- **Overhead:** robot code runs slower in deterministic mode (a counter update per block).
+- **Not covered:** time read by the JDK on the robot's behalf (`Thread.sleep`, timeouts) stays real, so robots with timing-dependent threads stay nondeterministic. Robot classes that can't be instrumented (a method growing beyond 64 KiB) run uncounted, with a warning.
+- **Next:** the same counter is the basis for deterministic CPU budgets and skipped turns (#15).
