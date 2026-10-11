@@ -47,6 +47,10 @@ def plan(manifest, seed, duels, melees, team_battles):
     for g in groups[:melees]:
         add("melee", g, 35)
     teams = pool("teams")
+    if team_battles and len(teams) < 2:
+        # Later batches run out of untested teams: the rumble only has a few dozen.
+        print(f"only {len(teams)} team(s) in the manifest: no team battles", file=sys.stderr)
+        team_battles = 0
     for _ in range(team_battles):
         add("teams", rng.sample(teams, 2), 10)
     return battles
