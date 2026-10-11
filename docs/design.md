@@ -280,14 +280,14 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 - **No API Gateway.** The HTTP API is only free for the first 12 months. Lambda **function URLs** sit behind CloudFront (origin access control), and everything is served from one domain, `rumble.planethofstede.be`. That means one certificate (ACM, us-east-1), no CORS and no separate API domain.
 - **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
 - **Website:** SvelteKit built with `adapter-static` on S3 + CloudFront (ADR 0015). It also hosts the user documentation. The home page and docs are prerendered; ranking, bot and pairing pages render in the browser from pre-computed JSON (`docs/rumble-data.md`). Interactive features (login, bot submission, "watch", reputation and account pages) call the `/api` Lambdas from the browser, and those Lambdas read and write DynamoDB. Unknown paths fall back to `200.html` (CloudFront custom error response), so client-side routes like `/bot/<id>` work; a CloudFront Function maps extensionless URLs to the prerendered `.html` files (`web/README.md`).
-- **Deployment:** the owner's AWS account, region **eu-west-1** (Ireland), DNS zone `planethofstede.be` in Route 53. The alias record is created by CDK via `HostedZone.fromLookup`. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack.
+- **Deployment:** a dedicated member account `robocode-s` in the owner's AWS Organization (ADR 0016), region **eu-west-1** (Ireland). An SCP limits it to eu-west-1 and us-east-1 and to services within the free-tier plan. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack. The DNS zone `planethofstede.be` stays in the management account: the `rumble` CNAME and the certificate's validation record are added there by hand, once.
 
 ### 12.2 Free-tier budget
 
 | Service | Always-free allowance (approx.) | How we stay within it |
 |---|---|---|
 | Lambda | 1M requests + 400k GB-s / month | Rust on arm64 with small memory; clients fetch work and upload results in **batches**, not one request per battle |
-| DynamoDB | 25 GB storage, 25 RCU + 25 WCU **provisioned** | Provisioned mode (on-demand is not covered by the free tier) and no auto-scaling beyond 25; aggregates instead of per-battle rows (§12.6) |
+| DynamoDB | 25 GB storage, 25 RCU + 25 WCU **provisioned** | Provisioned mode in prod (on-demand is not covered by the free tier) and no auto-scaling beyond 25; aggregates instead of per-battle rows (§12.6). A dev stage uses on-demand, which costs cents at test traffic and leaves the free capacity to prod |
 | CloudFront | 1 TB transfer + 10M requests / month | Site, ranking JSON, jars and recordings are all served through CloudFront and cached |
 | EventBridge Scheduler | 14M invocations / month | One scheduled ranking run per day |
 | CloudWatch Logs | 5 GB ingestion | Low log level and short retention (7 days) |
@@ -295,7 +295,7 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 | ACM | Public certificates free | — |
 
 Costs outside the free tier, kept deliberately small (the replay costs are detailed in §12.7):
-- **Route 53:** the hosted zone already exists ($0.50/month); alias queries to CloudFront are free.
+- **Route 53:** none. The records live in the existing `planethofstede.be` zone, so the rumble adds no hosted zone.
 - **S3 storage:** S3's free allowance only lasts 12 months. Afterwards it costs about $0.023/GB-month, so storage is capped (§12.7) at a few GB, which means cents per month.
 
 Guardrails:
@@ -510,6 +510,6 @@ robocode-s/
 | Robot jars | Mirrored to S3, with a takedown policy |
 | Rumble clients | Anyone with GitHub login; server-assigned seeded work; reputation-based verification by other volunteers (new users ~20%, trusted users ~1%) with optimistic acceptance |
 | IaC | AWS CDK (TypeScript) |
-| AWS deployment | eu-west-1; `rumble.planethofstede.be` (API under `/api`) in the existing Route 53 zone |
+| AWS deployment | Own member account `robocode-s` (ADR 0016), eu-west-1; `rumble.planethofstede.be` (API under `/api`) in the existing Route 53 zone of the management account |
 | Replays | Per-round recordings: 5 rounds won by each side, for matchups involving at least one top-50 bot; never expire, replaced only by new bots or versions; the rest on demand. About $0.50/month plus about $2.75 one-time |
 | AWS cost | Stay within the free tier (S3 aside, which costs cents): AWS never runs battles; Lambda function URLs behind CloudFront (no API Gateway); provisioned DynamoDB at 25/25; capped S3 |

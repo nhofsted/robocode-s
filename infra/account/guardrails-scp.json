@@ -1,0 +1,71 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyEuWest1AndUsEast1",
+      "Effect": "Deny",
+      "NotAction": [
+        "account:*",
+        "budgets:*",
+        "ce:*",
+        "cloudfront:*",
+        "cur:*",
+        "freetier:*",
+        "health:*",
+        "iam:*",
+        "organizations:*",
+        "pricing:*",
+        "route53:*",
+        "route53domains:*",
+        "s3:ListAllMyBuckets",
+        "sso:*",
+        "sts:*",
+        "support:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": ["eu-west-1", "us-east-1"]
+        }
+      }
+    },
+    {
+      "Sid": "NoServicesOutsideTheFreeTierPlan",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:RequestSpotInstances",
+        "ec2:RequestSpotFleet",
+        "ec2:CreateFleet",
+        "ec2:CreateNatGateway",
+        "ec2:CreateVpcEndpoint",
+        "ec2:CreateVpnConnection",
+        "ec2:PurchaseReservedInstancesOffering",
+        "ecs:CreateService",
+        "ecs:RunTask",
+        "eks:CreateCluster",
+        "elasticloadbalancing:CreateLoadBalancer",
+        "rds:CreateDBInstance",
+        "rds:CreateDBCluster",
+        "elasticache:CreateCacheCluster",
+        "elasticache:CreateReplicationGroup",
+        "elasticache:CreateServerlessCache",
+        "es:CreateDomain",
+        "aoss:CreateCollection",
+        "redshift:CreateCluster",
+        "redshift-serverless:CreateWorkgroup",
+        "kafka:CreateCluster",
+        "kafka:CreateClusterV2",
+        "kinesis:CreateStream",
+        "sagemaker:CreateEndpoint",
+        "sagemaker:CreateNotebookInstance",
+        "sagemaker:CreateTrainingJob",
+        "lightsail:CreateInstances",
+        "lambda:PutProvisionedConcurrencyConfig",
+        "secretsmanager:CreateSecret",
+        "route53:CreateHostedZone"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

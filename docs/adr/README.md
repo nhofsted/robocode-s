@@ -17,3 +17,4 @@
 | [0013](0013-deterministic-identity-hash-codes.md) | Deterministic identity hash codes for robots |
 | [0014](0014-work-metering-and-virtual-clock.md) | Work metering and a virtual clock for robots |
 | [0015](0015-static-sveltekit-site.md) | One static SvelteKit site for the rumble and the user documentation |
+| [0016](0016-own-aws-account.md) | The rumble runs in its own AWS account |
