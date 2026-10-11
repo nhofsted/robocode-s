@@ -58,7 +58,7 @@
 		return [-r, r];
 	});
 
-	// The opponent hovered in the best/worst and problem lists, marked in the charts above.
+	// The opponent hovered in a chart or in the best/worst and problem lists, marked in the charts.
 	let spotlight: string | null = $state(null);
 	const spot = (id: string) => ({
 		onpointerenter: () => (spotlight = id),
@@ -208,13 +208,21 @@
 		<PairingStrip bot={bot.id} {rumble} {pairings} />
 
 		<div class="scatters">
-			<ScatterChart title="Score by opponent strength" dots={scoreDots} xLabel="Opponent APS" yLabel="Score" highlight={spotlight} />
+			<ScatterChart
+				title="Score by opponent strength"
+				dots={scoreDots}
+				xLabel="Opponent APS"
+				yLabel="Score"
+				highlight={spotlight}
+				onhover={(id) => (spotlight = id)}
+			/>
 			<ScatterChart
 				title="Survival by opponent survival"
 				dots={survivalDots}
 				xLabel="Opponent survival"
 				yLabel="Survival"
 				highlight={spotlight}
+				onhover={(id) => (spotlight = id)}
 			/>
 			<ScatterChart
 				title="Problem bots (KNN-PBI)"
@@ -225,6 +233,7 @@
 				ref={0}
 				signed
 				highlight={spotlight}
+				onhover={(id) => (spotlight = id)}
 			/>
 		</div>
 		<p class="muted note">

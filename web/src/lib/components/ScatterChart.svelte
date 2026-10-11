@@ -1,8 +1,9 @@
 <script lang="ts">
 	// One dot per pairing, after LiteRumble's bot charts: x is a property of the opponent (its
 	// APS or survival), y how this bot does against it. Hover finds the nearest dot; clicking it
-	// opens that pairing. The pairing table on the same page is the table view. `highlight` marks
-	// an opponent hovered elsewhere on the page the same way.
+	// opens that pairing, and only the hovered dot gets a tooltip. The pairing table on the same
+	// page is the table view. `highlight` marks an opponent hovered elsewhere on the page (a list,
+	// another chart) without a tooltip; `onhover` reports this chart's hovered opponent for that.
 
 	// Not colour-coded: colouring by y (score, survival, PBI) only repeats the dot's height as an
 	// even gradient, and colouring by x repeats its position. Nothing else per pairing is worth a
@@ -27,8 +28,10 @@
 		ref?: number;
 		/** Format y values with a sign (differences). */
 		signed?: boolean;
-		/** Id of a dot to mark, when nothing in this chart is hovered. */
+		/** Id of a dot to mark, without a tooltip. */
 		highlight?: string | null;
+		/** Called with the hovered dot's id, or null when the pointer leaves it. */
+		onhover?: (id: string | null) => void;
 	}
 	let {
 		title,
@@ -38,7 +41,8 @@
 		yDomain = [0, 100],
 		ref = 50,
 		signed = false,
-		highlight = null
+		highlight = null,
+		onhover
 	}: Props = $props();
 
 	let width = $state(300);
@@ -60,7 +64,13 @@
 	});
 
 	let hovered: Dot | null = $state(null);
-	const active = $derived(hovered ?? dots.find((d) => d.id === highlight) ?? null);
+	const marked = $derived(hovered ? null : (dots.find((d) => d.id === highlight) ?? null));
+
+	function hover(dot: Dot | null) {
+		if (dot?.id === hovered?.id) return;
+		hovered = dot;
+		onhover?.(dot?.id ?? null);
+	}
 
 	function onMove(event: PointerEvent) {
 		const r = (event.currentTarget as SVGElement).getBoundingClientRect();
@@ -77,7 +87,7 @@
 				bestD = dist;
 			}
 		}
-		hovered = best;
+		hover(best);
 	}
 
 	const fmtY = (v: number) => (signed && v > 0 ? '+' : '') + formatNumber(v, 1);
@@ -92,7 +102,7 @@
 			role="img"
 			aria-label="{title}: {dots.length} opponents; the pairing table below lists the same values"
 			onpointermove={onMove}
-			onpointerleave={() => (hovered = null)}
+			onpointerleave={() => hover(null)}
 		>
 			{#each yTicks as t (t)}
 				<line class="grid" x1={pad.left} x2={width - pad.right} y1={y(t)} y2={y(t)} />
@@ -107,18 +117,21 @@
 			{#each dots as d (d.id)}
 				<circle class="dot" cx={x(d.x)} cy={y(d.y)} r="3" />
 			{/each}
-			{#if active}
+			{#if marked}
+				<circle class="dot active" cx={x(marked.x)} cy={y(marked.y)} r="5" />
+			{/if}
+			{#if hovered}
 				<!-- The hovered dot links to its pairing; the big transparent circle is the hit area. -->
-				<a href={active.href} aria-label="{active.name}: open pairing">
-					<circle class="hit" cx={x(active.x)} cy={y(active.y)} r="12" />
-					<circle class="dot active" cx={x(active.x)} cy={y(active.y)} r="5" />
+				<a href={hovered.href} aria-label="{hovered.name}: open pairing">
+					<circle class="hit" cx={x(hovered.x)} cy={y(hovered.y)} r="12" />
+					<circle class="dot active" cx={x(hovered.x)} cy={y(hovered.y)} r="5" />
 				</a>
 			{/if}
 		</svg>
-		{#if active}
-			<div class="tip" style:left="{x(active.x)}px" style:top="{y(active.y)}px">
-				<strong class="mono">{fmtY(active.y)}</strong>
-				<span>{active.name} · {xLabel.toLowerCase()} {formatNumber(active.x, 1)}</span>
+		{#if hovered}
+			<div class="tip" style:left="{x(hovered.x)}px" style:top="{y(hovered.y)}px">
+				<strong class="mono">{fmtY(hovered.y)}</strong>
+				<span>{hovered.name} · {xLabel.toLowerCase()} {formatNumber(hovered.x, 1)}</span>
 			</div>
 		{/if}
 	</div>
