@@ -40,7 +40,7 @@
 					<div class="mono muted small">{s.bot.versions[0].version} · #{s.entry.rank}</div>
 				</div>
 			</div>
-			{#if i === 0}<div class="vs pixel" aria-hidden="true">VS</div>{/if}
+			{#if i === 0}<div class="vs sf" aria-hidden="true">VS</div>{/if}
 		{/each}
 	</section>
 
@@ -137,8 +137,7 @@
 		font-size: 0.8rem;
 	}
 	.vs {
-		color: var(--amber);
-		font-size: 1.1rem;
+		font-size: 2rem;
 	}
 	.bar {
 		display: flex;

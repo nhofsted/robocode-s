@@ -2,13 +2,12 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import Tank from '#lib/components/Tank.svelte';
+	import Ground from '#lib/components/Ground.svelte';
+	import Logo from '#lib/components/Logo.svelte';
 	import { REPO_URL } from '#lib/site.ts';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
-
-	const LOGO = { body: [63, 138, 79], gun: [159, 212, 168], radar: [255, 194, 92] } as const;
 
 	const nav = [
 		{ href: '/rankings', label: 'Rankings' },
@@ -24,13 +23,14 @@
 	<link rel="icon" href="/favicon.png" type="image/png" />
 </svelte:head>
 
+<Ground />
+
 <a class="skip" href="#main">Skip to content</a>
 
 <header>
 	<div class="container bar">
 		<a class="logo" href={resolve('/')} aria-label="robocode-s home">
-			<Tank colors={LOGO} size={36} heading={0} gunHeading={45} radarHeading={80} />
-			<span class="pixel">robocode-s</span>
+			<Logo size={22} />
 		</a>
 		<nav aria-label="Main">
 			{#each nav as item (item.href)}
@@ -92,10 +92,8 @@
 	.logo {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.6rem;
-		color: var(--radar);
 		text-decoration: none;
-		font-size: 0.85rem;
+		padding: 0.2rem 0;
 	}
 	nav {
 		display: flex;

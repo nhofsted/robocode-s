@@ -8,10 +8,10 @@ Once a day, the rankings Lambda (design §12.6) publishes the rumble's state as 
 |---|---|---|
 | `/data/v1/rumbles.json` | `RumbleIndex`: all rumbles with bot and battle counts | daily |
 | `/data/v1/rankings/<rumble>.json` | `Rankings`: one row per bot, sorted by APS | daily |
-| `/data/v1/bots/<bot id>.json` | `BotDetails`: metadata, versions, and per rumble the metrics, all pairings and daily history | daily, for bots whose numbers changed |
+| `/data/v1/bots/<bot id>.json` | `BotDetails`: metadata, versions, and per rumble the metrics, all pairings and a year of daily history across versions | daily, for bots whose numbers changed |
 
 - **Rumble ids** are the division (`1v1`, `melee`, `teams`, `twinduel`), plus `-mini`, `-micro` or `-nano` for the weight-class rumbles (`1v1-micro`).
-- **Bot ids** are the robot's fully qualified class name without version (`sample.Walls`). A bot's ranked version is in the file; history and pairings belong to the current version.
+- **Bot ids** are the robot's fully qualified class name without version (`sample.Walls`). A bot's ranked version is in the file; metrics and pairings belong to the current version, the history spans all versions (each day records the version ranked then).
 - **All metrics** (APS, PWIN, survival, Glicko-2, ANPP, Vote) come from the same daily run, so they are always consistent with each other.
 
 ## Rules

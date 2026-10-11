@@ -70,6 +70,26 @@ describe('fixtures', () => {
 		}
 	});
 
+	it('keep history across versions, switching on release days', () => {
+		const rankings = fixtures.get('rankings/1v1.json') as Rankings;
+		let switches = 0;
+		for (const row of rankings.bots) {
+			const bot = fixtures.get(`bots/${row.id}.json`) as BotDetails;
+			const history = bot.rumbles['1v1'].history;
+			const order = bot.versions.map((v) => v.version).reverse();
+			expect(history.at(-1)!.version).toBe(row.version);
+			for (let i = 1; i < history.length; i++) {
+				const [prev, cur] = [history[i - 1], history[i]];
+				if (prev.version === cur.version) continue;
+				switches++;
+				expect(order.indexOf(cur.version)).toBeGreaterThan(order.indexOf(prev.version));
+				const added = bot.versions.find((v) => v.version === cur.version)!.addedAt.slice(0, 10);
+				expect(cur.date >= added && prev.date < added).toBe(true);
+			}
+		}
+		expect(switches).toBeGreaterThan(0);
+	});
+
 	it('return undefined for unknown files', () => {
 		expect(fixtures.get('rankings/nope.json')).toBeUndefined();
 		expect(fixtures.get('bots/no.such.Bot.json')).toBeUndefined();

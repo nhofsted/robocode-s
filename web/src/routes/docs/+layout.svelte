@@ -11,7 +11,7 @@
 
 <div class="container docs">
 	<nav aria-label="Documentation">
-		<p class="pixel">Docs</p>
+		<p class="kicker">Docs</p>
 		<ul>
 			{#each DOCS as d (d.href)}
 				<li>
@@ -45,9 +45,7 @@
 		align-self: start;
 		font-size: 0.9rem;
 	}
-	nav .pixel {
-		font-size: 0.7rem;
-		color: var(--amber);
+	nav .kicker {
 		margin: 0.6rem 0 0.8rem;
 	}
 	ul {
@@ -75,6 +73,12 @@
 		color: var(--muted);
 		font-size: 0.8rem;
 		margin-top: 1.5rem;
+	}
+	.content {
+		background: color-mix(in srgb, var(--panel) 94%, transparent);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 0.5rem clamp(1rem, 3vw, 2.2rem) 1.5rem;
 	}
 	.edit {
 		margin-top: 3rem;

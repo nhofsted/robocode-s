@@ -1,26 +1,28 @@
-/* Retro Robocode: the night battlefield, radar green, energy amber. One dark theme on purpose:
-   it is the battlefield. Contrast of text tokens against --bg and --panel is ≥ 4.5:1. */
+/* Classic Robocode: the blue-metal battlefield floor, radar green, energy amber. One dark theme
+   on purpose: it is the battlefield. Contrast of text tokens against --bg and --panel is ≥ 4.5:1. */
 
-@import '@fontsource/press-start-2p/latin-400.css';
+@import '@fontsource/archivo-black/latin-400.css';
 @import '@fontsource/ibm-plex-sans/latin-400.css';
 @import '@fontsource/ibm-plex-sans/latin-400-italic.css';
 @import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-sans/latin-700.css';
 @import '@fontsource/ibm-plex-mono/latin-400.css';
 @import '@fontsource/ibm-plex-mono/latin-600.css';
 
 :root {
 	color-scheme: dark;
 
-	--bg: #0c100c;
-	--bg-grid: #151c15;
-	--panel: #121712;
-	--panel-2: #182018;
-	--line: #263126;
-	--line-strong: #3a4a3a;
+	--bg: #0a0e15;
+	/* Darkens classic's floor tiles behind content; the home page's battlefield uses less. */
+	--ground-shade: rgb(8 11 18 / 0.72);
+	--panel: #10161f;
+	--panel-2: #162030;
+	--line: #243247;
+	--line-strong: #36475f;
 
-	--text: #dbe6d4;
-	--text-2: #a9b8a3;
-	--muted: #849580;
+	--text: #dfe7f1;
+	--text-2: #aab7c9;
+	--muted: #8794a8;
 
 	--radar: #5ee38a;
 	--radar-dim: #2f7a49;
@@ -29,8 +31,8 @@
 	--win: #3987e5;
 	--lose: #e66767;
 
-	--font-pixel: 'Press Start 2P', ui-monospace, monospace;
 	--font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+	--font-logo: Helvetica, Arial, 'Liberation Sans', 'Nimbus Sans', sans-serif;
 	--font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
 	--radius: 4px;
@@ -44,8 +46,9 @@
 	box-sizing: border-box;
 }
 
+/* No background on html: the body's background then paints the whole canvas, beneath the home
+   page's battlefield layer (z-index -1). */
 html {
-	background: var(--bg);
 	-webkit-text-size-adjust: 100%;
 }
 
@@ -54,11 +57,11 @@ body {
 	min-height: 100vh;
 	color: var(--text);
 	background-color: var(--bg);
-	/* The battlefield grid, 40px like a 1/20 of classic's 800px field. */
+	/* Classic's battlefield floor: --ground is a mosaic of its blue-metal tiles (Ground.svelte),
+	   one tile until that is ready. */
 	background-image:
-		linear-gradient(var(--bg-grid) 1px, transparent 1px),
-		linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-	background-size: 40px 40px;
+		linear-gradient(var(--ground-shade), var(--ground-shade)),
+		var(--ground, url('./lib/assets/classic/ground/blue_metal_0.png'));
 	background-attachment: fixed;
 	font-family: var(--font-sans);
 	font-size: 16px;
@@ -87,19 +90,22 @@ h3 {
 	margin: 1.6em 0 0.6em;
 }
 
-/* The pixel font is for display: page titles, the logo, small labels. */
-h1,
-.pixel {
-	font-family: var(--font-pixel);
-	font-weight: 400;
-	letter-spacing: 0.02em;
-}
 h1 {
-	font-size: clamp(1.1rem, 3.5vw, 1.6rem);
-	line-height: 1.5;
+	font-size: clamp(1.6rem, 4vw, 2.2rem);
+	font-weight: 700;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
 	color: var(--radar);
-	text-shadow: 0 0 12px color-mix(in srgb, var(--radar) 35%, transparent);
 	margin-top: 0.5em;
+}
+
+/* Small uppercase labels: section kickers, the docs sidebar title. */
+.kicker {
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--amber);
 }
 h2 {
 	font-size: 1.35rem;
@@ -281,4 +287,21 @@ select {
 		animation: none !important;
 		transition: none !important;
 	}
+}
+
+/* The logo's "S" (and other badges in that style): heavy italic letters with a yellow-to-red
+   gradient and a dark outline, after the Street Fighter II logo. */
+.sf {
+	display: inline-block;
+	font-family: 'Archivo Black', var(--font-logo);
+	font-weight: 400;
+	transform: skewX(-12deg);
+	background: linear-gradient(180deg, #fff59a 0%, #ffd42a 30%, #ff9a0a 58%, #ef3a12 80%, #c4120f 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	-webkit-text-stroke: 0.08em #2b0700;
+	paint-order: stroke fill;
+	filter: drop-shadow(0.05em 0.07em 0 rgb(0 0 0 / 0.7));
+	line-height: 1;
 }

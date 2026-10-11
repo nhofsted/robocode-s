@@ -1,19 +1,21 @@
 <script lang="ts">
 	// One metric over time: a 2px line, recessive grid, a crosshair that snaps to the nearest day,
-	// and a table view. Rank is drawn inverted (1 at the top).
+	// a marker at every release, and a table view. Rank is drawn inverted (1 at the top).
 	import { formatDate, formatNumber } from '#lib/rumble/format.ts';
 
 	interface Props {
-		points: { date: string; value: number | null }[];
+		points: { date: string; value: number | null; version?: string }[];
 		label: string;
 		digits: number;
 		invert?: boolean;
+		/** Releases: a vertical marker at the first day on or after `date`. */
+		markers?: { date: string; label: string }[];
 	}
-	let { points, label, digits, invert = false }: Props = $props();
+	let { points, label, digits, invert = false, markers = [] }: Props = $props();
 
 	let width = $state(640);
 	const height = 220;
-	const pad = { top: 14, right: 16, bottom: 26, left: 52 };
+	const pad = { top: 24, right: 16, bottom: 26, left: 52 };
 	let hover: number | null = $state(null);
 
 	const valid = $derived(points.filter((p): p is { date: string; value: number } => p.value !== null));
@@ -63,6 +65,13 @@
 		return out;
 	});
 
+	const releaseMarks = $derived(
+		markers
+			.filter((m) => m.date.slice(0, 10) > points[0]?.date)
+			.map((m) => ({ ...m, i: points.findIndex((p) => p.date >= m.date.slice(0, 10)) }))
+			.filter((m) => m.i >= 0)
+	);
+
 	const monthTicks = $derived(
 		points
 			.map((p, i) => ({ i, date: p.date }))
@@ -86,7 +95,8 @@
 	const hovered = $derived(hover === null ? null : points[hover]);
 	const valueText = $derived.by(() => {
 		const p = points[hover ?? points.length - 1];
-		return `${formatDate(p.date)}: ${label} ${formatNumber(p.value, digits)}`;
+		const v = p.version ? `, version ${p.version}` : '';
+		return `${formatDate(p.date)}${v}: ${label} ${formatNumber(p.value, digits)}`;
 	});
 	const tipLeft = $derived(hover === null ? 0 : Math.min(Math.max(x(hover), 70), width - 70));
 </script>
@@ -121,6 +131,10 @@
 					{new Date(m.date).toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' })}
 				</text>
 			{/each}
+			{#each releaseMarks as m (m.date)}
+				<line class="release" x1={x(m.i)} x2={x(m.i)} y1={pad.top - 6} y2={height - pad.bottom} />
+				<text class="release-label" x={x(m.i) + 4} y={pad.top - 10}>{m.label}</text>
+			{/each}
 			<path class="line" d={path} />
 			{#if hovered && hovered.value !== null && hover !== null}
 				<line class="cross" x1={x(hover)} x2={x(hover)} y1={pad.top} y2={height - pad.bottom} />
@@ -130,7 +144,7 @@
 		{#if hovered}
 			<div class="tip" style:left="{tipLeft}px" aria-live="polite">
 				<strong class="mono">{formatNumber(hovered.value, digits)}</strong>
-				<span>{label} · {formatDate(hovered.date)}</span>
+				<span>{label} · {formatDate(hovered.date)}{hovered.version ? ` · v${hovered.version}` : ''}</span>
 			</div>
 		{/if}
 	</div>
@@ -138,10 +152,14 @@
 		<summary>Show as table</summary>
 		<div class="table-scroll history">
 			<table class="data">
-				<thead><tr><th>Date</th><th class="num">{label}</th></tr></thead>
+				<thead><tr><th>Date</th><th>Version</th><th class="num">{label}</th></tr></thead>
 				<tbody>
 					{#each [...points].reverse() as p (p.date)}
-						<tr><td>{formatDate(p.date)}</td><td class="num">{formatNumber(p.value, digits)}</td></tr>
+						<tr>
+							<td>{formatDate(p.date)}</td>
+							<td class="mono">{p.version ?? ''}</td>
+							<td class="num">{formatNumber(p.value, digits)}</td>
+						</tr>
 					{/each}
 				</tbody>
 			</table>
@@ -176,6 +194,17 @@
 		stroke-width: 2;
 		stroke-linejoin: round;
 		stroke-linecap: round;
+	}
+	.release {
+		stroke: var(--amber);
+		stroke-width: 1.5;
+		stroke-dasharray: 4 3;
+		opacity: 0.8;
+	}
+	.release-label {
+		fill: var(--amber);
+		font-family: var(--font-mono);
+		font-size: 11px;
 	}
 	.cross {
 		stroke: var(--text-2);
@@ -216,6 +245,6 @@
 	.history {
 		max-height: 16rem;
 		margin-top: 0.5rem;
-		max-width: 20rem;
+		max-width: 24rem;
 	}
 </style>
