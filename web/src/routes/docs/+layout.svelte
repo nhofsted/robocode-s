@@ -19,10 +19,6 @@
 				</li>
 			{/each}
 		</ul>
-		<p class="design">
-			Engine and project internals:
-			<a href="{REPO_URL}/blob/main/docs/design.md">design document</a>.
-		</p>
 	</nav>
 	<div class="content">
 		{@render children()}
@@ -69,11 +65,6 @@
 		color: var(--radar);
 		border-left-color: var(--radar);
 	}
-	.design {
-		color: var(--muted);
-		font-size: 0.8rem;
-		margin-top: 1.5rem;
-	}
 	.content {
 		background: color-mix(in srgb, var(--panel) 94%, transparent);
 		border: 1px solid var(--line);
@@ -101,9 +92,6 @@
 		li a {
 			border-left: 0;
 			padding: 0.2rem 0.6rem 0.2rem 0;
-		}
-		.design {
-			display: none;
 		}
 	}
 </style>
