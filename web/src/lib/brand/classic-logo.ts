@@ -146,3 +146,10 @@ export const S_WIDTH = 40;
 
 /** Where the S follows "Robocode", with the letters' usual spacing. */
 export const S_OFFSET = 328;
+
+/**
+ * Placement of the flame S (FighterText) after the word, in units of the letters' height:
+ * horizontal offset from the end of the word, vertical offset from centred, and its height.
+ * Tuned on /brand.
+ */
+export const FLAME_S = { x: -0.92, y: -0.02, size: 1.75 };
