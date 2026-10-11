@@ -52,6 +52,20 @@
 	{#snippet a4()}<ClassicWordmark height={30} look="solid" s="super" sColor={RED} />{/snippet}
 	{@render header('1d · solid, raised red S', a4)}
 
+	{#snippet f1()}<ClassicWordmark height={30} look="glow" s="fighter" />{/snippet}
+	{@render header('1h · classic glow + flame S', f1)}
+
+	{#snippet f2()}<ClassicWordmark height={30} look="solid" s="fighter" />{/snippet}
+	{@render header('1i · solid + flame S', f2)}
+
+	{#snippet f3()}
+		<span class="iconmark">
+			<img src="/favicon-256.png" alt="" width="34" height="34" />
+			<ClassicWordmark height={26} look="solid" s="fighter" />
+		</span>
+	{/snippet}
+	{@render header('1j · icon + solid + flame S', f3)}
+
 	{#snippet a5()}<ClassicEmblem width={110} s="inline" tanks={false} />{/snippet}
 	{@render header('1e · mini emblem', a5)}
 
@@ -60,6 +74,10 @@
 		<figure>
 			<ClassicEmblem width={570} s="inline" />
 			<figcaption class="mono">1f · classic emblem, S inside</figcaption>
+		</figure>
+		<figure>
+			<ClassicEmblem width={570} s="fighter" />
+			<figcaption class="mono">1k · classic emblem, flame S</figcaption>
 		</figure>
 		<figure>
 			<ClassicEmblem width={570} s="badge" />
