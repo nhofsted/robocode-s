@@ -49,12 +49,8 @@
 
 /* No background on html: the body's background then paints the whole canvas, beneath the home
    page's battlefield layer (z-index -1). */
-/* Always show the scrollbar, so the centered layout (and the logo) sits at the same x on pages
-   that scroll and pages that don't. Not scrollbar-gutter: an empty gutter misses the fixed
-   floor tiles and shows as a bare strip. */
 html {
 	-webkit-text-size-adjust: 100%;
-	overflow-y: scroll;
 }
 
 body {
@@ -150,9 +146,12 @@ table {
 	border-collapse: collapse;
 }
 
+/* Centered on the whole viewport (100vw counts a classic scrollbar; auto margins don't), so the
+   layout and the logo sit at the same x whether or not the page scrolls. A page with a scrollbar
+   gives up to half its width on the right. */
 .container {
 	max-width: var(--content);
-	margin: 0 auto;
+	margin: 0 auto 0 max(0px, (100vw - var(--content)) / 2);
 	padding: 0 var(--gutter);
 }
 
