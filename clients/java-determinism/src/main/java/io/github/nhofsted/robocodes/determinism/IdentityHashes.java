@@ -10,9 +10,14 @@ import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.SerialVersionUIDAdder;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Deterministic identity hash codes for robots (ADR 0013).
@@ -24,6 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *       gets its own: on first use it takes the next value of the robot's identity hash
  *       stream ({@link RobotRandomness#identityHashCode}) and keeps it in a field.</li>
  *   <li>{@code Enum.hashCode()} (final) asks the same hook instead of the JVM.</li>
+ *   <li>Arrays can't get a field: the JDK's hash collections ({@link #HASHING_CLASSES}) and
+ *       robot code ask another hook for an array's hash code, which keeps it in a table
+ *       ({@link RobotRandomness#tableHash}). So does robot code's
+ *       {@code System.identityHashCode(o)} and {@code super.hashCode()} on {@code Object}.</li>
  * </ul>
  * Values only depend on the battle seed, the robot's name and the order in which the robot
  * hashes its objects: the same in classic (one JVM) and robocode-s (one JVM per robot).
@@ -36,7 +45,13 @@ final class IdentityHashes {
 
     private static final String FIELD = "robocodes$identityHash";
     private static final String HOOK = "java/util/function/ToIntFunction";
-    private static final Set<String> WARNED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * JDK classes whose {@code Object.hashCode()} calls ask the hook for arrays: the hash
+     * collections a robot's arrays can be keys of, and {@code Objects.hashCode}.
+     */
+    static final Set<String> HASHING_CLASSES = Set.of("java/util/HashMap", "java/util/WeakHashMap",
+            "java/util/Hashtable", "java/util/concurrent/ConcurrentHashMap", "java/util/Objects");
 
     private IdentityHashes() {
     }
@@ -51,11 +66,11 @@ final class IdentityHashes {
      * the hook is missing. Stack: {@code [..., o]} becomes {@code [..., hash]}. Leaves
      * {@code [..., o, o, hook]} at {@code fallback} for the caller's frame.
      */
-    private static void emitHash(MethodVisitor mv, Label fallback, Label end) {
+    private static void emitHash(MethodVisitor mv, String key, Label fallback, Label end) {
         mv.visitInsn(Opcodes.DUP);
         mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties", "()Ljava/util/Properties;",
                 false);
-        mv.visitLdcInsn(RobotRandomness.IDENTITY_HASH_KEY);
+        mv.visitLdcInsn(key);
         mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
                 "(Ljava/lang/Object;)Ljava/lang/Object;", false);
         mv.visitInsn(Opcodes.DUP);
@@ -105,7 +120,7 @@ final class IdentityHashes {
                             patched[0]++;
                             Label fallback = new Label();
                             Label end = new Label();
-                            emitHash(mv, fallback, end);
+                            emitHash(mv, RobotRandomness.IDENTITY_HASH_KEY, fallback, end);
                             mv.visitLabel(fallback);
                             emitFallback(mv);
                             mv.visitLabel(end);
@@ -123,6 +138,115 @@ final class IdentityHashes {
     }
 
     /**
+     * A JDK class of {@link #HASHING_CLASSES}: every {@code o.hashCode()} with {@code o} typed
+     * {@code Object} becomes
+     * <pre>
+     * o.getClass().isArray() ? hook(o) : o.hashCode()
+     * </pre>
+     * with the JVM's identity hash when the hook is missing. Other objects take the same path
+     * as before, at the cost of one {@code isArray()} check.
+     */
+    static byte[] patchHashCalls(byte[] classfileBuffer) {
+        ClassReader reader = new ClassReader(classfileBuffer);
+        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                return "java/lang/Object"; // no class loading inside java.base transforms
+            }
+        };
+        int[] patched = new int[1];
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                    String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9, super.visitMethod(access, name, descriptor, signature,
+                        exceptions)) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String method, String desc,
+                            boolean isInterface) {
+                        if (opcode != Opcodes.INVOKEVIRTUAL || !owner.equals("java/lang/Object")
+                                || !method.equals("hashCode") || !desc.equals("()I")) {
+                            super.visitMethodInsn(opcode, owner, method, desc, isInterface);
+                            return;
+                        }
+                        patched[0]++;
+                        Label plain = new Label();
+                        Label fallback = new Label();
+                        Label end = new Label();
+                        mv.visitInsn(Opcodes.DUP);
+                        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Object", "getClass",
+                                "()Ljava/lang/Class;", false);
+                        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Class", "isArray", "()Z", false);
+                        mv.visitJumpInsn(Opcodes.IFEQ, plain);
+                        emitHash(mv, RobotRandomness.HASH_CODE_KEY, fallback, end);
+                        mv.visitLabel(fallback);
+                        emitFallback(mv);
+                        mv.visitJumpInsn(Opcodes.GOTO, end);
+                        mv.visitLabel(plain);
+                        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Object", "hashCode", "()I", false);
+                        mv.visitLabel(end);
+                    }
+                };
+            }
+        }, 0);
+        if (patched[0] == 0) {
+            throw new IllegalStateException("no Object.hashCode() call found in " + reader.getClassName());
+        }
+        return writer.toByteArray();
+    }
+
+    /**
+     * In a robot class's code: calls that can reach the JVM's identity hash ask a hook
+     * instead. {@code o.hashCode()} on an array or {@code Object} goes to
+     * {@link RobotRandomness#hashCode}; {@code System.identityHashCode(o)} and
+     * {@code super.hashCode()} on {@code Object} to {@link RobotRandomness#tableHash}.
+     * Straight-line and stack-neutral, like the work counting: frames stay valid.
+     */
+    static void replaceHashCalls(InsnList instructions) {
+        for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (!(insn instanceof MethodInsnNode call)) {
+                continue;
+            }
+            String key = hookFor(call);
+            if (key == null) {
+                continue;
+            }
+            // [..., o] becomes [..., hook, o] and then [..., hash].
+            InsnList hook = new InsnList();
+            hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
+                    "()Ljava/util/Properties;", false));
+            hook.add(new LdcInsnNode(key));
+            hook.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+            hook.add(new TypeInsnNode(Opcodes.CHECKCAST, HOOK));
+            hook.add(new InsnNode(Opcodes.SWAP));
+            hook.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, HOOK, "applyAsInt", "(Ljava/lang/Object;)I", true));
+            AbstractInsnNode last = hook.getLast();
+            instructions.insert(insn, hook);
+            instructions.remove(insn);
+            insn = last;
+        }
+    }
+
+    private static String hookFor(MethodInsnNode call) {
+        if (call.getOpcode() == Opcodes.INVOKESTATIC && call.owner.equals("java/lang/System")
+                && call.name.equals("identityHashCode") && call.desc.equals("(Ljava/lang/Object;)I")) {
+            return RobotRandomness.TABLE_HASH_KEY;
+        }
+        if (!call.name.equals("hashCode") || !call.desc.equals("()I")) {
+            return null;
+        }
+        if (call.getOpcode() == Opcodes.INVOKEVIRTUAL
+                && (call.owner.equals("java/lang/Object") || call.owner.startsWith("["))) {
+            return RobotRandomness.HASH_CODE_KEY;
+        }
+        if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.owner.equals("java/lang/Object")) {
+            return RobotRandomness.TABLE_HASH_KEY;
+        }
+        return null;
+    }
+
+    /**
      * A robot class: adds the deterministic {@code hashCode()} if it is the top robot class
      * of a hierarchy that would inherit {@code Object.hashCode()}. Returns null to leave
      * the class unchanged.
@@ -131,10 +255,6 @@ final class IdentityHashes {
         ClassReader reader = new ClassReader(classfileBuffer);
         Scan scan = new Scan();
         reader.accept(scan, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-        if (scan.callsIdentityHashCode && WARNED.add(reader.getClassName())) {
-            System.err.println("robocode-s: " + reader.getClassName().replace('/', '.')
-                    + " calls System.identityHashCode, which is not deterministic (ADR 0013)");
-        }
         int skip = Opcodes.ACC_INTERFACE | Opcodes.ACC_ANNOTATION | Opcodes.ACC_ENUM | Opcodes.ACC_MODULE;
         String superName = reader.getSuperName();
         if ((reader.getAccess() & skip) != 0 || scan.declaresHashCode || superName == null
@@ -166,7 +286,6 @@ final class IdentityHashes {
     /** What the agent needs to know about a robot class before changing it. */
     private static final class Scan extends ClassVisitor {
         boolean declaresHashCode;
-        boolean callsIdentityHashCode;
 
         Scan() {
             super(Opcodes.ASM9);
@@ -178,15 +297,7 @@ final class IdentityHashes {
             if (name.equals("hashCode") && descriptor.equals("()I")) {
                 declaresHashCode = true;
             }
-            return new MethodVisitor(Opcodes.ASM9) {
-                @Override
-                public void visitMethodInsn(int opcode, String owner, String method, String desc,
-                        boolean isInterface) {
-                    if (owner.equals("java/lang/System") && method.equals("identityHashCode")) {
-                        callsIdentityHashCode = true;
-                    }
-                }
-            };
+            return null;
         }
     }
 
@@ -235,7 +346,7 @@ final class IdentityHashes {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
             Label fallback = new Label();
             Label end = new Label();
-            emitHash(mv, fallback, end);
+            emitHash(mv, RobotRandomness.IDENTITY_HASH_KEY, fallback, end);
             mv.visitLabel(fallback);
             if (frames) {
                 mv.visitFrame(Opcodes.F_FULL, 2, locals, 4, new Object[] {name, name, name, "java/lang/Object"});

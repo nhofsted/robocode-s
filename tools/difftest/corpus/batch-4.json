@@ -1,0 +1,987 @@
+{
+ "seed": 4,
+ "robots": [
+  {
+   "name": "sample.SittingDuck",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/sample.SittingDuck_1.0.jar",
+   "sha256": "6edd2d258998ad80a0283ee38178ec999bc3de4fc62bd41a6803a0c2a141386d",
+   "file": "sample.SittingDuck_1.0.jar"
+  },
+  {
+   "name": "doka.Test",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/doka.Test_1.0.jar",
+   "sha256": "48b05ca91dbe29c317530eceacfe6d86bdcff7db5b6b0d2a379a5c66a7c149c9",
+   "file": "doka.Test_1.0.jar"
+  },
+  {
+   "name": "slugzilla.OscillateLinear",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/slugzilla.OscillateLinear_1.0.jar",
+   "sha256": "548b4da25cc2e26cb30e30624239c32f58c7ff7757b2f0d9f3d297b65a94e994",
+   "file": "slugzilla.OscillateLinear_1.0.jar"
+  },
+  {
+   "name": "cre.Karolos",
+   "version": "0.32",
+   "pools": [
+    "duel",
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/cre.Karolos_0.32.jar",
+   "sha256": "9d35fbbe7c3c3a2d325d49028ea3c4be40906f0f5e919a49dd46f66ca734e7ca",
+   "file": "cre.Karolos_0.32.jar"
+  },
+  {
+   "name": "jt.SpearmintCT",
+   "version": "Alpha",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jt.SpearmintCT_Alpha.jar",
+   "sha256": "0e7e0319dd336ee4491377653295ec98345e2eb8c065c80c47e57d0a1c287a57",
+   "file": "jt.SpearmintCT_Alpha.jar"
+  },
+  {
+   "name": "fowl3628800.SitAndGo",
+   "version": "1.0.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/fowl3628800.SitAndGo_1.0.0.jar",
+   "sha256": "8b9b68f33190ed6d83f6da6765bbbb10e46c953bb76ac401a0e7b76d88b64ca9",
+   "file": "fowl3628800.SitAndGo_1.0.0.jar"
+  },
+  {
+   "name": "sul.Pinkbot",
+   "version": "1.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/sul.Pinkbot_1.1.jar",
+   "sha256": "f887a763d0bbc67bd354d5b88b21acc6f54ecd5bd7c14cc89626716987dcd40b",
+   "file": "sul.Pinkbot_1.1.jar"
+  },
+  {
+   "name": "lazarecki.mega.PinkerStinker",
+   "version": "0.7",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/lazarecki.mega.PinkerStinker_0.7.jar",
+   "sha256": "6924c640accb0f17f1a5aba61905fe49ced403462421bba059fcb90d5e3534f4",
+   "file": "lazarecki.mega.PinkerStinker_0.7.jar"
+  },
+  {
+   "name": "froh.micro.Aversari",
+   "version": "0.31",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/froh.micro.Aversari_0.31.jar",
+   "sha256": "c20774ee6f06e6e95b809e00880e4096c82548a5299330a14ef6ea765f1c36d2",
+   "file": "froh.micro.Aversari_0.31.jar"
+  },
+  {
+   "name": "sgp.MadHatter",
+   "version": "4.13",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/sgp.MadHatter_4.13.jar",
+   "sha256": "01d8020cd6a6421ece8849dd02ddeee46c70fa630039ac498f38f44d7dd711e9",
+   "file": "sgp.MadHatter_4.13.jar"
+  },
+  {
+   "name": "jaara.LambdaBot",
+   "version": "1.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jaara.LambdaBot_1.1.jar",
+   "sha256": "26dcddde94bd22ff72976f227e22471f6046e8c572709d1444731159b4be5658",
+   "file": "jaara.LambdaBot_1.1.jar"
+  },
+  {
+   "name": "oa.weak.FlyMk1",
+   "version": "0.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/oa.weak.FlyMk1_0.1.jar",
+   "sha256": "e475f93fba499018ff924d57b5d55c1409f184d0fe09bcdbd5489f07f13eed32",
+   "file": "oa.weak.FlyMk1_0.1.jar"
+  },
+  {
+   "name": "omens.CannonfodderNano",
+   "version": "1.4",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/omens.CannonfodderNano_1.4.jar",
+   "sha256": "38ad2ef7d26abf16f83d9c43d8378799eeec1175e276cb8d8516273cb320d924",
+   "file": "omens.CannonfodderNano_1.4.jar"
+  },
+  {
+   "name": "mladjo.GnuKlub",
+   "version": "0.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/mladjo.GnuKlub_0.1.jar",
+   "sha256": "fb5078072ff851d18e43064039a72ddc1ed1de1e4caa899dd6de76e8ad688cd7",
+   "file": "mladjo.GnuKlub_0.1.jar"
+  },
+  {
+   "name": "zen.Mirage",
+   "version": "0.9.5",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/zen.Mirage_0.9.5.jar",
+   "sha256": "19b13f7b43554c0f4433ddad2da848a39ec2bc3634ee01251b382e6ca49a7aef",
+   "file": "zen.Mirage_0.9.5.jar"
+  },
+  {
+   "name": "bts.mega.Gnarly",
+   "version": "1.4",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/bts.mega.Gnarly_1.4.jar",
+   "sha256": "77d1f463511e268b1a020f8571fe932a03760447e30067846a3c1d6090368f81",
+   "file": "bts.mega.Gnarly_1.4.jar"
+  },
+  {
+   "name": "matt.UnderDark4",
+   "version": "0.4.00",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/matt.UnderDark4_0.4.00.jar",
+   "sha256": "26b701c897d4152b5ae6acbe8f85bd3c006a06f1ff5f5f809fef6f2a6fcb111c",
+   "file": "matt.UnderDark4_0.4.00.jar"
+  },
+  {
+   "name": "jam.micro.RaikoMicro",
+   "version": "1.44",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jam.micro.RaikoMicro_1.44.jar",
+   "sha256": "cebe7fd4c3e2946803a3725cd2393b0ce7ae91e358cea41932cf8713ccb50be6",
+   "file": "jam.micro.RaikoMicro_1.44.jar"
+  },
+  {
+   "name": "gwah.GBotMarkIV",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/gwah.GBotMarkIV_1.0.jar",
+   "sha256": "6f4819d2206c5546bf8f5fbfc49cb3bab648974c1cff09b312f08e1449fff376",
+   "file": "gwah.GBotMarkIV_1.0.jar"
+  },
+  {
+   "name": "nz.A7Ibwenape",
+   "version": "A7Ibwen1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/nz.A7Ibwenape_A7Ibwen1.0.jar",
+   "sha256": "46c46d8c5155825dd6fa825ece4d6641065bbf0422c800705da9418adf434777",
+   "file": "nz.A7Ibwenape_A7Ibwen1.0.jar"
+  },
+  {
+   "name": "doka.ShinigamiKNN",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/doka.ShinigamiKNN_1.0.jar",
+   "sha256": "7ce1f15f0a454f7f0a29dffe867b728d1ebc56e98b4a9e629f31237a93b1695e",
+   "file": "doka.ShinigamiKNN_1.0.jar"
+  },
+  {
+   "name": "pulsar.PulsarMax",
+   "version": "0.8.9",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pulsar.PulsarMax_0.8.9.jar",
+   "sha256": "e16b5fa549f880e7ec75c7c2000453c966493aff3de8e0f390afdcb27e9b175b",
+   "file": "pulsar.PulsarMax_0.8.9.jar"
+  },
+  {
+   "name": "suh.nano.AngularMirrorC",
+   "version": "1.00",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/suh.nano.AngularMirrorC_1.00.jar",
+   "sha256": "d0778bbe3848d8614868c0c5207ea6c494f4e7126f62ef3ee530de917556d812",
+   "file": "suh.nano.AngularMirrorC_1.00.jar"
+  },
+  {
+   "name": "nova.Snow",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/nova.Snow_1.0.jar",
+   "sha256": "5532467b69c50d0cef42ec168f6328b09995d4a16ea56569b35fde7e29692858",
+   "file": "nova.Snow_1.0.jar"
+  },
+  {
+   "name": "robar.nano.Prestige",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/robar.nano.Prestige_1.0.jar",
+   "sha256": "cc7e2fc2fe4c0f24cf84630e69ace7c5a6ed9e954827e6cfcac9c04b4ed25c22",
+   "file": "robar.nano.Prestige_1.0.jar"
+  },
+  {
+   "name": "ap.Frederick",
+   "version": "1.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/ap.Frederick_1.1.jar",
+   "sha256": "d7f1709e4ea064f0662f383c339f57390977292fdd921933adc36e305a375899",
+   "file": "ap.Frederick_1.1.jar"
+  },
+  {
+   "name": "jcs.AutoBot",
+   "version": "4.2.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jcs.AutoBot_4.2.1.jar",
+   "sha256": "21598f5d66d81b55f831aab11b1639432ba24a42605f55b3c68a5cf148977841",
+   "file": "jcs.AutoBot_4.2.1.jar"
+  },
+  {
+   "name": "theo.simple.Lucid",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/theo.simple.Lucid_1.0.jar",
+   "sha256": "95825d0324f9c4fb72af6585d7168056b04e4f395f24a830e92c50358b70f576",
+   "file": "theo.simple.Lucid_1.0.jar"
+  },
+  {
+   "name": "conscience.Idem",
+   "version": "1.0a",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/conscience.Idem_1.0a.jar",
+   "sha256": "1635ea6692d7c89d41d0e089fced55ac334f24f429380fb686590ca58cecfb2d",
+   "file": "conscience.Idem_1.0a.jar"
+  },
+  {
+   "name": "kc.micro.WaveShark",
+   "version": "0.5",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kc.micro.WaveShark_0.5.jar",
+   "sha256": "f314fdb09b0251d04973f9dfaee8214ac4037f287bbdcb3d064903469c3ae9b2",
+   "file": "kc.micro.WaveShark_0.5.jar"
+  },
+  {
+   "name": "sqTank.waveSurfing.LionWWSVMvoid",
+   "version": "0.01",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/sqTank.waveSurfing.LionWWSVMvoid_0.01.jar",
+   "sha256": "a001c2404157bab122e0dbe312e33e79322ce0ddae55d9ab660def1c80bff7a6",
+   "file": "sqTank.waveSurfing.LionWWSVMvoid_0.01.jar"
+  },
+  {
+   "name": "jaemcrb.nano.M1Abrams",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jaemcrb.nano.M1Abrams_1.0.jar",
+   "sha256": "833cb9161e37c4d39f92e3b4337cd1ad6a1090551332d6545996ccd918348f40",
+   "file": "jaemcrb.nano.M1Abrams_1.0.jar"
+  },
+  {
+   "name": "nexus.Prototype",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/nexus.Prototype_1.0.jar",
+   "sha256": "a2a7e695391135cefcbdcc5bf701910449b546988643ea8450defe918ea7b84c",
+   "file": "nexus.Prototype_1.0.jar"
+  },
+  {
+   "name": "cx.CigaretBH",
+   "version": "1.03",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/cx.CigaretBH_1.03.jar",
+   "sha256": "8c107a759b229f8570dcce96ccedd8404545e7d3c6441a206c64d54a4209d678",
+   "file": "cx.CigaretBH_1.03.jar"
+  },
+  {
+   "name": "pez.nano.LittleEvilBrother",
+   "version": "0.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pez.nano.LittleEvilBrother_0.1.jar",
+   "sha256": "827da4e6125bad46b39226204e5512a3d9b8675dd455b95e544da93b3bd53a0c",
+   "file": "pez.nano.LittleEvilBrother_0.1.jar"
+  },
+  {
+   "name": "kms.Golden",
+   "version": "0.10",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kms.Golden_0.10.jar",
+   "sha256": "787293b2d0294b483b6862e2646c2259d28dd2ab00be208f8cdcaa13b8c0c19a",
+   "file": "kms.Golden_0.10.jar"
+  },
+  {
+   "name": "ar.horizon.Horizon",
+   "version": "1.2.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/ar.horizon.Horizon_1.2.2.jar",
+   "sha256": "2d8dee69f687581106100d53b46cea3571ed70c88e9d8601b69c48f850c20a70",
+   "file": "ar.horizon.Horizon_1.2.2.jar"
+  },
+  {
+   "name": "bvh.loki.Loki",
+   "version": "0.5",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/bvh.loki.Loki_0.5.jar",
+   "sha256": "46f15811b1cbdfa571eca677320bd0efca497cfb6ed6b672e82f8c27dfb3f0c6",
+   "file": "bvh.loki.Loki_0.5.jar"
+  },
+  {
+   "name": "mz.Adept",
+   "version": "2.65",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/mz.Adept_2.65.jar",
+   "sha256": "32cd2ab01f017a2b01e28f9e3572f433d72113d06acdd1e00992f35f8ac36a79",
+   "file": "mz.Adept_2.65.jar"
+  },
+  {
+   "name": "darkcanuck.Gaff",
+   "version": "1.50",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/darkcanuck.Gaff_1.50.jar",
+   "sha256": "64aeb84310e8951dfd7d3cd0bac948d5276e5da63f1fee4cb33419beca244ba8",
+   "file": "darkcanuck.Gaff_1.50.jar"
+  },
+  {
+   "name": "pez.nano.Icarus",
+   "version": "0.3",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pez.nano.Icarus_0.3.jar",
+   "sha256": "2ac19b41796f587c8d61072a18955943eca308ad86807fa9fb1988d24988c9df",
+   "file": "pez.nano.Icarus_0.3.jar"
+  },
+  {
+   "name": "supersample.SuperRamFire",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/supersample.SuperRamFire_1.0.jar",
+   "sha256": "34044b66a730220013d5cff6a040fb644a487ef09cb955787afd3fae070f8b80",
+   "file": "supersample.SuperRamFire_1.0.jar"
+  },
+  {
+   "name": "tjk.AFlatNatural",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/tjk.AFlatNatural_1.0.jar",
+   "sha256": "79ba036c8266600bbc60714def0fcab330171817c6517fbadb981231b477b583",
+   "file": "tjk.AFlatNatural_1.0.jar"
+  },
+  {
+   "name": "kneels.nano.Derp",
+   "version": "0.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kneels.nano.Derp_0.2.jar",
+   "sha256": "a7d4b85627bde12745484df0fcff7088a2c626c4e8f6c9588c84bb87c1e88c1c",
+   "file": "kneels.nano.Derp_0.2.jar"
+  },
+  {
+   "name": "is.fon.rs.FonDestroyer3084",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/is.fon.rs.FonDestroyer3084_1.0.jar",
+   "sha256": "475e564a78e5e0ce2ea4bf7d6693108ab9ef4d03e64e11ba8d75f3aacedb4b68",
+   "file": "is.fon.rs.FonDestroyer3084_1.0.jar"
+  },
+  {
+   "name": "oog.micro.Maui",
+   "version": "1.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/oog.micro.Maui_1.2.jar",
+   "sha256": "082672ac824f565788de5b7c7f2f60da631e081bd06bb58472140133190cb322",
+   "file": "oog.micro.Maui_1.2.jar"
+  },
+  {
+   "name": "projectx.ProjectNano",
+   "version": "2.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/projectx.ProjectNano_2.0.jar",
+   "sha256": "013011f8671162e192e697c03d66ef512673b4687fbf05af5cb167d55d926b89",
+   "file": "projectx.ProjectNano_2.0.jar"
+  },
+  {
+   "name": "jab.micro.Sanguijuela",
+   "version": "0.8",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jab.micro.Sanguijuela_0.8.jar",
+   "sha256": "f4a0381c0d57dc69ed41162117c417f07e8ca6b35812ddfacec8b8273c41129c",
+   "file": "jab.micro.Sanguijuela_0.8.jar"
+  },
+  {
+   "name": "dft.Krazy",
+   "version": "1.5",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/dft.Krazy_1.5.jar",
+   "sha256": "0daebd3dfdc2b82bc332c3ea31b9286b2da388667ce4caaacb4e237d4a1f8634",
+   "file": "dft.Krazy_1.5.jar"
+  },
+  {
+   "name": "mz.AdeptBSB",
+   "version": "1.03",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/mz.AdeptBSB_1.03.jar",
+   "sha256": "1b99f20dbc7ac14aa09dfcd38c95efdebcfebe16bc80927e277dd8c0a0f326b8",
+   "file": "mz.AdeptBSB_1.03.jar"
+  },
+  {
+   "name": "testantiswapgun.AntiSwap",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/testantiswapgun.AntiSwap_1.0.jar",
+   "sha256": "c124edd287d720b4ce632d19ef9854a068539fb756b66e4e52e191a1cfd5c82f",
+   "file": "testantiswapgun.AntiSwap_1.0.jar"
+  },
+  {
+   "name": "fromHell.C22H30N2O2S",
+   "version": "2.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/fromHell.C22H30N2O2S_2.2.jar",
+   "sha256": "2f0c643d24b1f4f1ece1a127e2d97831dde177a9191014314a64923e5bac753e",
+   "file": "fromHell.C22H30N2O2S_2.2.jar"
+  },
+  {
+   "name": "pa3k.Manta",
+   "version": "1.20",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pa3k.Manta_1.20.jar",
+   "sha256": "f83f618121cf669cd4d0132b5bb7788b226c0c727e5ee37c695635de5e30a06d",
+   "file": "pa3k.Manta_1.20.jar"
+  },
+  {
+   "name": "myl.nano.KomoriNinja",
+   "version": "1.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/myl.nano.KomoriNinja_1.1.jar",
+   "sha256": "d44ca5734824a7f7f7396016c47ed7d474751e775b1be11f1a6c22053db82f1b",
+   "file": "myl.nano.KomoriNinja_1.1.jar"
+  },
+  {
+   "name": "slugzilla.OrbitGF",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/slugzilla.OrbitGF_1.0.jar",
+   "sha256": "e069a24024ca9effc190caa3dcd00325a988f721ae1517810775fdc0021737cf",
+   "file": "slugzilla.OrbitGF_1.0.jar"
+  },
+  {
+   "name": "nan.Ihivatar_Mk_1",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/nan.Ihivatar_Mk_1_1.0.jar",
+   "sha256": "39e4a8100d3449e2887c11d3bfc5f49b1f17b8b1db639d5ff3b3525cf175bfa2",
+   "file": "nan.Ihivatar_Mk_1_1.0.jar"
+  },
+  {
+   "name": "jw.Booring",
+   "version": "1.11",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jw.Booring_1.11.jar",
+   "sha256": "649cc72201c4dd224d09f39de7b10a941a39cccfab2aad46539af56928c06fa8",
+   "file": "jw.Booring_1.11.jar"
+  },
+  {
+   "name": "acogdev.alpha",
+   "version": "0.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/acogdev.alpha_0.2.jar",
+   "sha256": "ce419ce9c2bc39bde8cad2c6e857afe7c72407a021f2f8bde6bf22670a0a76bf",
+   "file": "acogdev.alpha_0.2.jar"
+  },
+  {
+   "name": "kawigi.sbf.Teancum",
+   "version": "1.3",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kawigi.sbf.Teancum_1.3.jar",
+   "sha256": "d658099bb3f4e5c8afe3694a01d61b1a221ccfff3ad934307b659664833fa239",
+   "file": "kawigi.sbf.Teancum_1.3.jar"
+  },
+  {
+   "name": "shrub.Silver",
+   "version": "v048",
+   "pools": [
+    "duel",
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/shrub.Silver_v048.jar",
+   "sha256": "80cf8b7fd98df486f523f946f288f2d398e60187f73fd48e0f0a82c485c3a5d9",
+   "file": "shrub.Silver_v048.jar"
+  },
+  {
+   "name": "stelo.WangRobot",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/stelo.WangRobot_1.0.jar",
+   "sha256": "ab4f863cc646c04acc2c8567c26707754681e8345157c32cb502e8319e7bd533",
+   "file": "stelo.WangRobot_1.0.jar"
+  },
+  {
+   "name": "stelo.SoJNanoMelee",
+   "version": "1.1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/stelo.SoJNanoMelee_1.1.jar",
+   "sha256": "c9b3674fb8efa7d0ba86bb1e29cf2f4273540999f5f6aed72858956c24c88061",
+   "file": "stelo.SoJNanoMelee_1.1.jar"
+  },
+  {
+   "name": "axeBots.HataMoto",
+   "version": "3.09",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/axeBots.HataMoto_3.09.jar",
+   "sha256": "293a92846b40195a5de25c7379f72e0dcb08297f79d2b6fffd7d3a95b50afb2c",
+   "file": "axeBots.HataMoto_3.09.jar"
+  },
+  {
+   "name": "stelo.IntrinsicVolatility",
+   "version": "1.4",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/stelo.IntrinsicVolatility_1.4.jar",
+   "sha256": "7094c035e3b1a2f55fc6ba554b324d2c729480e844a90729cb84ee884d4fc1b9",
+   "file": "stelo.IntrinsicVolatility_1.4.jar"
+  },
+  {
+   "name": "drd.Dreadknoght",
+   "version": "0.9",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/drd.Dreadknoght_0.9.jar",
+   "sha256": "46eb8b94e33e01b49afac7f46f2ba2e7acb1a7bd5aebaa3cdd73c9151c657348",
+   "file": "drd.Dreadknoght_0.9.jar"
+  },
+  {
+   "name": "mc2.enemy.Original",
+   "version": "0.9",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/mc2.enemy.Original_0.9.jar",
+   "sha256": "ae1c21e590d274adabb63744faadac29d6fb8bf10e68cd4b2521d8cacea1f617",
+   "file": "mc2.enemy.Original_0.9.jar"
+  },
+  {
+   "name": "bzdp.BoxCar",
+   "version": "2.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/bzdp.BoxCar_2.0.jar",
+   "sha256": "22e13c11b29fb3ed958288b38d67ab6ae02bd899f16ddcf96295f621e795ecb6",
+   "file": "bzdp.BoxCar_2.0.jar"
+  },
+  {
+   "name": "spinnercat.micro.Tyger",
+   "version": "0.1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/spinnercat.micro.Tyger_0.1.jar",
+   "sha256": "0124c96687927f642e0441f28a68113e7e4bd577d22b2e49c25b4eba51a08055",
+   "file": "spinnercat.micro.Tyger_0.1.jar"
+  },
+  {
+   "name": "rsalesc.melee.Medina",
+   "version": "0.4.5",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/rsalesc.melee.Medina_0.4.5.jar",
+   "sha256": "6dc73e9f84552a48113e38274493fe771467dc1a9529997c1f0b0de881b94625",
+   "file": "rsalesc.melee.Medina_0.4.5.jar"
+  },
+  {
+   "name": "dcs.Eater_of_Worlds",
+   "version": "1.1.3-A",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/dcs.Eater_of_Worlds_1.1.3-A.jar",
+   "sha256": "b674714bdd8a9a3f2a422c44789ce0328e3c97db328d486b5a08e57c622bd1b8",
+   "file": "dcs.Eater_of_Worlds_1.1.3-A.jar"
+  },
+  {
+   "name": "stelo.Liblix",
+   "version": "0.3.1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/stelo.Liblix_0.3.1.jar",
+   "sha256": "b57c562b67fe1d94b070f683439291209df949f05ff77b9ea935369556db7e90",
+   "file": "stelo.Liblix_0.3.1.jar"
+  },
+  {
+   "name": "asd.Cthulhu",
+   "version": "1.3",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/asd.Cthulhu_1.3.jar",
+   "sha256": "208de4c048a8b6f619c676f0cc8098b758a6fd42ce06689f5549459d0d542051",
+   "file": "asd.Cthulhu_1.3.jar"
+  },
+  {
+   "name": "timmit.nano.TimDog",
+   "version": "0.33",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/timmit.nano.TimDog_0.33.jar",
+   "sha256": "ce89b54e4797f9d2b4ae3eed01c7b04346a2deab0238c3a6fdbd375cc03d1f93",
+   "file": "timmit.nano.TimDog_0.33.jar"
+  },
+  {
+   "name": "eld.Hmm",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/eld.Hmm_1.0.jar",
+   "sha256": "3af1b4c6f89c3c7f4c49a53a8ee29b39da1345676ea6351def5840f6a730ecd9",
+   "file": "eld.Hmm_1.0.jar"
+  },
+  {
+   "name": "caimano.Furia_Ceca",
+   "version": "0.22",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/caimano.Furia_Ceca_0.22.jar",
+   "sha256": "c1ce5bbf430fe9edc12da1768284be6f3d5bc35a9f48c84819f21edd32241616",
+   "file": "caimano.Furia_Ceca_0.22.jar"
+  },
+  {
+   "name": "Grystrion.RandomTrackerNOREV",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/Grystrion.RandomTrackerNOREV_1.0.jar",
+   "sha256": "d60f5b48a2def5c439757387637014db8044a99b4679e0471b4041854944dab3",
+   "file": "Grystrion.RandomTrackerNOREV_1.0.jar"
+  },
+  {
+   "name": "tvv.micro.Antares",
+   "version": "1.1.1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/tvv.micro.Antares_1.1.1.jar",
+   "sha256": "7e86c48bd1b4ccf152dbf3a9809a7b0e0fb92a23eaecec224e4d72c93484958a",
+   "file": "tvv.micro.Antares_1.1.1.jar"
+  },
+  {
+   "name": "jeremyreeder.Vincent",
+   "version": "2011.12.09",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jeremyreeder.Vincent_2011.12.09.jar",
+   "sha256": "85bb1d87fa647576e9e31a0d12406762dd23b7b94a46c7c6ccf8ed7b0eece19b",
+   "file": "jeremyreeder.Vincent_2011.12.09.jar"
+  },
+  {
+   "name": "oog.melee.Mercutio",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/oog.melee.Mercutio_1.0.jar",
+   "sha256": "7764f3b249077f2116d0cb4a1698534d0b19e9bb668295a5dc02bf0e0cfb827e",
+   "file": "oog.melee.Mercutio_1.0.jar"
+  },
+  {
+   "name": "jangs.ns51",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jangs.ns51_1.0.jar",
+   "sha256": "d5627c37cf9b8321cfec951692b25a2efa345f7ecbcd5a64fa32510d25015615",
+   "file": "jangs.ns51_1.0.jar"
+  },
+  {
+   "name": "jekl.StoneGhost",
+   "version": "0.7",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jekl.StoneGhost_0.7.jar",
+   "sha256": "8eee91f72cc3217cbf7b6948952e6457cabf32a377f7c7060d64b5ff8ba40fcd",
+   "file": "jekl.StoneGhost_0.7.jar"
+  },
+  {
+   "name": "maribo.FollowFire",
+   "version": "1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/maribo.FollowFire_1.jar",
+   "sha256": "a02bd4bb348cdb315cf19bd5379509cd34a5fc929facde67dddd57c222123e00",
+   "file": "maribo.FollowFire_1.jar"
+  },
+  {
+   "name": "voidious.Diamond",
+   "version": "1.8.28",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/voidious.Diamond_1.8.28.jar",
+   "sha256": "1ab39d66041eaf4edf5c073d8caa7c61ff5e783961adfad03914f14017d048ea",
+   "file": "voidious.Diamond_1.8.28.jar"
+  },
+  {
+   "name": "myl.nano.Graviton",
+   "version": "1.10",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/myl.nano.Graviton_1.10.jar",
+   "sha256": "4c6f85e03f5f67e918674e9ef0b5ec259998422e354c8e95ee33a3347fbcc212",
+   "file": "myl.nano.Graviton_1.10.jar"
+  },
+  {
+   "name": "maribo.melee.BMV",
+   "version": "0.1",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/maribo.melee.BMV_0.1.jar",
+   "sha256": "e18ed995c065ffd9746f408154bafefa34a02ae60945abc5fb5b20bffec21dd1",
+   "file": "maribo.melee.BMV_0.1.jar"
+  },
+  {
+   "name": "mn.nano.perceptual.Impact",
+   "version": "1.3.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/mn.nano.perceptual.Impact_1.3.0.jar",
+   "sha256": "eafd877adc4d334a5c6543360fe34cb5c6a2f17c31c32dc7ab0cfcef6e071f15",
+   "file": "mn.nano.perceptual.Impact_1.3.0.jar"
+  },
+  {
+   "name": "jsal.Jsalbot",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jsal.Jsalbot_1.0.jar",
+   "sha256": "5c0eb33b3cb7c7334eeb81c9389589cb645e70defc03b9ad1e6903bfd2d04cfa",
+   "file": "jsal.Jsalbot_1.0.jar"
+  },
+  {
+   "name": "dl.BetterWalls",
+   "version": "1.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/dl.BetterWalls_1.0.jar",
+   "sha256": "13372eab7e370c08d0c0ad7cf9142eb8434e9adb46430eb1651071169afb02d7",
+   "file": "dl.BetterWalls_1.0.jar"
+  },
+  {
+   "name": "ethdsy.MalackaTeam",
+   "version": "1.2",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/ethdsy.MalackaTeam_1.2.jar",
+   "sha256": "380eac760fe70a97a3c4a761aafabcef83c86b7cade4bca441b0e10da4ed709c",
+   "file": "ethdsy.MalackaTeam_1.2.jar"
+  },
+  {
+   "name": "l337.L337Team",
+   "version": "1.3.3.7",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/l337.L337Team_1.3.3.7.jar",
+   "sha256": "0b50498837d09091e298e441d5e94faa46c710b8610299829a951d1c8d26f610",
+   "file": "l337.L337Team_1.3.3.7.jar"
+  },
+  {
+   "name": "cx.mini.DemoniacNimrods",
+   "version": "0.50",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/cx.mini.DemoniacNimrods_0.50.jar",
+   "sha256": "742983458acb65cb939258dbaaf6a931870606383852284df77c3374a860c098",
+   "file": "cx.mini.DemoniacNimrods_0.50.jar"
+  },
+  {
+   "name": "amz.TeamDeathTeam",
+   "version": "1",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/amz.TeamDeathTeam_1.jar",
+   "sha256": "fb5c4dd47172dc207bc1b87a54f73e1d57eed56301642232ea9a801dcd74a8bb",
+   "file": "amz.TeamDeathTeam_1.jar"
+  },
+  {
+   "name": "rz.AlephTeam",
+   "version": "0.34",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/rz.AlephTeam_0.34.jar",
+   "sha256": "bdd8d3fa9492e41a8a35e8f67347ebc36c74ee850740587ace45497348bff697",
+   "file": "rz.AlephTeam_0.34.jar"
+  },
+  {
+   "name": "bvh.team.Valkiries",
+   "version": "1.0",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/bvh.team.Valkiries_1.0.jar",
+   "sha256": "1c30ae07eec48b629b6ce1ee0f8626c7e16b186d20fb238d70b99cde92a26216",
+   "file": "bvh.team.Valkiries_1.0.jar"
+  },
+  {
+   "name": "jab.DiamondStealers",
+   "version": "5",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jab.DiamondStealers_5.jar",
+   "sha256": "57f7348becec43c111d2e126240b30b5fdb8bc597ff18104df1cf07d67aaee5c",
+   "file": "jab.DiamondStealers_5.jar"
+  },
+  {
+   "name": "lxx.ConceptATeam",
+   "version": "0.8",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/lxx.ConceptATeam_0.8.jar",
+   "sha256": "8ed86d05ddbe64e77cc93352da90d53afed21a832a43f40f1525f1b67f1264aa",
+   "file": "lxx.ConceptATeam_0.8.jar"
+  },
+  {
+   "name": "gimp.GimpTeam",
+   "version": "0.1",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/gimp.GimpTeam_0.1.jar",
+   "sha256": "cbe24b9d14afcf2e5e60bd2f10c065e827592b83b6ee155e6738a52c44a54330",
+   "file": "gimp.GimpTeam_0.1.jar"
+  },
+  {
+   "name": "gh.mini.GrubbmGroup",
+   "version": "0.4",
+   "pools": [
+    "teams"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/gh.mini.GrubbmGroup_0.4.jar",
+   "sha256": "d4c8bd894ef6324d97ac984ff8ece51e4683b53b45ef4a4629155d9ddc2a5721",
+   "file": "gh.mini.GrubbmGroup_0.4.jar"
+  }
+ ]
+}

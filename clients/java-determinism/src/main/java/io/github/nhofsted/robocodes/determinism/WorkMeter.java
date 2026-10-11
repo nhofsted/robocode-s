@@ -12,13 +12,16 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Deterministic work metering and a virtual clock for robots (#15, ADR 0014).
@@ -62,6 +65,11 @@ final class WorkMeter {
                 // Counting first: a clock call costs one JDK call, not the hook's code.
                 count(node.name, method.instructions);
                 replaceClockCalls(node.name, method.instructions);
+                IdentityHashes.replaceHashCalls(method.instructions);
+                dropUnplacedLocals(method);
+                if (RobotRandomness.tracing()) {
+                    traceApiCalls(method.instructions);
+                }
             }
         }
         if (clinit == null) {
@@ -75,6 +83,70 @@ final class WorkMeter {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         node.accept(writer);
         return writer.toByteArray();
+    }
+
+    /**
+     * Diagnostics only: after each call into the Robocode API that returns a primitive,
+     * {@code hook.accept(boxed result, "Owner.method")}. Not counted as work.
+     */
+    private static void traceApiCalls(InsnList instructions) {
+        for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (!(insn instanceof MethodInsnNode call) || !call.owner.startsWith("robocode/")) {
+                continue;
+            }
+            char ret = call.desc.charAt(call.desc.indexOf(')') + 1);
+            String box = switch (ret) {
+                case 'D' -> "(D)Ljava/lang/Double;";
+                case 'J' -> "(J)Ljava/lang/Long;";
+                case 'I' -> "(I)Ljava/lang/Integer;";
+                case 'Z' -> "(Z)Ljava/lang/Boolean;";
+                default -> null;
+            };
+            if (box == null) {
+                continue;
+            }
+            String boxed = switch (ret) {
+                case 'D' -> "java/lang/Double";
+                case 'J' -> "java/lang/Long";
+                case 'I' -> "java/lang/Integer";
+                default -> "java/lang/Boolean";
+            };
+            InsnList trace = new InsnList();
+            trace.add(new InsnNode(ret == 'D' || ret == 'J' ? Opcodes.DUP2 : Opcodes.DUP));
+            trace.add(new MethodInsnNode(Opcodes.INVOKESTATIC, boxed, "valueOf", box, false));
+            trace.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
+                    "()Ljava/util/Properties;", false));
+            trace.add(new LdcInsnNode(RobotRandomness.API_TRACE_KEY));
+            trace.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+            trace.add(new TypeInsnNode(Opcodes.CHECKCAST, "java/util/function/BiConsumer"));
+            trace.add(new InsnNode(Opcodes.SWAP));
+            trace.add(new LdcInsnNode(call.owner.substring(call.owner.lastIndexOf('/') + 1) + "." + call.name));
+            trace.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/function/BiConsumer", "accept",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)V", true));
+            AbstractInsnNode last = trace.getLast();
+            instructions.insert(insn, trace);
+            insn = last;
+        }
+    }
+
+    /**
+     * Drops local variable debug entries whose range doesn't start and end at an
+     * instruction. Old compilers (javac 1.1) wrote ends in the middle of an instruction; the
+     * JVM accepts that, but ASM can't place the label and would write a negative length,
+     * which the JVM rejects ("Invalid length in LocalVariableTable"). Debug information only.
+     */
+    private static void dropUnplacedLocals(MethodNode method) {
+        if (method.localVariables == null || method.localVariables.isEmpty()) {
+            return;
+        }
+        Set<LabelNode> placed = new HashSet<>();
+        for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof LabelNode label) {
+                placed.add(label);
+            }
+        }
+        method.localVariables.removeIf(local -> !placed.contains(local.start) || !placed.contains(local.end));
     }
 
     /** {@code fuel = hook.apply(Class.forName("C").getClassLoader())}. */

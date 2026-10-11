@@ -336,6 +336,13 @@ impl<'a> BattleLoop<'a> {
             link.awaiting = None;
             link.active = false;
             link.final_execute = false;
+            // Classic starts each round with new `ExecCommands` that only keep the colors.
+            // Whether `setAdjustRadarForRobotTurn` was called is forgotten too, so that
+            // `setAdjustRadarForGunTurn` again sets the radar's body adjustment (engine-spec §8).
+            link.passthrough = Passthrough {
+                colors: link.passthrough.colors.take(),
+                ..Passthrough::default()
+            };
             if link.stream.is_none() {
                 // Could not be started: classic disables it (CANNOT_START).
                 self.battle.disable(i);
@@ -355,9 +362,12 @@ impl<'a> BattleLoop<'a> {
                 }),
             );
         }
-        // The round start snapshot comes before the robots' first `Execute`.
-        self.snapshot();
+        // As classic (`initializeRound` waits in `startRound` until every robot sleeps,
+        // then publishes): the round start snapshot includes what robots did before their
+        // first `Execute`, such as a crash's drained energy. Their console output comes
+        // with turn 1 (classic's round start snapshot doesn't read out text).
         self.collect_executes();
+        self.snapshot_with(false);
         loop {
             for i in 0..self.links.len() {
                 if let Some(commands) = self.links[i].pending.take() {
@@ -593,6 +603,11 @@ impl<'a> BattleLoop<'a> {
     }
 
     fn snapshot(&mut self) {
+        self.snapshot_with(true);
+    }
+
+    /// Broadcasts the current turn; `with_output` takes the robots' console output so far.
+    fn snapshot_with(&mut self, with_output: bool) {
         if self.observers.is_empty() {
             return;
         }
@@ -601,7 +616,14 @@ impl<'a> BattleLoop<'a> {
             .robots
             .iter()
             .zip(self.links.iter_mut())
-            .map(|(r, l)| convert::robot_snapshot(r, &l.passthrough, std::mem::take(&mut l.output)))
+            .map(|(r, l)| {
+                let output = if with_output {
+                    std::mem::take(&mut l.output)
+                } else {
+                    String::new()
+                };
+                convert::robot_snapshot(r, &l.passthrough, output)
+            })
             .collect();
         let snapshot = v1::TurnSnapshot {
             round: self.battle.round,

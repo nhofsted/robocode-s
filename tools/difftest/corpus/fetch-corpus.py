@@ -19,18 +19,39 @@ LISTS = {
     "melee": "RoboRumble/Participants/Melee",
     "teams": "RoboRumble/Participants/Teams",
 }
+# Fallback when RoboWiki is down: the same pools from the rumble server's rankings.
+RANKINGS = {"duel": "roborumble", "melee": "meleerumble", "teams": "teamrumble"}
 ARCHIVE = "https://robocode-archive.strangeautomata.com/robots/{}_{}.jar"
 AGENT = {"User-Agent": "robocode-s difftest (https://github.com/nhofsted/robocode-s)"}
 
 
-def participants(page):
-    url = "https://robowiki.net/w/index.php?title=" + urllib.parse.quote(page) + "&action=raw"
-    text = urllib.request.urlopen(urllib.request.Request(url, headers=AGENT), timeout=60).read().decode("utf-8", "replace")
+def participants(pool):
+    url = "https://robowiki.net/w/index.php?title=" + urllib.parse.quote(LISTS[pool]) + "&action=raw"
+    try:
+        text = urllib.request.urlopen(urllib.request.Request(url, headers=AGENT), timeout=60).read().decode("utf-8", "replace")
+    except OSError as e:
+        print(f"  RoboWiki unavailable ({e}); using the {RANKINGS[pool]} rankings", file=sys.stderr)
+        return ranked(RANKINGS[pool])
     entries = []
     for line in text.splitlines():
         m = re.match(r"^([A-Za-z0-9_.$]+) ([^,]+),(https?://\S+)$", line.strip())
         if m:
             entries.append({"name": m.group(1), "version": m.group(2).strip(), "listed_url": m.group(3)})
+    return entries
+
+
+def ranked(game):
+    """Participants of a rumble from its rankings page; jars come from the archive."""
+    url = "https://rumble.robowiki.net/Rankings?game=" + urllib.parse.quote(game)
+    text = urllib.request.urlopen(urllib.request.Request(url, headers=AGENT), timeout=60).read().decode("utf-8", "replace")
+    entries, seen = [], set()
+    for m in re.finditer(r"BotDetails\?game=[a-z]+&amp;name=([^\"&]+)", text):
+        bot = urllib.parse.unquote(m.group(1))
+        name, _, version = bot.partition(" ")
+        if bot in seen or not version or not re.fullmatch(r"[A-Za-z0-9_.$]+", name):
+            continue
+        seen.add(bot)
+        entries.append({"name": name, "version": version, "listed_url": ARCHIVE.format(name, version)})
     return entries
 
 
@@ -73,7 +94,7 @@ def select(args):
     for m in args.avoid:
         tested |= {r["name"] for r in json.loads(Path(m).read_text())["robots"]}
     for pool, count in [("duel", args.duel), ("melee", args.melee), ("teams", args.teams)]:
-        entries = participants(LISTS[pool])
+        entries = participants(pool)
         rng.shuffle(entries)
         picked = 0
         for e in entries:

@@ -494,6 +494,8 @@ The command state is what a robot sends with every `execute`. It replaces the ro
 | team messages | sender, recipient (null = all), serialized payload |
 | debug properties, graphics calls, output text | display only |
 
+Each round starts with a new command state that only keeps the colors (`RobotPeer.initializeRound`). That includes the robot side's record of whether `setAdjustRadarForRobotTurn` was called. While it wasn't, `setAdjustRadarForGunTurn(b)` also sets `adjustRadarForBodyTurn = b`. A robot that turns body adjustment off in one round, then only calls `setAdjustRadarForGunTurn(true)` in the next round, therefore has its radar adjusted for the body again (`catcat20.Matcha`).
+
 **Validation on receipt:**
 - `maxTurnRate = min(abs(maxTurnRate), MAX_TURN_RATE_RADIANS)`;
 - `maxVelocity = min(abs(maxVelocity), 8)`;

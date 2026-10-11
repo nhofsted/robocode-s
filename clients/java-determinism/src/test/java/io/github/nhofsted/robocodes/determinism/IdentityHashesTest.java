@@ -115,6 +115,63 @@ class IdentityHashesTest {
                 ObjectStreamClass.lookup(wave).getSerialVersionUID());
     }
 
+    /** Arrays as keys of the JDK's hash collections, hashed on a robot thread. */
+    @Test
+    void robotArraysGetTableHashesInHashCollections() throws Exception {
+        String robot = "sample.Fire (11)";
+        int[] hashes = inGroup(robot, () -> {
+            double[] first = {1};
+            double[] second = {2};
+            java.util.Map<double[], Integer> map = new java.util.HashMap<>();
+            map.put(second, 2);
+            map.put(first, 1);
+            return new int[] {java.util.Objects.hashCode(first), java.util.Objects.hashCode(second),
+                    map.get(first), new java.util.concurrent.ConcurrentHashMap<>(map).get(second)};
+        });
+        long base = RobotRandomness.baseSeed(SEED, robot);
+        assertArrayEquals(new int[] {
+                RobotRandomness.tableHashCode(base, 2),
+                RobotRandomness.tableHashCode(base, 1), 1, 2}, hashes);
+        double[] elsewhere = {3};
+        assertEquals(System.identityHashCode(elsewhere), java.util.Objects.hashCode(elsewhere),
+                "off robot threads, arrays keep the JVM's hash");
+    }
+
+    /** Robot code that reaches the JVM's identity hash directly. */
+    public static class Hasher implements Supplier<int[]> {
+        @Override
+        public int[] get() {
+            int[] array = {1};
+            Object object = new Object();
+            return new int[] {array.hashCode(), System.identityHashCode(object), ((Object) array).hashCode(),
+                    new Hasher().super_hashCode(), System.identityHashCode(array)};
+        }
+
+        int super_hashCode() {
+            return super.hashCode();
+        }
+
+        @Override
+        public int hashCode() {
+            return super.hashCode();
+        }
+    }
+
+    @Test
+    void robotCodeAsksTheTableForIdentityHashes() throws Exception {
+        String robot = "sample.Fire (12)";
+        Class<?> hasher = robotClass(Hasher.class);
+        @SuppressWarnings("unchecked")
+        int[] hashes = inGroup(robot, () -> ((Supplier<int[]>) newInstance(hasher)).get());
+        long base = RobotRandomness.baseSeed(SEED, robot);
+        assertArrayEquals(new int[] {
+                RobotRandomness.tableHashCode(base, 1),
+                RobotRandomness.tableHashCode(base, 2),
+                RobotRandomness.tableHashCode(base, 1),
+                RobotRandomness.tableHashCode(base, 3),
+                RobotRandomness.tableHashCode(base, 1)}, hashes);
+    }
+
     private static Class<?> robotClass(Class<?> original) throws ClassNotFoundException {
         ClassLoader loader = new RobotClassLoader(IdentityHashesTest.class.getClassLoader(), Set.of(original.getName()));
         return loader.loadClass(original.getName());

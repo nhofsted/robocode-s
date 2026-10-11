@@ -70,6 +70,8 @@ public final class DeterminismAgent {
         // Installed before Enum.hashCode() uses it; answers like the JVM until configured.
         System.getProperties().put(RobotRandomness.IDENTITY_HASH_KEY,
                 (ToIntFunction<Object>) RobotRandomness::identityHash);
+        System.getProperties().put(RobotRandomness.HASH_CODE_KEY, (ToIntFunction<Object>) RobotRandomness::hashCode);
+        System.getProperties().put(RobotRandomness.TABLE_HASH_KEY, (ToIntFunction<Object>) RobotRandomness::tableHash);
         // Work metering and the virtual clock for robot classes (ADR 0014).
         System.getProperties().put(RobotRandomness.FUEL_KEY, (Function<Object, Object>) RobotRandomness::fuel);
         System.getProperties().put(RobotRandomness.CLOCK_NANOS_KEY,
@@ -77,9 +79,13 @@ public final class DeterminismAgent {
         System.getProperties().put(RobotRandomness.CLOCK_MILLIS_KEY,
                 (ToLongFunction<Object>) RobotRandomness::virtualMillis);
         System.getProperties().put(RobotRandomness.TURN_KEY, (Runnable) RobotRandomness::turn);
+        System.getProperties().put(RobotRandomness.API_TRACE_KEY,
+                (java.util.function.BiConsumer<Object, Object>) RobotRandomness::traceApi);
         System.getProperties().put(STOP_KEY, (Consumer<Object>) DeterminismAgent::awaitRobotThread);
         instrumentation.addTransformer(new Transformer(), true);
-        instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class);
+        instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class,
+                java.util.HashMap.class, java.util.WeakHashMap.class, java.util.Hashtable.class,
+                java.util.concurrent.ConcurrentHashMap.class, java.util.Objects.class);
         RobotRandomness.markAgentInstalled();
     }
 
@@ -264,6 +270,14 @@ public final class DeterminismAgent {
                 ProtectionDomain protectionDomain, byte[] classfileBuffer) {
             if ("robocode/util/Utils".equals(className)) {
                 return patchUtils(classfileBuffer);
+            }
+            if (IdentityHashes.HASHING_CLASSES.contains(className)) {
+                try {
+                    return IdentityHashes.patchHashCalls(classfileBuffer);
+                } catch (Throwable t) {
+                    System.err.println("DeterminismAgent: could not patch " + className + ": " + t);
+                    return null;
+                }
             }
             if ("java/lang/Enum".equals(className)) {
                 try {

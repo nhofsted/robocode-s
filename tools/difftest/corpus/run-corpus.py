@@ -52,7 +52,7 @@ def plan(manifest, seed, duels, melees, team_battles):
     return battles
 
 
-def oracle(battle, jars, recordings, suffix=""):
+def oracle(battle, jars, recordings, suffix="", timeout=ORACLE_TIMEOUT):
     out = recordings / f"{battle['name']}{suffix}.jsonl.gz"
     if out.exists():
         return out, None
@@ -73,9 +73,9 @@ def oracle(battle, jars, recordings, suffix=""):
     with open(log, "w") as f:
         try:
             # A robot stuck in an endless loop makes classic wait 10 minutes per turn.
-            r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=f, timeout=ORACLE_TIMEOUT)
+            r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
         except subprocess.TimeoutExpired:
-            return None, f"oracle timed out after {ORACLE_TIMEOUT} s (a robot stuck in a loop?), see {log}"
+            return None, f"oracle timed out after {timeout} s (a robot stuck in a loop?), see {log}"
     if r.returncode != 0:
         return None, f"oracle failed (exit {r.returncode}), see {log}"
     out.with_suffix(".tmp.gz").rename(out)
@@ -146,6 +146,10 @@ def main():
                    help="at most this many melee and team battles at once (each runs many JVMs)")
     p.add_argument("--check-oracle", action="store_true",
                    help="record every battle twice in classic and require identical recordings")
+    p.add_argument("--oracle-timeout", type=int, default=ORACLE_TIMEOUT,
+                   help="seconds per classic recording (default 15 minutes; very slow robots need more)")
+    p.add_argument("--plan", help="fight the battles of this plan.json (e.g. an earlier run's) instead of a new plan")
+    p.add_argument("--only", help="comma-separated battle names: fight only these (e.g. 25-duel)")
     args = p.parse_args()
     manifest = json.loads(Path(args.manifest).read_text())
     jar_dir = Path(args.jars).resolve()
@@ -153,7 +157,13 @@ def main():
     out = Path(args.out).resolve()
     recordings = out / "recordings"
     recordings.mkdir(parents=True, exist_ok=True)
-    battles = plan(manifest, args.seed, args.duels, args.melees, args.team_battles)
+    if args.plan:
+        battles = json.loads(Path(args.plan).read_text())
+    else:
+        battles = plan(manifest, args.seed, args.duels, args.melees, args.team_battles)
+    if args.only:
+        names = args.only.split(",")
+        battles = [b for b in battles if b["name"] in names]
     (out / "plan.json").write_text(json.dumps(battles, indent=1) + "\n")
     total_rounds = sum(b["rounds"] for b in battles)
     print(f"{len(battles)} battles, {total_rounds} rounds; {args.oracle_jobs} classic and {args.jobs} live jobs",
@@ -170,11 +180,11 @@ def main():
     # Phase 1: classic. Its timing depends on the machine's load (#16), so it runs with
     # limited parallelism.
     def record(battle):
-        recording, error = oracle(battle, jars, recordings)
+        recording, error = oracle(battle, jars, recordings, timeout=args.oracle_timeout)
         if error:
             return battle, None, "ORACLE-FAIL " + error
         if args.check_oracle:
-            again, error = oracle(battle, jars, recordings, ".check")
+            again, error = oracle(battle, jars, recordings, ".check", args.oracle_timeout)
             if error:
                 return battle, None, "ORACLE-FAIL " + error
             differs = same_recording(recording, again)

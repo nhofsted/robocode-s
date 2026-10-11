@@ -105,4 +105,6 @@ The runner works in two phases:
 - **`RACE`:** a known classic race (engine-spec §15.3). Only the rounds before it count.
 - **`ORACLE-NONDETERMINISTIC`:** classic itself isn't reproducible for this battle; reported with `--check-oracle`, which records every battle twice.
 
-Robots that make classic itself nondeterministic are kept in the manifest with an `exclude` reason and left out of the plan.
+Robots that make classic itself nondeterministic are kept in the manifest with an `exclude` reason and left out of the plan. So are robots that can loop forever without an action: classic only ends that through wall-clock skipped turns, which become reproducible with CPU budgets (#15).
+
+To fight some battles of an earlier run again, e.g. after a fix: `--plan <out>/plan.json --only 25-duel,31-melee`.

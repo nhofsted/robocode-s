@@ -3,6 +3,9 @@
  */
 package io.github.nhofsted.robocodes.determinism;
 
+import java.lang.ref.Reference;
+import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -30,6 +33,8 @@ import java.util.function.Supplier;
  *   Utils.getRandom(): one new java.util.Random(mix64(base ^ 0x5554494C53524E44L)) per robot
  *   k-th identity hash code (k = 1, 2, ...):
  *     h = (int) (mix64((base ^ 0x4944454E54495459L) + k * 0x9E3779B97F4A7C15L) >>> 33), 1 if 0
+ *   k-th table identity hash code (arrays, super.hashCode(), System.identityHashCode):
+ *     the k-th identity hash code above, with base ^ 0x5441424C45484153L as base
  * </pre>
  * where {@code mix64} is the SplitMix64 finalizer. Calls from threads that do
  * not belong to a robot keep the JDK's normal behavior.
@@ -56,6 +61,17 @@ public final class RobotRandomness {
      * by robot classes and {@code Enum.hashCode()} as rewritten by the agent (ADR 0013).
      */
     static final String IDENTITY_HASH_KEY = "robocodes.determinism.identityHash";
+    /**
+     * System property key of the hash code hook for calls that may reach
+     * {@code Object.hashCode()} of an array (a {@code ToIntFunction<Object>}): the JDK's hash
+     * collections and robot code, as rewritten by the agent (ADR 0013).
+     */
+    static final String HASH_CODE_KEY = "robocodes.determinism.hashCode";
+    /**
+     * System property key of the hook for robot code's {@code System.identityHashCode(o)}
+     * and {@code super.hashCode()} on {@code Object} (a {@code ToIntFunction<Object>}).
+     */
+    static final String TABLE_HASH_KEY = "robocodes.determinism.tableHash";
     /** Hook giving robot classes their robot's work counter (a {@code Function<ClassLoader, long[]>}). */
     static final String FUEL_KEY = "robocodes.determinism.fuel";
     /** Virtual {@code System.nanoTime()} for robot code (a {@code ToLongFunction<long[]>}). */
@@ -84,6 +100,7 @@ public final class RobotRandomness {
     private static final long MATH_SALT = 0x4D41544852414E44L; // "MATHRAND"
     private static final long UTILS_SALT = 0x5554494C53524E44L; // "UTILSRND"
     private static final long HASH_SALT = 0x4944454E54495459L; // "IDENTITY"
+    private static final long TABLE_SALT = 0x5441424C45484153L; // "TABLEHAS"
     private static final long GOLDEN_GAMMA = 0x9E3779B97F4A7C15L;
 
     private static volatile boolean agentInstalled;
@@ -93,6 +110,24 @@ public final class RobotRandomness {
      * short stack, to compare runs (e.g. classic and robocode-s) where they diverge.
      */
     private static final String TRACE = System.getProperty("robocodes.traceDeterminism");
+
+    /**
+     * Diagnostics: with the trace on, robot code's calls into the Robocode API that return
+     * a primitive also trace the value (a {@code BiConsumer<Object, Object>}: value, method).
+     */
+    static final String API_TRACE_KEY = "robocodes.determinism.apiTrace";
+
+    static boolean tracing() {
+        return TRACE != null;
+    }
+
+    /** A robot's Robocode API call returned {@code value}. */
+    static void traceApi(Object value, Object method) {
+        if (TRACE != null) {
+            trace("api " + method + " " + (value instanceof Double d ? Long.toHexString(Double.doubleToRawLongBits(d))
+                    + " " + d : value));
+        }
+    }
 
     private static final ThreadLocal<Boolean> TRACING = ThreadLocal.withInitial(() -> false);
 
@@ -187,6 +222,31 @@ public final class RobotRandomness {
         return hash;
     }
 
+    /**
+     * {@code o.hashCode()}, but for an array (which inherits the JVM's identity hash, e.g. a
+     * {@code double[]} used as a {@code HashMap} key) on a robot thread: its
+     * {@linkplain #tableHash table identity hash}.
+     */
+    static int hashCode(Object o) {
+        return o.getClass().isArray() ? tableHash(o) : o.hashCode();
+    }
+
+    /**
+     * The identity hash code of an object that has no field for it (an array, or any object
+     * asked through {@code System.identityHashCode} or {@code super.hashCode()}): on a robot
+     * thread, the next value of the robot's table hash stream when it is first asked, kept
+     * in a weak identity table; otherwise the JVM's own. A separate stream, so these can't
+     * shift the robot's other identity hashes.
+     */
+    static int tableHash(Object o) {
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream == null) {
+            return System.identityHashCode(o);
+        }
+        return stream.tableHash(o);
+    }
+
     /** Whether the agent rewrote {@code Math.random()} and {@code new Random()}. */
     public static boolean isAgentInstalled() {
         return agentInstalled;
@@ -264,9 +324,20 @@ public final class RobotRandomness {
 
     /** The work counter of the robot whose classes {@code loader} defines. */
     static Object fuel(Object loader) {
+        long[] fuel;
         synchronized (FUEL) {
-            return FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
+            fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
         }
+        if (TRACE != null) {
+            // Robot classes initialize on the robot's thread: remember the counter for the
+            // per-turn trace.
+            RobotRandomness randomness = current;
+            Stream stream = randomness == null ? null : randomness.currentStream();
+            if (stream != null) {
+                stream.fuel = fuel;
+            }
+        }
+        return fuel;
     }
 
     /** One more turn for the robot of the current thread. */
@@ -275,6 +346,9 @@ public final class RobotRandomness {
         Stream stream = randomness == null ? null : randomness.currentStream();
         if (stream != null) {
             stream.turn();
+            if (TRACE != null && stream.fuel != null) {
+                trace("turn " + stream.turns() + " fuel " + stream.fuel[0]);
+            }
         }
     }
 
@@ -314,6 +388,11 @@ public final class RobotRandomness {
         return hash == 0 ? 1 : hash;
     }
 
+    /** The k-th (1-based) table identity hash code a robot hands out (see {@link #tableHash}). */
+    public static int tableHashCode(long baseSeed, long k) {
+        return identityHashCode(baseSeed ^ TABLE_SALT, k);
+    }
+
     /** SplitMix64 finalizer. */
     static long mix64(long z) {
         z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
@@ -338,6 +417,12 @@ public final class RobotRandomness {
         private long created;
         private long hashed;
         private long turns;
+        private long tabled;
+        /** The robot's work counter, for the trace only. */
+        volatile long[] fuel;
+        /** Table identity hashes, by object identity; entries go when the object does. */
+        private final Map<IdentityKey, Integer> table = new HashMap<>();
+        private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
 
         Stream(long base) {
             this.base = base;
@@ -357,12 +442,51 @@ public final class RobotRandomness {
             return identityHashCode(base, ++hashed);
         }
 
+        synchronized int tableHash(Object o) {
+            for (Reference<?> gone; (gone = collected.poll()) != null; ) {
+                table.remove(gone);
+            }
+            Integer hash = table.get(new IdentityKey(o, null));
+            if (hash == null) {
+                hash = tableHashCode(base, ++tabled);
+                table.put(new IdentityKey(o, collected), hash);
+                if (TRACE != null) {
+                    trace("tableHash " + o.getClass().getName() + " " + hash);
+                }
+            }
+            return hash;
+        }
+
         synchronized void turn() {
             turns++;
         }
 
         synchronized long turns() {
             return turns;
+        }
+    }
+
+    /** A weak reference that is equal to another one to the same object. */
+    private static final class IdentityKey extends WeakReference<Object> {
+        private final int hash;
+
+        IdentityKey(Object o, ReferenceQueue<Object> queue) {
+            super(o, queue);
+            hash = System.identityHashCode(o);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            Object o = get();
+            return o != null && other instanceof IdentityKey key && key.get() == o;
         }
     }
 }
