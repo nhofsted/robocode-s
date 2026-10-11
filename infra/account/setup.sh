@@ -4,7 +4,9 @@
 # what already exists.
 #
 #   aws sso login --profile nodaly
-#   infra/account/setup.sh
+#   ACCOUNT_EMAIL=you+robocode-s@example.com infra/account/setup.sh
+#
+# ACCOUNT_EMAIL becomes the new account's root email and receives the budget alerts.
 #
 # It creates the robocode-s member account, assigns AdministratorAccess to the Identity Center
 # user, attaches the guardrail SCP, adds the robocode-s CLI profile, creates a $1/month budget
@@ -14,8 +16,7 @@ set -euo pipefail
 MGMT_PROFILE=${MGMT_PROFILE:-nodaly}
 PROFILE=robocode-s
 ACCOUNT_NAME=robocode-s
-ACCOUNT_EMAIL=${ACCOUNT_EMAIL:-nick.hofstede+robocode-s@gmail.com}
-ALERT_EMAIL=${ALERT_EMAIL:-nick.hofstede@gmail.com}
+ACCOUNT_EMAIL=${ACCOUNT_EMAIL:?set ACCOUNT_EMAIL to the root email of the new account}
 PERMISSION_SET=AdministratorAccess
 SCP_NAME=robocode-s-guardrails
 CDK_VERSION=2.1143.0
@@ -115,11 +116,11 @@ if ! aws budgets describe-budget --profile "$PROFILE" --account-id "$ACCOUNT_ID"
 	aws budgets create-budget --profile "$PROFILE" --account-id "$ACCOUNT_ID" \
 		--budget '{"BudgetName":"robocode-s-monthly","BudgetType":"COST","TimeUnit":"MONTHLY","BudgetLimit":{"Amount":"1","Unit":"USD"}}' \
 		--notifications-with-subscribers "[
-			{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":50,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$ALERT_EMAIL\"}]},
-			{\"Notification\":{\"NotificationType\":\"FORECASTED\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":100,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$ALERT_EMAIL\"}]}
+			{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":50,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$ACCOUNT_EMAIL\"}]},
+			{\"Notification\":{\"NotificationType\":\"FORECASTED\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":100,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$ACCOUNT_EMAIL\"}]}
 		]"
 fi
-echo "robocode-s-monthly: \$1, alerts to $ALERT_EMAIL"
+echo "robocode-s-monthly: \$1, alerts to $ACCOUNT_EMAIL"
 
 step "CDK bootstrap"
 npx -y "aws-cdk@$CDK_VERSION" bootstrap --profile "$PROFILE" \
