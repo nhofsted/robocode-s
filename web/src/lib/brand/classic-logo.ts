@@ -150,6 +150,5 @@ export const S_OFFSET = 328;
 /**
  * Placement of the flame S (FighterText) after the word, in units of the letters' height:
  * horizontal offset from the end of the word, vertical offset from centred, and its height.
- * Tuned on /brand.
  */
 export const FLAME_S = { x: -0.681, y: -0.05, size: 1.6 };

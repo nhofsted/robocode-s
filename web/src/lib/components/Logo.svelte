@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The site logo: classic Robocode's logo letters with their glow, and the flame S of
-	// robocode-s tucked behind the end of the word (variation 1h on /brand).
+	// robocode-s tucked behind the end of the word.
 	import ClassicWordmark from '#lib/brand/ClassicWordmark.svelte';
 
 	interface Props {
