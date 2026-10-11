@@ -23,7 +23,7 @@ The website (`web/`) needs Node 24 and pnpm; see [web/README.md](web/README.md).
 
 ## Repository layout
 
-- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli)
+- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli, replay)
 - `proto/`: wire protocol schema
 - `clients/java-compat/`: the robot host for classic Java robots (classic's robot side over the robocode-s protocol)
 - `clients/java-determinism/`: Java agent for per-robot seeded randomness

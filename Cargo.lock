@@ -575,6 +575,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "robocode-s-replay"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "robocode-s-fdlibm",
+ "serde_json",
+]
+
+[[package]]
 name = "robocode-s-runner"
 version = "0.1.0"
 dependencies = [
