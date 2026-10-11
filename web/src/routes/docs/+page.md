@@ -12,4 +12,4 @@ robocode-s is a reimplementation of [Robocode](https://robocode.sourceforge.io/)
 
 > **Status:** robocode-s is in early development and has no release yet. Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
 
-Building robocode-s itself, the protocol and the engine internals are documented in the repository: the [design document](https://github.com/nhofsted/robocode-s/blob/main/docs/design.md), the [engine specification](https://github.com/nhofsted/robocode-s/blob/main/docs/engine-spec.md) and the [architecture decision records](https://github.com/nhofsted/robocode-s/blob/main/docs/adr/README.md).
+Building robocode-s itself and the engine internals are documented in the repository: the [engine specification](https://github.com/nhofsted/robocode-s/blob/main/docs/engine-spec.md) and the [architecture decision records](https://github.com/nhofsted/robocode-s/blob/main/docs/adr/README.md).
