@@ -24,8 +24,9 @@
 	--text-2: #aab7c9;
 	--muted: #8794a8;
 
-	--radar: #5ee38a;
-	--radar-dim: #2f7a49;
+	/* Classic's logo green: pure hue 120, like the logo's rgb(0 255 0), light enough for text. */
+	--radar: #55ef55;
+	--radar-dim: #2a8a2a;
 	--amber: #ffc25c;
 	--danger: #ff7a6b;
 	--win: #3987e5;

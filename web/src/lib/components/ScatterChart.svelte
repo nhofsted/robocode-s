@@ -148,7 +148,7 @@
 		font-size: 11px;
 	}
 	.dot {
-		fill: rgb(94 227 138 / 0.55);
+		fill: color-mix(in srgb, var(--radar) 55%, transparent);
 	}
 	.dot.active {
 		fill: var(--radar);
