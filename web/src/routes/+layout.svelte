@@ -20,7 +20,9 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href="/favicon.png" type="image/png" />
+	<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+	<link rel="icon" href="/favicon-256.png" sizes="256x256" type="image/png" />
+	<link rel="apple-touch-icon" href="/favicon-256.png" />
 </svelte:head>
 
 <Ground />

@@ -8,7 +8,7 @@ Once a day, the rankings Lambda (design §12.6) publishes the rumble's state as 
 |---|---|---|
 | `/data/v1/rumbles.json` | `RumbleIndex`: all rumbles with bot and battle counts | daily |
 | `/data/v1/rankings/<rumble>.json` | `Rankings`: one row per bot, sorted by APS | daily |
-| `/data/v1/bots/<bot id>.json` | `BotDetails`: metadata, versions, and per rumble the metrics, all pairings and a year of daily history across versions | daily, for bots whose numbers changed |
+| `/data/v1/bots/<bot id>.json` | `BotDetails`: metadata, versions, and per rumble the metrics, all pairings and its history since the first version (daily for a year, weekly before) | daily, for bots whose numbers changed |
 
 - **Rumble ids** are the division (`1v1`, `melee`, `teams`, `twinduel`), plus `-mini`, `-micro` or `-nano` for the weight-class rumbles (`1v1-micro`).
 - **Bot ids** are the robot's fully qualified class name without version (`sample.Walls`). A bot's ranked version is in the file; metrics and pairings belong to the current version, the history spans all versions (each day records the version ranked then).
@@ -18,7 +18,7 @@ Once a day, the rankings Lambda (design §12.6) publishes the rumble's state as 
 
 - Percentages are 0–100, timestamps ISO 8601 UTC, dates `YYYY-MM-DD`.
 - Within v1, fields are only added, never removed or changed in meaning. Anything else is v2, under `/data/v2/`, published next to v1 until the site has moved.
-- Files are served through CloudFront, compressed, cached until shortly after the next daily run. Uncompressed, a 1v1 ranking with 1,100 bots is about 250 KB and a bot file with all its pairings about 150 KB (measured on the fixtures at 600 bots: 131 KB and 76 KB).
+- Files are served through CloudFront, compressed, cached until shortly after the next daily run. Uncompressed, a 1v1 ranking with 1,100 bots is about 250 KB and a bot file with all its pairings and its full history about 150–200 KB (measured on the fixtures at 600 bots: 131 KB, and 104 KB for a bot with 2.5 years of history).
 
 ## Sizes and cost
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	// "Robocode" in green Helvetica, with the "S" of robocode-s appended like a version badge.
+	import FighterText from './FighterText.svelte';
 	interface Props {
 		/** Font size of "Robocode" in px; the S is larger. */
 		size?: number;
@@ -8,13 +9,13 @@
 </script>
 
 <span class="logo" style:font-size="{size}px" role="img" aria-label="robocode-s">
-	<span class="word" aria-hidden="true">Robocode</span><span class="sf" aria-hidden="true">S</span>
+	<span class="word" aria-hidden="true">Robocode</span><span class="s"><FighterText text="S" height="1.9em" /></span>
 </span>
 
 <style>
 	.logo {
 		display: inline-flex;
-		align-items: baseline;
+		align-items: center;
 		white-space: nowrap;
 	}
 	.word {
@@ -23,10 +24,9 @@
 		letter-spacing: -0.01em;
 		color: var(--radar);
 	}
-	.sf {
-		font-size: 1.45em;
-		margin-left: 0.04em;
+	.s {
+		margin-left: -0.55em;
 		position: relative;
-		top: 0.08em;
+		top: 0.06em;
 	}
 </style>
