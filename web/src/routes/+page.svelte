@@ -1,0 +1,204 @@
+<script lang="ts">
+	import { resolve } from '$app/paths';
+	import Battlefield from '#lib/components/Battlefield.svelte';
+	import { REPO_URL } from '#lib/site.ts';
+
+	const milestones: { id: string; name: string; state: 'done' | 'active' | 'planned' }[] = [
+		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
+		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'active' },
+		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'planned' },
+		{ id: 'M3', name: 'Isolation: containers, remote runners', state: 'planned' },
+		{ id: 'M4', name: 'Robots in Python, .NET, Rust, C/C++, Kotlin', state: 'planned' },
+		{ id: 'M5', name: 'The rumble: rankings, volunteers, submissions', state: 'planned' },
+		{ id: 'M5b', name: 'Battle replays in the browser', state: 'planned' }
+	];
+	const STATE_LABEL = { done: 'Done', active: 'In progress', planned: 'Planned' };
+</script>
+
+<svelte:head>
+	<title>robocode-s · Robocode, rebuilt</title>
+	<meta
+		name="description"
+		content="robocode-s is a reimplementation of Robocode: a fast Rust engine, robots in any language, bit-exact with classic robots, and a distributed rumble."
+	/>
+</svelte:head>
+
+<section class="hero">
+	<div class="field"><Battlefield /></div>
+	<div class="container hero-text">
+		<h1>Build a tank.<br />Write its brain.<br />Win the rumble.</h1>
+		<p class="lead">
+			robocode-s is a reimplementation of <a href="https://robocode.sourceforge.io/">Robocode</a>
+			with a Rust engine and robots that run in their own process, in any language. Classic Java
+			robots run unmodified, turn for turn identical to classic Robocode.
+		</p>
+		<p class="ctas">
+			<a class="button" href={resolve('/docs/getting-started')}>Get started</a>
+			<a class="button secondary" href={resolve('/rankings')}>Rankings</a>
+		</p>
+	</div>
+</section>
+
+<div class="container">
+	<section class="features" aria-label="Features">
+		<article class="panel">
+			<h2 class="pixel">Classic</h2>
+			<p>
+				Existing robot jars run as they are. Every turn matches classic Robocode 1.11.1 exactly,
+				checked against real RoboRumble robots.
+			</p>
+		</article>
+		<article class="panel">
+			<h2 class="pixel">Any language</h2>
+			<p>
+				Robots talk to the engine over one open protocol, so they can be written in Java, Kotlin,
+				Python, C#, Rust or C/C++ and run locally, in a container or on another machine.
+			</p>
+		</article>
+		<article class="panel">
+			<h2 class="pixel">Reproducible</h2>
+			<p>
+				In deterministic mode the same seed gives the same battle on every machine. Find a bug
+				once, replay it forever.
+			</p>
+		</article>
+		<article class="panel">
+			<h2 class="pixel">The rumble</h2>
+			<p>
+				A distributed league: volunteers run the battles, results are cross-checked, and every
+				matchup can be watched in the browser.
+			</p>
+		</article>
+	</section>
+
+	<section class="status">
+		<h2>Where we are</h2>
+		<p>
+			robocode-s is in early development. The engine, protocol, server and the host for classic
+			Java robots already fight real RoboRumble robots identically to classic; there is no
+			release to download yet. Follow along on <a href={REPO_URL}>GitHub</a>.
+		</p>
+		<ol class="milestones">
+			{#each milestones as m (m.id)}
+				<li class={m.state}>
+					<span class="id mono">{m.id}</span>
+					<span class="name">{m.name}</span>
+					<span class="state">{STATE_LABEL[m.state]}</span>
+				</li>
+			{/each}
+		</ol>
+	</section>
+</div>
+
+<style>
+	.hero {
+		position: relative;
+		min-height: 420px;
+		border-bottom: 1px solid var(--line);
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+	}
+	.field {
+		position: absolute;
+		inset: 0;
+		opacity: 0.85;
+	}
+	.hero-text {
+		position: relative;
+		width: 100%;
+		padding-top: 3rem;
+		padding-bottom: 3rem;
+		pointer-events: none;
+	}
+	.hero-text a {
+		pointer-events: auto;
+	}
+	.hero h1 {
+		font-size: clamp(1.2rem, 4.5vw, 2.1rem);
+		line-height: 1.6;
+		margin: 0 0 1rem;
+	}
+	.lead {
+		max-width: 38rem;
+		font-size: 1.1rem;
+		color: var(--text);
+		background: color-mix(in srgb, var(--bg) 70%, transparent);
+		padding: 0.25rem 0;
+	}
+	.ctas {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		margin-top: 1.5rem;
+	}
+
+	.features {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+		gap: 1rem;
+		margin-top: 2.5rem;
+	}
+	.features article {
+		padding: 1.1rem 1.2rem;
+	}
+	.features h2 {
+		font-size: 0.8rem;
+		color: var(--amber);
+		margin: 0 0 0.8rem;
+	}
+	.features p {
+		margin: 0;
+		color: var(--text-2);
+	}
+
+	.status {
+		margin-top: 3rem;
+		max-width: 48rem;
+	}
+	.milestones {
+		list-style: none;
+		padding: 0;
+		margin: 1.2rem 0 0;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--panel);
+	}
+	.milestones li {
+		display: grid;
+		grid-template-columns: 3rem 1fr auto;
+		gap: 0.75rem;
+		padding: 0.55rem 0.9rem;
+		border-bottom: 1px solid var(--line);
+		align-items: baseline;
+	}
+	.milestones li:last-child {
+		border-bottom: 0;
+	}
+	.id {
+		color: var(--muted);
+	}
+	.state {
+		font-size: 0.8rem;
+		color: var(--muted);
+	}
+	.done .state {
+		color: var(--radar);
+	}
+	.done .state::before {
+		content: '✔ ';
+	}
+	.active .state {
+		color: var(--amber);
+	}
+	.active .state::before {
+		content: '▶ ';
+	}
+	.active .name {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.planned .name {
+		color: var(--text-2);
+	}
+</style>

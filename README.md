@@ -19,6 +19,8 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 ./gradlew build            # Java libraries, sample robots and difftest oracle
 ```
 
+The website (`web/`) needs Node 24 and pnpm; see [web/README.md](web/README.md).
+
 ## Repository layout
 
 - `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli)
@@ -27,7 +29,8 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 - `clients/java-determinism/`: Java agent for per-robot seeded randomness
 - `robots/samples/`: classic sample robots (EPL-2.0)
 - `tools/difftest/`: oracle that records classic battles for differential testing
-- `docs/`: [design](docs/design.md), [engine specification](docs/engine-spec.md) and [architecture decision records](docs/adr/README.md)
+- `web/`: the rumble website and user documentation (SvelteKit, static)
+- `docs/`: [design](docs/design.md), [engine specification](docs/engine-spec.md) and [architecture decision records](docs/adr/README.md); the rumble's [data files](docs/rumble-data.md)
 
 ## License
 

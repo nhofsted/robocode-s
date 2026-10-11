@@ -68,3 +68,24 @@ jobs:
         run: cargo run --locked --release -p robocode-s-difftest --bin live -- "$RUNNER_TEMP"/recordings/*.jsonl.gz
         env:
           ROBOCODES_JAVA: ${{ env.JAVA_HOME }}/bin/java
+
+  web:
+    name: Website
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
