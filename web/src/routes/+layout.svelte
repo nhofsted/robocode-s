@@ -55,6 +55,8 @@
 			<a href="https://www.eclipse.org/legal/epl-2.0/">Eclipse Public License 2.0</a>.
 			It reimplements <a href="https://robocode.sourceforge.io/">Robocode</a>, created by
 			Mathew A. Nelson and maintained by Flemming N. Larsen and contributors.
+			Its community meets on the <a href="https://robowiki.net/">RoboWiki</a> and
+			<a href={resolve('/docs/community')}>elsewhere</a>.
 		</p>
 	</div>
 </footer>

@@ -9,6 +9,7 @@ robocode-s is a reimplementation of [Robocode](https://robocode.sourceforge.io/)
 - **[Getting started](/docs/getting-started)**: what you can do today, and what installing will look like.
 - **[Developing a robot](/docs/robot-development)**: how to set up a robot project, test it, debug it and release it.
 - **[The rumble](/docs/rumble)**: divisions, weight classes, how scores are computed, and how battles are run and checked.
+- **[Community and links](/docs/community)**: the RoboWiki, LiteRumble, the Google Group, Facebook and Reddit: where the Robocode community learns, competes and talks.
 
 > **Status:** robocode-s is in early development and has no release yet. Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
 
