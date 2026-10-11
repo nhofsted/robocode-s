@@ -138,8 +138,16 @@ npx -y "aws-cdk@$CDK_VERSION" bootstrap --profile "$PROFILE" \
 	"aws://$ACCOUNT_ID/eu-west-1" "aws://$ACCOUNT_ID/us-east-1"
 
 step "Lambda concurrency quota"
-# New accounts can start far below the default 1000; reserved concurrency per function needs headroom.
-aws service-quotas get-service-quota --profile "$PROFILE" --service-code lambda --quota-code L-B99A9384 \
-	--query Quota.Value --output text
+# New accounts can start at 10. Lambda keeps 10 unreserved, so reserved concurrency per function
+# (design §12.2) needs more; request the usual default. Free, and reserved concurrency still caps use.
+QUOTA=$(aws service-quotas get-service-quota --profile "$PROFILE" --service-code lambda \
+	--quota-code L-B99A9384 --query Quota.Value --output text)
+echo "concurrent executions: $QUOTA"
+if (( ${QUOTA%.*} < 1000 )) && [[ $(aws service-quotas list-requested-service-quota-change-history-by-quota \
+	--profile "$PROFILE" --service-code lambda --quota-code L-B99A9384 \
+	--query "RequestedQuotas[?Status=='PENDING' || Status=='CASE_OPENED'] | length(@)" --output text) == 0 ]]; then
+	aws service-quotas request-service-quota-increase --profile "$PROFILE" --service-code lambda \
+		--quota-code L-B99A9384 --desired-value 1000 --query RequestedQuota.Status --output text
+fi
 
 printf '\nDone. Account %s, profile %s.\n' "$ACCOUNT_ID" "$PROFILE"
