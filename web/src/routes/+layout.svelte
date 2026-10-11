@@ -32,7 +32,7 @@
 <header>
 	<div class="container bar">
 		<a class="logo" href={resolve('/')} aria-label="robocode-s home">
-			<Logo size={22} />
+			<Logo height={28} />
 		</a>
 		<nav aria-label="Main">
 			{#each nav as item (item.href)}

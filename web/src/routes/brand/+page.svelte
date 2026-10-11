@@ -35,8 +35,8 @@
 	</p>
 
 	<h2>Current</h2>
-	{#snippet current()}<Logo size={22} />{/snippet}
-	{@render header('now', current)}
+	{#snippet current()}<Logo height={28} />{/snippet}
+	{@render header('now (1h, in the site header)', current)}
 
 	<h2>Option 1: classic letters</h2>
 

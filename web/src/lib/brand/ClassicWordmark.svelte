@@ -67,12 +67,17 @@
 		align-items: center;
 		white-space: nowrap;
 	}
-	/* The flame tails run under the end of the word. */
+	/* The S sits behind the end of the word: "Robocode" overlaps it a little. */
 	.fighter {
 		display: flex;
-		margin-left: calc(var(--h) * -0.62);
+		margin-left: calc(var(--h) * -0.92);
 		position: relative;
 		top: calc(var(--h) * 0.04);
+		z-index: 0;
+	}
+	svg {
+		position: relative;
+		z-index: 1;
 	}
 	svg {
 		display: inline-block;

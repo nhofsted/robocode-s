@@ -1,32 +1,13 @@
 <script lang="ts">
-	// "Robocode" in green Helvetica, with the "S" of robocode-s appended like a version badge.
-	import FighterText from './FighterText.svelte';
+	// The site logo: classic Robocode's logo letters with their glow, and the flame S of
+	// robocode-s tucked behind the end of the word (variation 1h on /brand).
+	import ClassicWordmark from '#lib/brand/ClassicWordmark.svelte';
+
 	interface Props {
-		/** Font size of "Robocode" in px; the S is larger. */
-		size?: number;
+		/** Height of the letters in px; the S is taller. */
+		height?: number;
 	}
-	let { size = 22 }: Props = $props();
+	let { height = 28 }: Props = $props();
 </script>
 
-<span class="logo" style:font-size="{size}px" role="img" aria-label="robocode-s">
-	<span class="word" aria-hidden="true">Robocode</span><span class="s"><FighterText text="S" height="1.9em" /></span>
-</span>
-
-<style>
-	.logo {
-		display: inline-flex;
-		align-items: center;
-		white-space: nowrap;
-	}
-	.word {
-		font-family: var(--font-logo);
-		font-weight: 700;
-		letter-spacing: -0.01em;
-		color: var(--radar);
-	}
-	.s {
-		margin-left: -0.55em;
-		position: relative;
-		top: 0.06em;
-	}
-</style>
+<ClassicWordmark {height} look="glow" s="fighter" />

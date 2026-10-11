@@ -190,8 +190,8 @@
 			ctx.translate(b.x, b.y);
 			ctx.rotate(b.radar);
 			const beam = ctx.createLinearGradient(0, 0, 0, -220);
-			beam.addColorStop(0, 'rgba(94,227,138,0.18)');
-			beam.addColorStop(1, 'rgba(94,227,138,0)');
+			beam.addColorStop(0, 'rgba(85,239,85,0.18)');
+			beam.addColorStop(1, 'rgba(85,239,85,0)');
 			ctx.fillStyle = beam;
 			ctx.beginPath();
 			ctx.moveTo(0, 0);
