@@ -19,6 +19,8 @@ fn main() -> ExitCode {
                 "OK   {file}: {} rounds, {} turns, {} events",
                 s.rounds, s.turns, s.events
             ),
+            // A known classic race (engine-spec §15.3): reported, not a failure.
+            Err(e) if e.starts_with(robocode_s_difftest::RACE) => println!("RACE {file}: {e}"),
             Err(e) => {
                 failed += 1;
                 println!("FAIL {file}: {e}");

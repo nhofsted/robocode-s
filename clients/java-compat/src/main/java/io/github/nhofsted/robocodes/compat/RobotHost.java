@@ -120,11 +120,16 @@ public final class RobotHost {
         BattleRules rules = HiddenAccess.createRules(r.getBattlefieldWidth(), r.getBattlefieldHeight(),
                 r.getNumRounds(), r.getGunCoolingRate(), r.getInactivityTime(), r.getHideEnemyNames(),
                 r.getSentryBorderSize());
-        Matcher suffix = Pattern.compile("( \\(\\d+\\))$").matcher(s.getName());
-        RobotStatics statics = new RobotStatics(spec, s.getName(), suffix.find() ? suffix.group(1) : "",
+        // The robot's own name is the canonical instance, as in classic (Convert.name).
+        String name = Convert.name(s.getName());
+        List<String> members = new ArrayList<>();
+        for (String member : s.getTeamMembersList()) {
+            members.add(Convert.name(member));
+        }
+        Matcher suffix = Pattern.compile("( \\(\\d+\\))$").matcher(name);
+        RobotStatics statics = new RobotStatics(spec, name, suffix.find() ? suffix.group(1) : "",
                 s.getTeamLeader(), rules, s.hasTeamName() ? s.getTeamName() : null,
-                s.getTeamMembersCount() > 0 ? new ArrayList<>(s.getTeamMembersList()) : null, s.getRobotIndex(),
-                s.getTeamIndex());
+                members.isEmpty() ? null : members, s.getRobotIndex(), s.getTeamIndex());
         IHostManager hostManager = ContainerBase.getComponent(IHostManager.class);
         return (IHostingRobotProxy) hostManager.createRobotProxy(spec, statics, peer);
     }

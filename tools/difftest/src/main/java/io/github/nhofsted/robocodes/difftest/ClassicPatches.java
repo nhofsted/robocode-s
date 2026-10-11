@@ -84,22 +84,24 @@ public final class ClassicPatches {
                             case "performLoadCommands()V" -> "commandsLoaded";
                             case "publishStatus(J)V" -> "statusPublished";
                             case "addEvent(Lrobocode/Event;)V" -> "eventAdded";
+                            case "drainEnergy()V" -> "energyDrained";
+                            case "punishBadBehavior(Lnet/sf/robocode/peer/BadBehavior;)V" -> "punished";
                             default -> null;
                         };
                         if (hook != null) {
                             hooked[0]++;
-                            boolean withEvent = hook.equals("eventAdded");
+                            boolean withArgument = hook.equals("eventAdded") || hook.equals("punished");
                             return new MethodVisitor(Opcodes.ASM9, mv) {
                                 @Override
                                 public void visitCode() {
                                     super.visitCode();
                                     mv.visitVarInsn(Opcodes.ALOAD, 0);
-                                    if (withEvent) {
+                                    if (withArgument) {
                                         mv.visitVarInsn(Opcodes.ALOAD, 1);
                                     }
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             "io/github/nhofsted/robocodes/difftest/OracleHooks", hook,
-                                            withEvent ? "(Ljava/lang/Object;Ljava/lang/Object;)V" : "(Ljava/lang/Object;)V",
+                                            withArgument ? "(Ljava/lang/Object;Ljava/lang/Object;)V" : "(Ljava/lang/Object;)V",
                                             false);
                                 }
                             };
@@ -133,8 +135,8 @@ public final class ClassicPatches {
                         };
                     }
                 }, 0);
-                if (hooked[0] != 3) {
-                    throw new IllegalStateException("expected 3 hooked RobotPeer methods, found " + hooked[0]);
+                if (hooked[0] != 5) {
+                    throw new IllegalStateException("expected 5 hooked RobotPeer methods, found " + hooked[0]);
                 }
                 if (replaced[0] != 1) {
                     throw new IllegalStateException("expected one wait() in RobotPeer.startRound, found " + replaced[0]);

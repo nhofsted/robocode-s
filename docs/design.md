@@ -206,6 +206,7 @@ Classic robots get a per-robot data directory with a quota (`getDataFile`, `Robo
 - All engine randomness is seeded.
 - Robots' own randomness is seeded **per robot**: `Math.random()` and `new Random()` draw from streams derived from the battle seed and the robot's name (ADR 0009). For JVM robots, a Java agent (`clients/java-determinism`) does this. Classic itself can't: its `RANDOMSEED` only seeds `Math.random()` on old JVMs, as a single stream shared by all robots.
 - Robot JVMs run with `-XX:-InlineMathNatives`, so robots' own trigonometry is identical on every platform (§4.3). Otherwise volunteers on different hardware could get different results for the same seed.
+- They also run with `-XX:hashCode=2` (constant identity hash codes), so robots iterating over identity-keyed hash collections behave the same in every run (ADR 0013).
 - Known limit: robots that read the clock to budget their own computation can still behave differently between runs.
 - Under WASM, budgets become instruction fuel, which makes even the time limits deterministic.
 
@@ -220,6 +221,9 @@ The **robot host** runs classic Java robots unchanged (ADR 0012). It does not re
 - `RemotePeer` implements classic's `IRobotPeer`. Each `execute` becomes an `Execute` message; the next `Tick` becomes classic's `ExecResults`. Dead or halted robots get classic's `DeathException`, `WinException` or `AbortedException` after sending their final commands, exactly like classic's `RobotPeer.executeImpl`.
 - Crashed robots (`drainEnergy`) and misbehaving ones (`punishBadBehavior`) are reported in `Execute`.
 - The peer measures the robot thread's CPU time per turn (`ThreadMXBean`).
+- **Same name, same object:** in classic every event carries the very same `String` instance for a robot's name, the robot's own name included, and rumble bots compare names with `==`. The host keeps one instance per name (not `intern()`: classic's names aren't interned).
+- **A robot whose code ends** (crash, robot-side disable, `run()` returning) sends one final `Execute` with its current commands, `drain_energy` and `stopped`. That matches classic's `waitForBattleEndImpl`, which stores its commands once more and then only re-sends the server's copy.
+- **Kotlin:** like classic 1.11.1, the host has `kotlin-stdlib` 2.4.0 on its class path, for robots written in Kotlin.
 - `RobotHost` (the main class) connects, receives its identity in `HelloAck`, configures the robot's random streams (ADR 0009, 0010), looks up the robot in its jar through classic's repository, creates classic's proxy and then drives rounds from the server's messages.
 - It runs with `NOSECURITY=true` (one class loader for classic's engine classes and the peer); isolation is the process or container (§6).
 - **Distribution:** `./gradlew :clients:java-compat:installDist` gives `robot-host/lib/` with the classic jars as separate files, because classic finds its modules by jar name.

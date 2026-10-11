@@ -49,12 +49,15 @@ public final class OracleHooks {
         final String[] commands;
         final String[] remaining;
         final List<List<String>> events = new ArrayList<>();
+        /** What robot threads did to their robot while handling the turn (see {@link #energyDrained}). */
+        final List<List<String>> actions = new ArrayList<>();
 
         Turn(int robots) {
             commands = new String[robots];
             remaining = new String[robots];
             for (int i = 0; i < robots; i++) {
                 events.add(new ArrayList<>());
+                actions.add(new ArrayList<>());
             }
         }
     }
@@ -209,6 +212,34 @@ public final class OracleHooks {
             }
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("cannot read classic's event queue", e);
+        }
+    }
+
+    /**
+     * Entry of {@code RobotPeer.drainEnergy()}: the robot's code crashed or was disabled
+     * robot-side (e.g. too many {@code getXX} calls without {@code execute}). Classic
+     * calls it from the robot's thread while the turn's wakeup waits for it, so it is
+     * part of the turn the robot was handling.
+     */
+    public static void energyDrained(Object peer) {
+        action(peer, "\"drainEnergy\"");
+    }
+
+    /** Entry of {@code RobotPeer.punishBadBehavior(BadBehavior)}: the robot is disabled. */
+    public static void punished(Object peer, Object badBehavior) {
+        action(peer, "\"disable:" + badBehavior + "\"");
+    }
+
+    private static void action(Object peer, String json) {
+        if (!enabled) {
+            return;
+        }
+        try {
+            synchronized (OracleHooks.class) {
+                current.actions.get(index(peer)).add(json);
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot read classic's robot index", e);
         }
     }
 

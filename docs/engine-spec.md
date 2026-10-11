@@ -578,11 +578,16 @@ The engine drops new events when a queue holds more than 256, except `DeathEvent
 
 ## 14. Observable output used by difftest
 
-The oracle (`tools/difftest`) records, after each turn:
-- per robot: state, x, y, energy, velocity, body/gun/radar heading, gun heat, current and total score;
-- per bullet (explosions included): owner, id, state, x, y, heading, power, victim.
+The oracle (`tools/difftest`) records each turn after classic publishes it, which is **after** the turn's wakeup (`runTurn` ends with `wakeupRobots`; `finalizeTurn` publishes). It records:
+- **per robot:** state, x, y, energy, velocity, body/gun/radar heading, gun heat, and current and total score;
+- **per bullet (explosions included):** owner, id, state, x, y, heading, power and victim;
+- **per robot, from hooks in `RobotPeer`:**
+  - the command state loaded this turn (`performLoadCommands`);
+  - the remaining values reported to it (`publishStatus`, before the wakeup);
+  - every event generated for it (`addEvent`);
+  - `actions`, only present when something happened: what the robot's own thread did to its robot during the wakeup. That is `drainEnergy` (its code crashed or was disabled robot-side, e.g. 10,000 `getXX` calls without `execute`) or `disable:<reason>` (`punishBadBehavior`).
 
-Comparing these is the M1 acceptance criterion. Events are not recorded yet.
+The replay compares the remaining values, applies the actions, then compares the state and the events. A turn's snapshot therefore includes a crash in the robot's handling of that turn. The server does the same: it collects the turn's `Execute`s before it sends the `TurnSnapshot`.
 
 ---
 
@@ -605,5 +610,10 @@ OpenJDK's code is GPL and can't be copied. **Decision:** `crates/geom` is an ind
 ### 15.3 Other notes
 
 - **Math semantics:** classic uses `Math`; with intrinsics, results differ on some JVMs. The reference runs with `StrictMath` semantics (ADR 0003).
+- **Dead robots' energy and ghost shots (classic race):**
+  - **The race:** a dead robot's bullets still hit, and the owner gets `updateEnergy(bulletHitBonus)` (§8.3) until its thread has finished. A robot finishes on its first `execute` after death, which sets `isExecFinishedAndDisabled`. `wakeupRobots` doesn't wait for dead robots, so a robot that does slow work in `onDeath` or `onRoundEnded` (such as saving data files) can still gain energy several turns after dying, depending on thread timing.
+  - **Ghost shots:** classic also loads dead robots' commands (`performLoadCommands`), and `fireBullets` only checks gun heat and energy. A dead robot that regained energy therefore **fires again** with its last commands, and those bullets can hit other robots.
+  - **robocode-s** finishes a dead robot at the wakeup that follows its death, which is classic's result for a robot that finishes quickly: no energy, no ghost shots.
+  - **The difftest** doesn't compare a dead robot's energy. It reports a difference as a known race (`RACE`) when classic's recording shows a dead robot with energy earlier in that round.
 - **Classic timing bug:** `RobotPeer.startRound` has a lost-wakeup race. It affects timing only, never results; the oracle patches it (`ClassicPatches`).
 - **Out of scope for the engine:** painting, debug properties, robot console output, interactive (keyboard and mouse) events, and the robot-side API semantics (blocking calls, custom events, event dispatch and interruption). The robot-side API will be specified separately for `java-compat`.

@@ -4,7 +4,7 @@
 //! Java robot host, compared with a classic recording of the same battle. In
 //! deterministic mode the result must be identical to classic.
 
-use crate::{compare_snapshot, load, rounds, rules, setups, states};
+use crate::{RACE, classic_race, compare_snapshot, load, rounds, rules, setups, states};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_runner::{JavaHost, RobotLaunch, launch};
@@ -155,9 +155,28 @@ pub fn live_battle(
             ));
         }
     }
+    // Each robot's console output, for diagnosis: `<work>/<battle>/output-<i>.txt`.
+    for i in 0..names.len() {
+        let mut text = String::new();
+        for s in &snapshots {
+            if let Some(r) = s.robots.get(i).filter(|r| !r.output.is_empty()) {
+                for line in r.output.lines() {
+                    text.push_str(&format!("{} {}: {line}\n", s.round, s.turn));
+                }
+            }
+        }
+        let _ = std::fs::write(work.join(&battle).join(format!("output-{i}.txt")), text);
+    }
     let states = states(&rounds);
     for (snapshot, line) in snapshots.iter().zip(&states) {
-        compare_snapshot(snapshot, line).map_err(|e| format!("{e}{stderr}"))?;
+        if let Err(e) = compare_snapshot(snapshot, line) {
+            let round = line["round"].as_i64().unwrap_or(-1);
+            let turn = line["turn"].as_i64().unwrap_or(0);
+            return Err(match classic_race(&lines, round, turn) {
+                Some(race) => format!("{RACE}: {race}; {e}"),
+                None => format!("{e}{stderr}"),
+            });
+        }
     }
     if states.len() != snapshots.len() {
         return Err(format!(

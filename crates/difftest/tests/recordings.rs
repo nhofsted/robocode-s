@@ -19,6 +19,8 @@ fn engine_matches_classic_recordings() {
     let failures: Vec<String> = files
         .iter()
         .filter_map(|f| robocode_s_difftest::replay_file(f).err())
+        // A known classic race (engine-spec §15.3) is not a robocode-s error.
+        .filter(|e| !e.starts_with(robocode_s_difftest::RACE))
         .collect();
     assert!(
         failures.is_empty(),

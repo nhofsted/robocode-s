@@ -82,3 +82,23 @@ cargo run --release -p robocode-s-difftest --bin live -- /tmp/recordings/*.jsonl
 ```
 
 `ROBOCODES_JAVA` selects the Java runtime; without it the pinned Temurin JRE is downloaded. `ROBOCODES_ROBOT_JARS` (a path list) adds robot jars, e.g. RoboRumble bots.
+
+## RoboRumble corpus
+
+Sample robots are too simple to cover classic's corners, so #11 also tests a fixed, seeded selection of **real RoboRumble robots** (duels, melee, teams). `corpus/rumble-corpus.json` lists them with source URL and SHA-256. The jars themselves aren't committed, because they belong to their authors.
+
+```sh
+# Download exactly the robots in the manifest (verified by SHA-256)
+python3 tools/difftest/corpus/fetch-corpus.py download --manifest tools/difftest/corpus/rumble-corpus.json --jars /tmp/corpus-jars
+# Fight the seeded battle plan in classic and live, and compare every turn
+python3 tools/difftest/corpus/run-corpus.py --manifest tools/difftest/corpus/rumble-corpus.json \
+  --jars /tmp/corpus-jars --out /tmp/corpus-run --check-oracle
+```
+
+`fetch-corpus.py select` draws a new selection from the current RoboWiki participant lists. Each result is one of:
+- **`OK`:** identical.
+- **`FAIL`:** a robocode-s difference.
+- **`RACE`:** a known classic race (engine-spec §15.3). Only the rounds before it count.
+- **`ORACLE-NONDETERMINISTIC`:** classic itself isn't reproducible for this battle; reported with `--check-oracle`, which records every battle twice.
+
+Robots that make classic itself nondeterministic are kept in the manifest with an `exclude` reason and left out of the plan.

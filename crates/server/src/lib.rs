@@ -355,9 +355,10 @@ impl<'a> BattleLoop<'a> {
                 }),
             );
         }
+        // The round start snapshot comes before the robots' first `Execute`.
         self.snapshot();
+        self.collect_executes();
         loop {
-            self.collect_executes();
             for i in 0..self.links.len() {
                 if let Some(commands) = self.links[i].pending.take() {
                     self.battle.set_commands(i, commands);
@@ -365,6 +366,10 @@ impl<'a> BattleLoop<'a> {
             }
             self.battle.step();
             self.deliver();
+            // As classic (`runTurn` ends with `wakeupRobots`, then `finalizeTurn` publishes):
+            // a turn's snapshot includes what robots did while handling it, such as a
+            // crash's drained energy and their console output.
+            self.collect_executes();
             self.snapshot();
             self.pace();
             if self.battle.is_round_over() {

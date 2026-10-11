@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.robocode.classic.battle) // BoundingRectangle for GeometryVectors
     runtimeOnly(libs.robocode.classic.host)
     runtimeOnly(libs.robocode.classic.repository)
+    // Classic ships the Kotlin runtime for robots written in Kotlin.
+    runtimeOnly(libs.kotlin.stdlib.classic)
     implementation(project(":clients:java-determinism"))
     implementation(libs.asm)
     sampleRobots(project(":robots:samples"))
@@ -43,6 +45,8 @@ val oracleJvmArgs = listOf(
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
     "-XX:+UnlockDiagnosticVMOptions",
     "-XX:-InlineMathNatives",
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:hashCode=2",
     "-Ddebug=true",
 )
 

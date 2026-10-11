@@ -37,7 +37,11 @@ fn main() -> ExitCode {
         ),
     };
     let jars: Vec<PathBuf> = std::env::var_os("ROBOCODES_ROBOT_JARS")
-        .map(|v| std::env::split_paths(&v).collect())
+        .map(|v| {
+            std::env::split_paths(&v)
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        })
         .unwrap_or_else(|| {
             vec![PathBuf::from(
                 "robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar",
@@ -48,6 +52,8 @@ fn main() -> ExitCode {
     for file in &files {
         match robocode_s_difftest::live::live_battle(Path::new(file), &host, &jars, &work) {
             Ok(summary) => println!("OK   {file}: {summary}"),
+            // A known classic race (engine-spec §15.3): reported, not a failure.
+            Err(e) if e.starts_with(robocode_s_difftest::RACE) => println!("RACE {file}: {e}"),
             Err(e) => {
                 failed += 1;
                 println!("FAIL {file}: {e}");

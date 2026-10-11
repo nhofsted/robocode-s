@@ -116,11 +116,24 @@ final class RemotePeer implements IRobotPeer {
     }
 
     /**
-     * Classic: a halted winner in the last round waits for the battle's end. Here it
-     * waits until the round is over.
+     * The robot's code ended (it crashed, was disabled, or its {@code run} returned) and it
+     * waits for the round's end. Classic stores its current commands once more, including
+     * a {@code setFire} that wasn't executed yet, after draining its energy right away.
+     * After that it only re-sends the server's copy each turn, so a final {@code Execute}
+     * with {@code stopped} is equivalent. A halted robot (the last round's winner) sends
+     * nothing, as in classic.
      */
     @Override
     public ExecResults waitForBattleEndImpl(ExecCommands commands) {
+        if (!stopping && !finished) {
+            send(Execute.newBuilder()
+                    .setTurn(lastTurn)
+                    .setCommands(Convert.commands(commands))
+                    .setOutput(nullToEmpty(commands.getOutputText()))
+                    .setCpuNanos(cpuSinceReturn())
+                    .setDrainEnergy(drained)
+                    .setStopped(true));
+        }
         Object next;
         do {
             next = take();
@@ -130,7 +143,7 @@ final class RemotePeer implements IRobotPeer {
                 false);
     }
 
-    /** The robot's code crashed (classic drains its energy). Reported when its thread ends. */
+    /** The robot's code crashed (classic drains its energy). Reported with its final commands. */
     @Override
     public void drainEnergy() {
         drained = true;

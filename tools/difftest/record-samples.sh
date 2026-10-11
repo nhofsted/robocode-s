@@ -16,7 +16,7 @@ java_args=(
   -Xmx512M
   --add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED
   --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
-  -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives
+  -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives -XX:+UnlockExperimentalVMOptions -XX:hashCode=2
   -Ddebug=true
   "-javaagent:$(ls "$root"/clients/java-determinism/build/libs/java-determinism-*.jar)"
   "-javaagent:$(ls "$lib"/difftest-*.jar)"

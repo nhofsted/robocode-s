@@ -1,5 +1,7 @@
 [versions]
 robocode-classic = "1.11.1"
+# The Kotlin runtime classic 1.11.1 ships for robots written in Kotlin
+kotlin-classic = "2.4.0"
 junit = "6.1.3"
 asm = "9.10.1"
 protobuf = "4.31.1"
@@ -8,6 +10,7 @@ protobuf = "4.31.1"
 robocode-classic-api = { module = "net.sf.robocode:robocode.api", version.ref = "robocode-classic" }
 robocode-classic-core = { module = "net.sf.robocode:robocode.core", version.ref = "robocode-classic" }
 robocode-classic-battle = { module = "net.sf.robocode:robocode.battle", version.ref = "robocode-classic" }
+kotlin-stdlib-classic = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin-classic" }
 robocode-classic-host = { module = "net.sf.robocode:robocode.host", version.ref = "robocode-classic" }
 robocode-classic-repository = { module = "net.sf.robocode:robocode.repository", version.ref = "robocode-classic" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }

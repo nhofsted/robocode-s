@@ -34,16 +34,53 @@ pub struct Mismatch {
     pub round: i64,
     pub turn: i64,
     pub message: String,
+    /// Set when classic's recording shows a known race before the mismatch, in the same
+    /// round (see [`classic_race`]): the difference is then not a robocode-s error.
+    pub race: Option<String>,
 }
 
 impl std::fmt::Display for Mismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "round {} turn {}: {}",
-            self.round, self.turn, self.message
-        )
+        match &self.race {
+            Some(race) => write!(
+                f,
+                "{RACE}: {race}; round {} turn {}: {}",
+                self.round, self.turn, self.message
+            ),
+            None => write!(
+                f,
+                "round {} turn {}: {}",
+                self.round, self.turn, self.message
+            ),
+        }
     }
+}
+
+/// How a [`Mismatch`] caused by a known classic race starts when printed.
+pub const RACE: &str = "classic race";
+
+/// A known race in classic, visible in its recording, in `round` up to `turn`: a dead
+/// robot that regained energy. Its bullet hit after its death and its thread hadn't
+/// finished yet, so it can even fire again with its last commands (engine-spec §15.3).
+/// robocode-s finishes dead robots at once, so the battles diverge from there.
+pub fn classic_race(lines: &[Value], round: i64, turn: i64) -> Option<String> {
+    lines
+        .iter()
+        .filter(|l| {
+            l["round"].as_i64() == Some(round) && l["turn"].as_i64().is_some_and(|t| t <= turn)
+        })
+        .find_map(|l| {
+            let robots = l["robots"].as_array()?;
+            robots.iter().enumerate().find_map(|(i, r)| {
+                (r["state"] == "DEAD" && number(&r["energy"]) > 0.0).then(|| {
+                    format!(
+                        "robot {i} was dead with energy {} at turn {}",
+                        number(&r["energy"]),
+                        l["turn"]
+                    )
+                })
+            })
+        })
 }
 
 /// Replays a recording file (`.jsonl` or `.jsonl.gz`).
@@ -66,6 +103,13 @@ pub fn replay_file(path: &Path) -> Result<Summary, String> {
 
 /// Replays parsed recording lines.
 pub fn replay(lines: &[Value]) -> Result<Summary, Mismatch> {
+    replay_turns(lines).map_err(|mut m| {
+        m.race = classic_race(lines, m.round, m.turn);
+        m
+    })
+}
+
+fn replay_turns(lines: &[Value]) -> Result<Summary, Mismatch> {
     let header = lines
         .first()
         .filter(|h| h["type"] == "header")
@@ -129,8 +173,12 @@ pub fn replay(lines: &[Value]) -> Result<Summary, Mismatch> {
                         &format!("engine is at turn {}", battle.time),
                     ));
                 }
-                compare_state(&battle, line).map_err(|m| fail(round, turn, &m))?;
+                // Classic reports the remaining values before the turn's wakeup, in which
+                // robot threads may drain or disable their robot; the snapshot and the
+                // events come after it.
                 compare_remaining(&battle, line).map_err(|m| fail(round, turn, &m))?;
+                apply_actions(&mut battle, line).map_err(|m| fail(round, turn, &m))?;
+                compare_state(&battle, line).map_err(|m| fail(round, turn, &m))?;
                 summary.events +=
                     compare_events(&mut battle, line).map_err(|m| fail(round, turn, &m))?;
             }
@@ -154,6 +202,7 @@ fn fail(round: i64, turn: i64, message: &str) -> Mismatch {
         round,
         turn,
         message: message.to_string(),
+        race: None,
     }
 }
 
@@ -288,6 +337,24 @@ pub fn describe(d: f64) -> String {
     format!("{d:?} (bits {:016x})", d.to_bits())
 }
 
+/// What robot threads did to their robot while handling the turn (`actions`, only
+/// present when something happened): `drainEnergy` or `disable:<reason>`.
+fn apply_actions(battle: &mut Battle, line: &Value) -> Result<(), String> {
+    let Some(actions) = line["actions"].as_array() else {
+        return Ok(());
+    };
+    for (i, robot) in actions.iter().enumerate() {
+        for action in robot.as_array().into_iter().flatten() {
+            match action.as_str() {
+                Some("drainEnergy") => battle.drain_energy(i),
+                Some(a) if a.starts_with("disable:") => battle.disable(i),
+                _ => return Err(format!("robot {i}: unknown action {action}")),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn compare_state(battle: &Battle, line: &Value) -> Result<(), String> {
     let robots = line["robots"].as_array().ok_or("no robots")?;
     if robots.len() != battle.robots.len() {
@@ -319,6 +386,9 @@ fn compare_state(battle: &Battle, line: &Value) -> Result<(), String> {
             ("totalScore", e.total_score()),
         ];
         for (name, actual) in fields {
+            if dead_energy_race(r, name) {
+                continue;
+            }
             let expected = number(&r[name]);
             if !same(expected, actual) {
                 return Err(format!(
@@ -641,6 +711,16 @@ pub fn proto_event_json(e: &v1::Event) -> Value {
     }
 }
 
+/// A dead robot's energy is a race in classic, so it isn't compared. A bullet it fired
+/// before dying still earns it the hit bonus until its thread finishes (`updateEnergy`
+/// checks `isExecFinishedAndDisabled`). Classic doesn't wait for dead robots, so robots
+/// that save data in `onDeath` can still gain energy several turns later. robocode-s
+/// finishes them at once. If such a robot fires again, the difference shows up elsewhere
+/// and is reported as a [`classic_race`] (engine-spec §15.3).
+fn dead_energy_race(recorded: &Value, field: &str) -> bool {
+    field == "energy" && recorded["state"].as_str() == Some("DEAD")
+}
+
 /// Compares an observer snapshot with a recorded state line.
 pub fn compare_snapshot(snapshot: &v1::TurnSnapshot, line: &Value) -> Result<(), String> {
     let at = format!("round {} turn {}", snapshot.round, snapshot.turn);
@@ -678,6 +758,9 @@ pub fn compare_snapshot(snapshot: &v1::TurnSnapshot, line: &Value) -> Result<(),
             ("score", e.score.unwrap_or_default()),
             ("totalScore", e.total_score.unwrap_or_default()),
         ] {
+            if dead_energy_race(r, name) {
+                continue;
+            }
             if !same(number(&r[name]), actual) {
                 return Err(format!(
                     "{at}: robot {i} {name}: classic {}, server {}",
@@ -710,4 +793,33 @@ pub fn compare_snapshot(snapshot: &v1::TurnSnapshot, line: &Value) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod race_tests {
+    use super::classic_race;
+    use serde_json::json;
+
+    fn turn(round: i64, turn: i64, state: &str, energy: f64) -> serde_json::Value {
+        json!({"type": "turn", "round": round, "turn": turn,
+               "robots": [{"state": "ACTIVE", "energy": 50.0}, {"state": state, "energy": energy}]})
+    }
+
+    #[test]
+    fn a_dead_robot_with_energy_is_a_race_from_that_turn_in_that_round() {
+        let lines = vec![
+            turn(0, 10, "ACTIVE", 1.0),
+            turn(0, 11, "DEAD", 0.0),
+            turn(0, 12, "DEAD", 7.5),
+            turn(1, 5, "ACTIVE", 100.0),
+        ];
+        assert_eq!(classic_race(&lines, 0, 11), None);
+        assert!(classic_race(&lines, 0, 12).unwrap().contains("robot 1"));
+        assert!(classic_race(&lines, 0, 40).is_some());
+        assert_eq!(
+            classic_race(&lines, 1, 40),
+            None,
+            "only the same round counts"
+        );
+    }
 }

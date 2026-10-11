@@ -23,6 +23,8 @@ dependencies {
     implementation(libs.robocode.classic.repository)
     // Classic's container setup expects the battle module (RobocodeMain needs IRecordManager).
     runtimeOnly(libs.robocode.classic.battle)
+    // Classic ships the Kotlin runtime for robots written in Kotlin.
+    runtimeOnly(libs.kotlin.stdlib.classic)
     implementation(libs.protobuf.java)
     implementation(project(":clients:java-determinism"))
 }
