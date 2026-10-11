@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
+	import FighterText from '#lib/components/FighterText.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
 	import { css } from '#lib/components/sprites.ts';
@@ -40,7 +41,7 @@
 					<div class="mono muted small">{s.bot.versions[0].version} · #{s.entry.rank}</div>
 				</div>
 			</div>
-			{#if i === 0}<div class="vs sf" aria-hidden="true">VS</div>{/if}
+			{#if i === 0}<div class="vs"><FighterText text="VS" height="3.2rem" /></div>{/if}
 		{/each}
 	</section>
 
@@ -137,7 +138,7 @@
 		font-size: 0.8rem;
 	}
 	.vs {
-		font-size: 2rem;
+		line-height: 0;
 	}
 	.bar {
 		display: flex;

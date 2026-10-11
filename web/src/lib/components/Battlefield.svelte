@@ -88,10 +88,15 @@
 		};
 		resize();
 
-		for (let i = 0; i < tanks; i++) {
+		for (let i = 0, tries = 0; i < tanks; tries++) {
+			const x = 60 + rand() * Math.max(1, width - 120);
+			const y = 60 + rand() * Math.max(1, height - 120);
+			// Start apart (a few tries, then accept whatever space there is).
+			if (tries < 200 && bots.some((b) => Math.abs(b.x - x) < 80 && Math.abs(b.y - y) < 80)) continue;
+			i++;
 			bots.push({
-				x: 60 + rand() * Math.max(1, width - 120),
-				y: 60 + rand() * Math.max(1, height - 120),
+				x,
+				y,
 				heading: rand() * Math.PI * 2,
 				gun: rand() * Math.PI * 2,
 				radar: rand() * Math.PI * 2,
@@ -106,7 +111,12 @@
 		const angleTo = (a: Bot, b: { x: number; y: number }) => Math.atan2(b.x - a.x, a.y - b.y);
 		const norm = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
-		const step = (dt: number) => {
+		/** Robots are 36 × 36 boxes, as in classic. */
+		const SIZE = 36;
+		const overlaps = (i: number, x: number, y: number) =>
+			bots.findIndex((o, j) => j !== i && Math.abs(o.x - x) < SIZE && Math.abs(o.y - y) < SIZE);
+
+		const step = (dt: number, realDt: number) => {
 			for (const [i, b] of bots.entries()) {
 				if (rand() < 0.02) b.turn = (rand() - 0.5) * 0.08;
 				if (rand() < 0.02) b.speed = (rand() < 0.5 ? -1 : 1) * (2 + rand() * 4);
@@ -118,8 +128,22 @@
 					b.speed = Math.abs(b.speed) || 3;
 				}
 				b.heading += b.turn * dt;
-				b.x = Math.min(width - 20, Math.max(20, b.x + Math.sin(b.heading) * b.speed * dt));
-				b.y = Math.min(height - 20, Math.max(20, b.y - Math.cos(b.heading) * b.speed * dt));
+				const nx = Math.min(width - 20, Math.max(20, b.x + Math.sin(b.heading) * b.speed * dt));
+				const ny = Math.min(height - 20, Math.max(20, b.y - Math.cos(b.heading) * b.speed * dt));
+				// Robot collision: a move that pushes into another robot is blocked, like classic's
+				// ram; then back off and turn away.
+				const other = overlaps(i, nx, ny);
+				const closer =
+					other >= 0 &&
+					Math.hypot(bots[other].x - nx, bots[other].y - ny) <
+						Math.hypot(bots[other].x - b.x, bots[other].y - b.y);
+				if (closer) {
+					b.speed = -Math.sign(b.speed || 1) * (1.5 + rand() * 2);
+					b.turn = (rand() < 0.5 ? -1 : 1) * (0.03 + rand() * 0.05);
+				} else {
+					b.x = nx;
+					b.y = ny;
+				}
 
 				const target = bots[b.target];
 				const want = angleTo(b, target);
@@ -156,7 +180,7 @@
 				}
 			}
 			for (let k = blasts.length - 1; k >= 0; k--) {
-				blasts[k].t += 0.5 * dt;
+				blasts[k].t += 0.4 * realDt;
 				if (blasts[k].t >= EXPLOSION.length) blasts.splice(k, 1);
 			}
 		};
@@ -201,12 +225,14 @@
 			}
 		};
 
+		/** Simulation speed relative to one step per frame: calm enough for a background. */
+		const PACE = 0.35;
 		let last = performance.now();
 		const loop = (now: number) => {
 			const dt = Math.min(3, (now - last) / 16.67);
 			last = now;
 			if (visible && !document.hidden) {
-				step(dt);
+				step(dt * PACE, dt);
 				draw();
 			}
 			frame = requestAnimationFrame(loop);
@@ -219,7 +245,7 @@
 		});
 
 		if (reduce) {
-			for (let i = 0; i < 90; i++) step(1);
+			for (let i = 0; i < 90; i++) step(1, 1);
 			draw();
 		} else {
 			frame = requestAnimationFrame(loop);

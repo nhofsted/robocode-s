@@ -77,7 +77,8 @@ const CLASS_LIMIT: Record<WeightClass, number> = {
 	mega: Infinity
 };
 
-const HISTORY_DAYS = 365;
+/** Daily history points this far back; weekly before that. */
+const DAILY_DAYS = 365;
 
 const SAMPLES = [
 	'sample.Corners',
@@ -405,14 +406,13 @@ function createHistory(
 	n: number,
 	now: Date
 ): HistoryPoint[] {
-	const firstDay = Math.round(daysBetween(new Date(bot.versions.at(-1)!.addedAt), now));
-	const days = Math.min(HISTORY_DAYS, firstDay + 1);
+	const days = Math.round(daysBetween(new Date(bot.versions.at(-1)!.addedAt), now)) + 1;
 	const points: HistoryPoint[] = [];
 	let r = rank;
 	let aps = m.aps;
 	let glicko = m.glicko;
 	let v = 0;
-	for (let k = 0; k < days; k++) {
+	for (let k = 0; k < days; k += k < DAILY_DAYS ? 1 : 7) {
 		const date = isoDay(now, -k);
 		// Step back to the version that was current on this day.
 		while (v < bot.versions.length - 1 && date < bot.versions[v].addedAt.slice(0, 10)) {
@@ -430,7 +430,7 @@ function createHistory(
 			glicko: round(glicko, 1)
 		});
 		const age = Math.round(daysBetween(new Date(bot.versions[v].addedAt), now)) - k;
-		const jitter = age < 10 ? 1.5 : 0.25;
+		const jitter = (age < 10 ? 1.5 : 0.25) * (k < DAILY_DAYS ? 1 : 2.6);
 		aps = clamp(aps + jitter * gaussian(rand) * 0.4, 0, 100);
 		r = clamp(r + jitter * gaussian(rand) * Math.max(1, n / 200), 1, n);
 		glicko += jitter * gaussian(rand) * 4;
