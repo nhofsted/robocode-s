@@ -40,7 +40,6 @@
 					{item.label}
 				</a>
 			{/each}
-			<a href={REPO_URL} rel="external">GitHub</a>
 		</nav>
 	</div>
 </header>
@@ -52,7 +51,7 @@
 <footer>
 	<div class="container">
 		<p>
-			robocode-s is open source under the
+			robocode-s is open source <a href={REPO_URL} rel="external">on GitHub</a> under the
 			<a href="https://www.eclipse.org/legal/epl-2.0/">Eclipse Public License 2.0</a>.
 			It reimplements <a href="https://robocode.sourceforge.io/">Robocode</a>, created by
 			Mathew A. Nelson and maintained by Flemming N. Larsen and contributors.

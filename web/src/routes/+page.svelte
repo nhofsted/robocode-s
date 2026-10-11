@@ -60,7 +60,7 @@
 		<article class="panel">
 			<h2 class="kicker">Any language</h2>
 			<p>
-				Robots talk to the engine over one open protocol, so they can be written in Java, Kotlin,
+				Robots talk to the engine over an open protocol, so they can be written in Java, Kotlin,
 				Python, C#, Rust or C/C++ and run locally, in a container or on another machine.
 			</p>
 		</article>
