@@ -26,7 +26,7 @@
 	<title>robocode-s · Robocode, rebuilt</title>
 	<meta
 		name="description"
-		content="robocode-s is a reimplementation of Robocode: a fast Rust engine, robots in any language, bit-exact with classic robots, and a distributed rumble."
+		content="robocode-s is a reimplementation of Robocode: a fast Rust engine, robots that talk to it over an open protocol, bit-exact with classic robots, and a distributed rumble."
 	/>
 </svelte:head>
 
@@ -37,7 +37,8 @@
 		<h1>Build a tank.<br />Write its brain.<br />Win the rumble.</h1>
 		<p class="lead">
 			robocode-s is a reimplementation of <a href="https://robocode.sourceforge.io/">Robocode</a>
-			with a Rust engine and robots that run in their own process, in any language. Classic Java
+			with a Rust engine and robots that run in their own process, talking to the engine over an open
+			protocol. Classic Java
 			robots run unmodified, turn for turn identical to classic Robocode.
 		</p>
 		<p class="ctas">
@@ -52,8 +53,8 @@
 		<article class="panel">
 			<h2 class="kicker">Classic</h2>
 			<p>
-				Existing robot jars run as they are. Every turn matches classic Robocode 1.11.1 exactly,
-				checked against real RoboRumble robots.
+				Existing robot jars run as they are. Every turn matches classic Robocode exactly, checked
+				against real RoboRumble robots.
 			</p>
 		</article>
 		<article class="panel">
@@ -140,6 +141,10 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		margin-top: 1.5rem;
+	}
+	/* The battlefield shows through a transparent button; a solid fill keeps its text readable. */
+	.ctas .secondary {
+		background: var(--panel);
 	}
 
 	.features {

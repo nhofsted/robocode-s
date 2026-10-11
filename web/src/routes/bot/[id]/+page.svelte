@@ -58,6 +58,15 @@
 		return [-r, r];
 	});
 
+	// The opponent hovered in the best/worst and problem lists, marked in the charts above.
+	let spotlight: string | null = $state(null);
+	const spot = (id: string) => ({
+		onpointerenter: () => (spotlight = id),
+		onpointerleave: () => (spotlight = null),
+		onfocusin: () => (spotlight = id),
+		onfocusout: () => (spotlight = null)
+	});
+
 	let compareWith = $state('');
 	const compareIds = $derived(new Set(data.rankings.bots.map((r) => r.id)));
 	function compare(event: SubmitEvent) {
@@ -199,12 +208,13 @@
 		<PairingStrip bot={bot.id} {rumble} {pairings} />
 
 		<div class="scatters">
-			<ScatterChart title="Score by opponent strength" dots={scoreDots} xLabel="Opponent APS" yLabel="Score" />
+			<ScatterChart title="Score by opponent strength" dots={scoreDots} xLabel="Opponent APS" yLabel="Score" highlight={spotlight} />
 			<ScatterChart
 				title="Survival by opponent survival"
 				dots={survivalDots}
 				xLabel="Opponent survival"
 				yLabel="Survival"
+				highlight={spotlight}
 			/>
 			<ScatterChart
 				title="Problem bots (KNN-PBI)"
@@ -214,6 +224,7 @@
 				yDomain={pbiRange}
 				ref={0}
 				signed
+				highlight={spotlight}
 			/>
 		</div>
 		<p class="muted note">
@@ -227,7 +238,7 @@
 					<h3>{group.title}</h3>
 					<ol>
 						{#each group.list as p (p.opponent)}
-							<li>
+							<li {...spot(p.opponent)}>
 								<a href={pairingHref(p.opponent)}>{shortName(p.opponent)}</a>
 								<span class="num score" style:background={scoreHeat(p.score)}>{formatNumber(p.score, 1)}</span>
 							</li>
@@ -242,7 +253,7 @@
 				<h3>Problem bots <span class="muted">(lowest KNN-PBI)</span></h3>
 				<ol>
 					{#each problems as p (p.opponent)}
-						<li>
+						<li {...spot(p.opponent)}>
 							<a href={pairingHref(p.opponent)}>{shortName(p.opponent)}</a>
 							<span class="num score" style:background={scoreHeat(50 + p.pbi)}>{p.pbi > 0 ? '+' : ''}{formatNumber(p.pbi, 1)}</span>
 						</li>
@@ -426,7 +437,7 @@
 		gap: 1rem;
 		margin: 1.2rem 0;
 	}
-	.extremes > div {
+	.extremes > .panel {
 		padding: 0.8rem 1rem;
 	}
 	.extremes h3 {
