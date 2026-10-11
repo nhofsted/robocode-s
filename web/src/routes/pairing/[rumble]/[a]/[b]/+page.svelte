@@ -111,7 +111,7 @@
 		<p>
 			Replays of this pairing will play right here in the browser, with the same engine that ran
 			the battle compiled to WebAssembly. The rumble keeps five rounds won by each side for every
-			matchup with a top-50 bot; other rounds are re-run by a volunteer on request.
+			matchup; other rounds are re-run by a volunteer on request.
 		</p>
 		<button disabled>Replays arrive with milestone M5b</button>
 	</section>

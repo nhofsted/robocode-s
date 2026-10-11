@@ -69,4 +69,4 @@ See [Developing a robot](/docs/robot-development#package-it) for how to package 
 
 > **Status:** milestone M5b.
 
-Every pairing page will have a **watch** button that plays a battle in the browser, with the same engine that ran it, compiled to WebAssembly. The rumble keeps recordings of five rounds won by each side for every matchup with at least one top-50 bot. Any other round can be requested: a volunteer re-runs that battle (same seed, same result) and uploads the round.
+Every pairing page will have a **watch** button that plays a battle in the browser, with the same engine that ran it, compiled to WebAssembly. The rumble keeps recordings of five rounds won by each side for every matchup. Any other round can be requested: a volunteer re-runs that battle (same seed, same result) and uploads the round.

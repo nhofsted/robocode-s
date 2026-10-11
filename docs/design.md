@@ -296,10 +296,10 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 
 Costs outside the free tier, kept deliberately small (the replay costs are detailed in §12.7):
 - **Route 53:** none. The records live in the existing `planethofstede.be` zone, so the rumble adds no hosted zone.
-- **S3 storage:** S3's free allowance only lasts 12 months. Afterwards it costs about $0.023/GB-month, so storage is capped (§12.7) at a few GB, which means cents per month.
+- **S3 storage:** S3's free allowance only lasts 12 months. Afterwards it costs about $0.023/GB-month, so storage is bounded by the replay slots (§12.7): about 70–140 GB, about $1.60–3.20/month.
 
 Guardrails:
-- AWS Budgets alert at $1/month.
+- AWS Budgets alert at $5/month (replay storage alone is a few dollars, §12.7).
 - **Reserved concurrency** on every Lambda, so abuse can't scale costs.
 - Per-token rate limits in the API.
 - DynamoDB capacity fixed at the free limits. Overload causes throttling, not a bill.
@@ -364,27 +364,33 @@ Rankings:
 Recordings are stored per **round**, not per battle. A recording starts from a state keyframe at the beginning of a round and contains the intents of that round. Estimated size is 10–20 KB for a 1v1 round; to be measured in M1.
 
 **Stored round slots:**
-- **Which matchups:** every matchup where **at least one bot is in the top 50** of its division.
+- **Which matchups:** every matchup in every division.
 - **Per matchup:** the **5 rounds won by each side**, so authors can study why they win and why they lose. One-sided matchups may have fewer.
 - **Slot key:** (division, bot A version, bot B version, winner, index). A slot is filled by the first qualifying rounds played after that version pair appears.
 - **No expiry:** a recording is never replaced while both bot versions are current. Only a **new bot** or a **new version** creates new empty slots, and only new slots cause uploads.
-- **Clean-up:** recordings of retired bot versions are deleted, which is free in S3. A bot that drops out of the top 50 keeps its existing recordings; it just doesn't get new slots.
+- **Clean-up:** recordings of retired bot versions are deleted, which is free in S3.
+
+**Slot bookkeeping:** the pairing statistics item (§12.6) holds the slot table: for each filled slot, the object key, byte range and round number. The results Lambda already reads and writes that item in the same transaction, so finding empty slots costs no extra reads or rows. The daily rankings run copies the slot table into the pairing data, so the "watch" button knows what to fetch.
+
+**One object per battle:** all slot-filling rounds of a battle are uploaded as a single S3 object, the concatenation of their round recordings. The viewer fetches one round with an HTTP range request through CloudFront. A 1v1 battle of 35 rounds usually fills most of a new pairing's 10 slots, so a pairing costs one or two PUTs instead of ten.
 
 **Upload flow:**
 1. A client keeps the round recordings of its current batch until the results are acknowledged.
-2. The results Lambda replies with the rounds that fill an empty slot, each with a presigned S3 PUT URL. Most batches upload nothing.
+2. The results Lambda replies with the battles that fill empty slots: for each, the rounds to include and a presigned S3 PUT URL for the battle object. Most batches upload nothing once the matchups are filled.
 3. Only users above a reputation threshold are asked for recordings. Each recording's hash must match the round hash reported in the results.
 
-**Everything else on request:** for any other matchup or round, "watch" turns into a high-priority assignment. A volunteer re-runs the battle deterministically and uploads the requested round, which is kept in a small LRU cache with a size cap of about 1 GB.
+**Everything else on request:** for any other round, "watch" turns into a high-priority assignment. A volunteer re-runs the battle deterministically and uploads the requested round, which is kept in a small LRU cache with a size cap of about 1 GB. This also covers the side that never wins a one-sided matchup.
 
-**Estimated cost** (1v1 with about 1,100 bots, plus the other divisions):
+**Estimated cost** (1v1 with about 1,100 bots, plus the much smaller other divisions):
 
 | Item | Estimate |
 |---|---|
-| Stored rounds | about 520k (1v1) + other divisions → **about 8–10 GB** → about $0.20–0.25/month |
-| Initial fill | about 550k PUTs, **one-time about $2.75** |
-| Ongoing uploads | new bot outside the top 50: about 500 rounds; new bot entering the top 50: about 11k rounds. At a few dozen new versions/month: **about $0.10–0.50/month** |
+| Stored rounds | about 6M (1v1, about 604k matchups) + other divisions → **about 70–140 GB** at 10–20 KB per round → about $1.60–3.20/month |
+| Initial fill | about 0.6–1M PUTs (one per battle object), **one-time about $3–5** |
+| Ongoing uploads | a new bot or version: about 11k rounds in 1–2k PUTs, about $0.01, plus 110–220 MB of storage (its previous version's recordings are deleted). At a few dozen new versions/month: **well under $0.10/month** in PUTs |
 | Downloads | Served through CloudFront and cached; within CloudFront's free allowance |
+
+Storage is the main cost and grows with the number of bots, quadratically in the 1v1 division. The round size is still an estimate, to be measured in M1; if it comes out much larger, the matchup scope can be narrowed again without changing the slot design.
 
 ### 12.8 Web interface
 
@@ -478,7 +484,7 @@ robocode-s/
 - **O6** ~~Sample robot licensing~~ Decided: bundled under EPL-2.0. All 27 files were checked and carry the EPL-1.0 header (§13.1).
 - **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The API is served under `/api` on the same domain.
 - **O8** ~~Cross-check fraction~~ Decided: reputation-based, verified by volunteers only (§12.4). The exact numbers (start rate, floor, curve) get tuned once real data exists.
-- **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
+- **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for every matchup; no expiry; the rest on demand (§12.7).
 - **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1, ADR 0015).
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
@@ -511,5 +517,5 @@ robocode-s/
 | Rumble clients | Anyone with GitHub login; server-assigned seeded work; reputation-based verification by other volunteers (new users ~20%, trusted users ~1%) with optimistic acceptance |
 | IaC | AWS CDK (TypeScript) |
 | AWS deployment | Own member account `robocode-s` (ADR 0016), eu-west-1; `rumble.planethofstede.be` (API under `/api`) in the existing Route 53 zone of the management account |
-| Replays | Per-round recordings: 5 rounds won by each side, for matchups involving at least one top-50 bot; never expire, replaced only by new bots or versions; the rest on demand. About $0.50/month plus about $2.75 one-time |
-| AWS cost | Stay within the free tier (S3 aside, which costs cents): AWS never runs battles; Lambda function URLs behind CloudFront (no API Gateway); provisioned DynamoDB at 25/25; capped S3 |
+| Replays | Per-round recordings: 5 rounds won by each side, for every matchup, uploaded as one object per battle; never expire, replaced only by new bots or versions; the rest on demand. About $1.60–3.20/month plus about $3–5 one-time |
+| AWS cost | Stay within the free tier (S3 aside, which costs a few dollars for replays): AWS never runs battles; Lambda function URLs behind CloudFront (no API Gateway); provisioned DynamoDB at 25/25; S3 bounded by the replay slots |
