@@ -4,6 +4,7 @@
 	// classic tank icon with a simple wordmark.
 	import ClassicEmblem from '#lib/brand/ClassicEmblem.svelte';
 	import ClassicWordmark from '#lib/brand/ClassicWordmark.svelte';
+	import LogoTuner from '#lib/brand/LogoTuner.svelte';
 	import Logo from '#lib/components/Logo.svelte';
 
 	const AMBER = '#ffb31f';
@@ -33,6 +34,8 @@
 			>RobocodeLogo.java</span
 		>); the S is new, built from the same letter pieces.
 	</p>
+
+	<LogoTuner />
 
 	<h2>Current</h2>
 	{#snippet current()}<Logo height={28} />{/snippet}

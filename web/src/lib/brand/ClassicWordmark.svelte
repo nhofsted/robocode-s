@@ -1,7 +1,7 @@
 <script lang="ts">
 	// "Robocode" in classic's logo letters (classic-logo.ts), optionally followed by the S.
 	import FighterText from '#lib/components/FighterText.svelte';
-	import { ROBOCODE_D, ROBOCODE_WIDTH, S_D, S_OFFSET, S_WIDTH } from './classic-logo.ts';
+	import { FLAME_S, ROBOCODE_D, ROBOCODE_WIDTH, S_D, S_OFFSET, S_WIDTH } from './classic-logo.ts';
 
 	interface Props {
 		height?: number;
@@ -13,8 +13,10 @@
 		 */
 		s?: 'inline' | 'super' | 'fighter' | 'none';
 		sColor?: string;
+		/** Placement of the flame S, in letter heights (defaults: FLAME_S). */
+		flame?: { x: number; y: number; size: number };
 	}
-	let { height = 32, look = 'glow', s = 'inline', sColor = '#ffb31f' }: Props = $props();
+	let { height = 32, look = 'glow', s = 'inline', sColor = '#ffb31f', flame = FLAME_S }: Props = $props();
 
 	const id = $props.id();
 	const PAD = 3;
@@ -23,7 +25,7 @@
 	);
 </script>
 
-<span class="mark" role="img" aria-label="robocode-s" style:--h="{height}px">
+<span class="mark" role="img" aria-label="robocode-s">
 
 <svg
 	viewBox="{-PAD} {-PAD} {width + 2 * PAD} {46 + 2 * PAD}"
@@ -57,7 +59,13 @@
 	</g>
 </svg>
 {#if s === 'fighter'}
-	<span class="fighter"><FighterText text="S" height="{height * 1.75}px" /></span>
+	<span
+		class="fighter"
+		style:margin-left="{height * flame.x}px"
+		style:top="{height * flame.y}px"
+	>
+		<FighterText text="S" height="{height * flame.size}px" />
+	</span>
 {/if}
 </span>
 
@@ -70,9 +78,7 @@
 	/* The S sits behind the end of the word: "Robocode" overlaps it a little. */
 	.fighter {
 		display: flex;
-		margin-left: calc(var(--h) * -0.92);
 		position: relative;
-		top: calc(var(--h) * 0.04);
 		z-index: 0;
 	}
 	svg {
