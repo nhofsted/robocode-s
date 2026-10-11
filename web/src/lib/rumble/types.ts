@@ -121,7 +121,10 @@ export interface BotRumble extends Metrics {
 	rank: number;
 	battles: number;
 	pairings: Pairing[];
-	/** Daily snapshots, oldest first (design §12.6). */
+	/**
+	 * Daily snapshots over the last year, oldest first, across all of the bot's versions
+	 * (design §12.6); `version` tells which one was ranked that day.
+	 */
 	history: HistoryPoint[];
 }
 
@@ -139,6 +142,8 @@ export interface Pairing {
 
 export interface HistoryPoint {
 	date: string;
+	/** The version ranked on that day. */
+	version: string;
 	rank: number;
 	aps: number;
 	glicko: number;

@@ -395,7 +395,7 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 - **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
 - **Data contract:** the rankings Lambda writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). Until it exists, the site's dev server serves seeded synthetic data in the same format.
-- **Look:** retro Robocode: the dark battlefield, radar green, a pixel display font.
+- **Look:** classic Robocode, with its own images: the blue-metal floor tiles as background, its tank sprites (recoloured like classic) and explosions, and a roaming battlefield behind the home page. Bot pages show rating history across versions, with a marker at every release.
 
 ## 13. Compatibility reference and differential testing
 

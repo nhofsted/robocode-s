@@ -77,7 +77,7 @@ const CLASS_LIMIT: Record<WeightClass, number> = {
 	mega: Infinity
 };
 
-const HISTORY_DAYS = 120;
+const HISTORY_DAYS = 365;
 
 const SAMPLES = [
 	'sample.Corners',
@@ -393,7 +393,10 @@ function buildRumble(
 	};
 }
 
-/** A random walk that ends at today's values; starts when the current version was added. */
+/**
+ * A random walk backwards from today's values, across the bot's versions: at each release the
+ * scores step (older versions were usually weaker) and settle from noisy early estimates.
+ */
 function createHistory(
 	rand: () => number,
 	bot: Bot,
@@ -402,20 +405,32 @@ function createHistory(
 	n: number,
 	now: Date
 ): HistoryPoint[] {
-	const days = Math.min(HISTORY_DAYS, bot.addedDay + 1);
+	const firstDay = Math.round(daysBetween(new Date(bot.versions.at(-1)!.addedAt), now));
+	const days = Math.min(HISTORY_DAYS, firstDay + 1);
 	const points: HistoryPoint[] = [];
 	let r = rank;
 	let aps = m.aps;
 	let glicko = m.glicko;
+	let v = 0;
 	for (let k = 0; k < days; k++) {
+		const date = isoDay(now, -k);
+		// Step back to the version that was current on this day.
+		while (v < bot.versions.length - 1 && date < bot.versions[v].addedAt.slice(0, 10)) {
+			v++;
+			const step = 0.5 + rand() * 3.5;
+			aps = clamp(aps - step, 0, 100);
+			glicko -= step * 14;
+			r = clamp(r + step * Math.max(1, n / 60), 1, n);
+		}
 		points.push({
-			date: isoDay(now, -k),
+			date,
+			version: bot.versions[v].version,
 			rank: Math.round(r),
 			aps: round(aps, 2),
 			glicko: round(glicko, 1)
 		});
-		// Younger versions settle from noisier early estimates.
-		const jitter = k > days - 10 ? 1.5 : 0.25;
+		const age = Math.round(daysBetween(new Date(bot.versions[v].addedAt), now)) - k;
+		const jitter = age < 10 ? 1.5 : 0.25;
 		aps = clamp(aps + jitter * gaussian(rand) * 0.4, 0, 100);
 		r = clamp(r + jitter * gaussian(rand) * Math.max(1, n / 200), 1, n);
 		glicko += jitter * gaussian(rand) * 4;

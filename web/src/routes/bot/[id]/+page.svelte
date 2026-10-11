@@ -44,8 +44,9 @@
 	let historyKey: (typeof HISTORY)[number]['key'] = $state('aps');
 	const historyDef = $derived(HISTORY.find((h) => h.key === historyKey)!);
 	const historyPoints = $derived(
-		entry.history.map((h) => ({ date: h.date, value: h[historyKey] }))
+		entry.history.map((h) => ({ date: h.date, value: h[historyKey], version: h.version }))
 	);
+	const releases = $derived(bot.versions.map((v) => ({ date: v.addedAt, label: `v${v.version}` })));
 
 	type SortKey = 'opponentRank' | 'opponent' | 'score' | 'survival' | 'normalized' | 'battles';
 	let sortKey: SortKey = $state('score');
@@ -155,6 +156,7 @@
 				label={historyDef.label}
 				digits={historyDef.digits}
 				invert={historyDef.invert}
+				markers={releases}
 			/>
 		</div>
 	</section>

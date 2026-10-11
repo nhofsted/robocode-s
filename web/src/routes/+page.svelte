@@ -13,6 +13,13 @@
 		{ id: 'M5b', name: 'Battle replays in the browser', state: 'planned' }
 	];
 	const STATE_LABEL = { done: 'Done', active: 'In progress', planned: 'Planned' };
+
+	// The home page shows more of the battlefield floor than content pages.
+	$effect(() => {
+		const root = document.documentElement.style;
+		root.setProperty('--ground-shade', 'rgb(8 11 18 / 0.5)');
+		return () => root.removeProperty('--ground-shade');
+	});
 </script>
 
 <svelte:head>
@@ -23,8 +30,9 @@
 	/>
 </svelte:head>
 
+<div class="field"><Battlefield tanks={6} /></div>
+
 <section class="hero">
-	<div class="field"><Battlefield /></div>
 	<div class="container hero-text">
 		<h1>Build a tank.<br />Write its brain.<br />Win the rumble.</h1>
 		<p class="lead">
@@ -42,28 +50,28 @@
 <div class="container">
 	<section class="features" aria-label="Features">
 		<article class="panel">
-			<h2 class="pixel">Classic</h2>
+			<h2 class="kicker">Classic</h2>
 			<p>
 				Existing robot jars run as they are. Every turn matches classic Robocode 1.11.1 exactly,
 				checked against real RoboRumble robots.
 			</p>
 		</article>
 		<article class="panel">
-			<h2 class="pixel">Any language</h2>
+			<h2 class="kicker">Any language</h2>
 			<p>
 				Robots talk to the engine over one open protocol, so they can be written in Java, Kotlin,
 				Python, C#, Rust or C/C++ and run locally, in a container or on another machine.
 			</p>
 		</article>
 		<article class="panel">
-			<h2 class="pixel">Reproducible</h2>
+			<h2 class="kicker">Reproducible</h2>
 			<p>
 				In deterministic mode the same seed gives the same battle on every machine. Find a bug
 				once, replay it forever.
 			</p>
 		</article>
 		<article class="panel">
-			<h2 class="pixel">The rumble</h2>
+			<h2 class="kicker">The rumble</h2>
 			<p>
 				A distributed league: volunteers run the battles, results are cross-checked, and every
 				matchup can be watched in the browser.
@@ -71,7 +79,7 @@
 		</article>
 	</section>
 
-	<section class="status">
+	<section class="status panel">
 		<h2>Where we are</h2>
 		<p>
 			robocode-s is in early development. The engine, protocol, server and the host for classic
@@ -91,18 +99,17 @@
 </div>
 
 <style>
+	/* The battlefield fills the window behind the whole page. */
+	.field {
+		position: fixed;
+		inset: 0;
+		z-index: -1;
+		pointer-events: none;
+	}
 	.hero {
-		position: relative;
 		min-height: 420px;
-		border-bottom: 1px solid var(--line);
-		overflow: hidden;
 		display: flex;
 		align-items: center;
-	}
-	.field {
-		position: absolute;
-		inset: 0;
-		opacity: 0.85;
 	}
 	.hero-text {
 		position: relative;
@@ -115,16 +122,18 @@
 		pointer-events: auto;
 	}
 	.hero h1 {
-		font-size: clamp(1.2rem, 4.5vw, 2.1rem);
-		line-height: 1.6;
-		margin: 0 0 1rem;
+		font-size: clamp(2rem, 6vw, 3.4rem);
+		line-height: 1.1;
+		margin: 0 0 1.2rem;
+		text-shadow: 0 2px 12px rgb(0 0 0 / 0.8);
 	}
 	.lead {
 		max-width: 38rem;
 		font-size: 1.1rem;
 		color: var(--text);
-		background: color-mix(in srgb, var(--bg) 70%, transparent);
-		padding: 0.25rem 0;
+		background: color-mix(in srgb, var(--bg) 80%, transparent);
+		padding: 0.6rem 0.9rem;
+		border-radius: var(--radius);
 	}
 	.ctas {
 		display: flex;
@@ -143,9 +152,7 @@
 		padding: 1.1rem 1.2rem;
 	}
 	.features h2 {
-		font-size: 0.8rem;
-		color: var(--amber);
-		margin: 0 0 0.8rem;
+		margin: 0 0 0.6rem;
 	}
 	.features p {
 		margin: 0;
@@ -153,8 +160,9 @@
 	}
 
 	.status {
-		margin-top: 3rem;
+		margin-top: 2rem;
 		max-width: 48rem;
+		padding: 0.2rem 1.4rem 1.4rem;
 	}
 	.milestones {
 		list-style: none;
@@ -162,7 +170,7 @@
 		margin: 1.2rem 0 0;
 		border: 1px solid var(--line);
 		border-radius: var(--radius);
-		background: var(--panel);
+		background: var(--panel-2);
 	}
 	.milestones li {
 		display: grid;

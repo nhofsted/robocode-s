@@ -15,7 +15,7 @@ React was considered: a larger ecosystem and more familiar to contributors. For 
 - **Docs and the home page are prerendered** HTML. Docs are Markdown in the repository (mdsvex), versioned with the code.
 - **Data pages render in the browser** from a `200.html` fallback and read static JSON files written by the rankings Lambda. The files form a versioned contract (`docs/rumble-data.md`, `web/src/lib/rumble/types.ts`).
 - Until the backend exists, the dev and preview servers serve **seeded synthetic data** in that contract, so the site and the backend can be built independently.
-- Design: retro Robocode (dark battlefield, radar green, pixel display font), self-hosted fonts.
+- Design: classic Robocode's look, with its own images: the blue-metal battlefield floor as background, its tank sprites recoloured with its algorithm, its explosions; a "Robocode" wordmark in green Helvetica with a Street Fighter-style "S"; self-hosted fonts.
 
 ## Consequences
 
