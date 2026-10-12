@@ -186,39 +186,66 @@ final class WorkMeter {
         return code;
     }
 
-    /** {@code System.nanoTime()} and {@code currentTimeMillis()} read the virtual clock. */
+    /**
+     * Robot code's ways to ask for the time read the virtual clock: {@code System.nanoTime()}
+     * and {@code currentTimeMillis()}, and the JDK calls that read the latter themselves:
+     * {@code new Date()}, {@code Calendar.getInstance()} and {@code Instant.now()}.
+     */
     private static void replaceClockCalls(String className, InsnList instructions) {
         for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (insn.getOpcode() != Opcodes.INVOKESTATIC) {
+            if (!(insn instanceof MethodInsnNode call)) {
                 continue;
             }
-            MethodInsnNode call = (MethodInsnNode) insn;
-            if (!call.owner.equals("java/lang/System") || !call.desc.equals("()J")) {
-                continue;
+            String method = call.owner + "." + call.name + call.desc;
+            InsnList replacement = new InsnList();
+            switch (method) {
+                case "java/lang/System.nanoTime()J" ->
+                        replacement.add(virtualClock(className, RobotRandomness.CLOCK_NANOS_KEY));
+                case "java/lang/System.currentTimeMillis()J" ->
+                        replacement.add(virtualClock(className, RobotRandomness.CLOCK_MILLIS_KEY));
+                case "java/util/Date.<init>()V" -> {
+                    // new Date() becomes new Date(millis).
+                    replacement.add(virtualClock(className, RobotRandomness.CLOCK_MILLIS_KEY));
+                    replacement.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/util/Date", "<init>", "(J)V",
+                            false));
+                }
+                case "java/util/Calendar.getInstance()Ljava/util/Calendar;" -> {
+                    replacement.add(new MethodInsnNode(Opcodes.INVOKESTATIC, call.owner, call.name, call.desc,
+                            false));
+                    replacement.add(new InsnNode(Opcodes.DUP));
+                    replacement.add(virtualClock(className, RobotRandomness.CLOCK_MILLIS_KEY));
+                    replacement.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Calendar",
+                            "setTimeInMillis", "(J)V", false));
+                }
+                case "java/time/Instant.now()Ljava/time/Instant;" -> {
+                    replacement.add(virtualClock(className, RobotRandomness.CLOCK_MILLIS_KEY));
+                    replacement.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/time/Instant", "ofEpochMilli",
+                            "(J)Ljava/time/Instant;", false));
+                }
+                default -> {
+                    continue;
+                }
             }
-            String key = switch (call.name) {
-                case "nanoTime" -> RobotRandomness.CLOCK_NANOS_KEY;
-                case "currentTimeMillis" -> RobotRandomness.CLOCK_MILLIS_KEY;
-                default -> null;
-            };
-            if (key == null) {
-                continue;
-            }
-            InsnList clock = new InsnList();
-            clock.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
-                    "()Ljava/util/Properties;", false));
-            clock.add(new LdcInsnNode(key));
-            clock.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
-                    "(Ljava/lang/Object;)Ljava/lang/Object;", false));
-            clock.add(new TypeInsnNode(Opcodes.CHECKCAST, HOOK_CLOCK));
-            clock.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
-            clock.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, HOOK_CLOCK, "applyAsLong",
-                    "(Ljava/lang/Object;)J", true));
-            AbstractInsnNode last = clock.getLast();
-            instructions.insert(insn, clock);
+            AbstractInsnNode last = replacement.getLast();
+            instructions.insert(insn, replacement);
             instructions.remove(insn);
             insn = last;
         }
+    }
+
+    /** Pushes the hook's virtual time ({@code key}: nanos or millis) for this robot. */
+    private static InsnList virtualClock(String className, String key) {
+        InsnList clock = new InsnList();
+        clock.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
+                "()Ljava/util/Properties;", false));
+        clock.add(new LdcInsnNode(key));
+        clock.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
+                "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+        clock.add(new TypeInsnNode(Opcodes.CHECKCAST, HOOK_CLOCK));
+        clock.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+        clock.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, HOOK_CLOCK, "applyAsLong",
+                "(Ljava/lang/Object;)J", true));
+        return clock;
     }
 
     /**

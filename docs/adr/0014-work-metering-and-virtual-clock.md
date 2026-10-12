@@ -14,6 +14,7 @@ In deterministic mode the determinism agent **counts the work** of robot code an
 - **Clock:** in robot code, `System.nanoTime()` and `System.currentTimeMillis()` read
   `elapsed = turns × TURN_NANOS + fuel × PICOS_PER_INSTRUCTION / 1000`.
   It starts at `NANO_ORIGIN` and `EPOCH_MILLIS` (2026-01-01T00:00Z). Turns are counted in classic's robot-side `executeImpl` and `waitForBattleEndImpl`.
+  JDK calls that read the wall clock themselves are rewritten too: `new Date()` becomes `new Date(virtual millis)`, `Calendar.getInstance()` gets `setTimeInMillis(virtual millis)` and `Instant.now()` becomes `Instant.ofEpochMilli(virtual millis)`. `pa.Improved` seeds its `Random` from `new Date().getTime()`. Other JDK time sources (`LocalDateTime.now()`, `new GregorianCalendar()`, `Clock`) still read real time; the corpus's double classic recordings catch robots that use them.
 - **The constants are part of the deterministic rules:** `TURN_NANOS` = 1 ms, `PICOS_PER_INSTRUCTION` = 1000 for now. They will be calibrated against a reference machine (#15). Every language gets its own counting and calibration.
 
 The values depend only on what the robot executes, the same in classic's oracle and in robocode-s, on every machine.

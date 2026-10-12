@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ORACLE_TIMEOUT = 15 * 60
 
 
-def plan(manifest, seed, duels, melees, team_battles):
+def plan(manifest, seed, duels, melees, team_battles, cover_all=False):
     rng = random.Random(seed)
     # Excluded robots stay in the manifest with the reason, e.g. robots whose battles
     # are not reproducible in classic itself.
@@ -34,6 +34,9 @@ def plan(manifest, seed, duels, melees, team_battles):
     order = duel[:]
     rng.shuffle(order)
     pairs = [order[i:i + 2] for i in range(0, len(order) - 1, 2)]
+    if cover_all and len(order) % 2:
+        # The odd one out fights a robot that already has a duel.
+        pairs.append([order[-1], rng.choice(order[:-1])])
     while len(pairs) < duels:
         pairs.append(rng.sample(duel, 2))
     for p in pairs[:duels]:
@@ -42,6 +45,11 @@ def plan(manifest, seed, duels, melees, team_battles):
     order = melee[:]
     rng.shuffle(order)
     groups = [order[i:i + 10] for i in range(0, len(order) - 9, 10)]
+    if cover_all and len(order) % 10 >= 2:
+        # The rest fight a smaller melee.
+        groups.append(order[len(order) - len(order) % 10:])
+    elif cover_all and len(order) % 10 == 1 and groups:
+        groups[-1].append(order[-1])
     while len(groups) < melees:
         groups.append(rng.sample(melee, 10))
     for g in groups[:melees]:
@@ -152,6 +160,8 @@ def main():
                    help="record every battle twice in classic and require identical recordings")
     p.add_argument("--oracle-timeout", type=int, default=ORACLE_TIMEOUT,
                    help="seconds per classic recording (default 15 minutes; very slow robots need more)")
+    p.add_argument("--cover-all", action="store_true",
+                   help="every robot fights at least once: --duels and --melees become the number needed")
     p.add_argument("--plan", help="fight the battles of this plan.json (e.g. an earlier run's) instead of a new plan")
     p.add_argument("--only", help="comma-separated battle names: fight only these (e.g. 25-duel)")
     args = p.parse_args()
@@ -164,7 +174,12 @@ def main():
     if args.plan:
         battles = json.loads(Path(args.plan).read_text())
     else:
-        battles = plan(manifest, args.seed, args.duels, args.melees, args.team_battles)
+        if args.cover_all:
+            robots = [r for r in manifest["robots"] if "exclude" not in r]
+            n = lambda pool: sum(pool in r["pools"] for r in robots)
+            args.duels = (n("duel") + 1) // 2
+            args.melees = n("melee") // 10 + (n("melee") % 10 >= 2)
+        battles = plan(manifest, args.seed, args.duels, args.melees, args.team_battles, args.cover_all)
     if args.only:
         names = args.only.split(",")
         battles = [b for b in battles if b["name"] in names]
