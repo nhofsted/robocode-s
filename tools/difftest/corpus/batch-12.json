@@ -289,7 +289,8 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/tcf.Repat3_2.jar",
    "sha256": "591ff9ee335ab0a53d48d1d1678f8aa2cc1865f8cd227ef9ec3e059d11e616a2",
-   "file": "tcf.Repat3_2.jar"
+   "file": "tcf.Repat3_2.jar",
+   "exclude": "Not reproducible in classic: crashes many times per battle (NullPointerException in doRadar), and classic sometimes drains its energy one turn later (thread timing), also at low load."
   },
   {
    "name": "apv.TheBrainPi",
