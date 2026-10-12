@@ -54,8 +54,11 @@ final class WorkMeter {
         }
         ClassNode node = new ClassNode(Opcodes.ASM9);
         reader.accept(node, 0);
-        node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_TRANSIENT
-                | Opcodes.ACC_SYNTHETIC, FIELD, "[J", null, null));
+        boolean meter = RobotRandomness.METER_WORK;
+        if (meter) {
+            node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_TRANSIENT
+                    | Opcodes.ACC_SYNTHETIC, FIELD, "[J", null, null));
+        }
         MethodNode clinit = null;
         for (MethodNode method : node.methods) {
             if (method.name.equals("<clinit>")) {
@@ -63,14 +66,22 @@ final class WorkMeter {
             }
             if (method.instructions.size() > 0) {
                 // Counting first: a clock call costs one JDK call, not the hook's code.
-                count(node.name, method.instructions);
-                replaceClockCalls(node.name, method.instructions);
+                if (meter) {
+                    count(node.name, method.instructions);
+                    replaceClockCalls(node.name, method.instructions);
+                }
                 IdentityHashes.replaceHashCalls(method.instructions);
                 dropUnplacedLocals(method);
                 if (RobotRandomness.tracing()) {
                     traceApiCalls(method.instructions);
                 }
             }
+        }
+        if (!meter) {
+            // Calibration only (-Drobocodes.meterWork=false): deterministic hashes, no counting.
+            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            node.accept(writer);
+            return writer.toByteArray();
         }
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
