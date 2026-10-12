@@ -87,6 +87,9 @@ def main():
         chosen = json.loads(Path(plan).read_text())
         if args.only:
             chosen = [b for b in chosen if b["name"] in args.only.split(",")]
+        # Battle names repeat between plans (00-duel, ...): prefix them with the plan's run.
+        prefix = Path(plan).resolve().parent.name
+        chosen = [dict(b, name=f"{prefix}-{b['name']}") for b in chosen]
         if args.limit:
             chosen = chosen[:args.limit]
         battles += chosen

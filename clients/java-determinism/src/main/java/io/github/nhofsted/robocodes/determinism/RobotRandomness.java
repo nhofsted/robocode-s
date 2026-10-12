@@ -85,8 +85,12 @@ public final class RobotRandomness {
      * The virtual clock (ADR 0014). Part of the deterministic rules: changing a constant
      * changes what time-reading robots do.
      */
-    /** Virtual time per counted instruction, in picoseconds (calibrated, #15). */
-    public static final long PICOS_PER_INSTRUCTION = 1000;
+    /**
+     * Virtual time per counted instruction, in picoseconds. Calibrated on 2026-10-13 against
+     * classic 1.11.1 on OpenJDK 21 (x86-64, WSL2): robots doing over 100 000 counted
+     * instructions per turn take 820-1010 ps each (#15, ADR 0014).
+     */
+    public static final long PICOS_PER_INSTRUCTION = 900;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
     /** Value of the virtual {@code nanoTime()} before the robot did anything. */
