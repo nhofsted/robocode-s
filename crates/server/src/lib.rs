@@ -98,8 +98,9 @@ struct Link {
     /// The robot receives results this round: from `RoundStart` until the `Tick` in which
     /// it stops (death, halt or the end of the round).
     active: bool,
-    /// After a halting `Tick`, an alive robot sends one final `Execute`; its commands still
-    /// take effect, as in classic (`executeImpl` stores them before throwing).
+    /// After a halting `Tick`, a robot that is halted or just died sends one final
+    /// `Execute`; its commands still take effect, as in classic (`executeImpl` stores them
+    /// before throwing).
     final_execute: bool,
     /// The turn of the `Tick` (0: `RoundStart`) we await an `Execute` for.
     awaiting: Option<i64>,
@@ -557,6 +558,9 @@ impl<'a> BattleLoop<'a> {
             let robot = &self.battle.robots[i];
             let running = robot.is_running() && !round_over;
             let alive = robot.is_alive();
+            // A robot whose thread still runs into this turn's stop: halted (alive), or just
+            // died (not halted; a disabled robot is both dead and halted, and has stopped).
+            let final_execute = !round_over && (alive || !robot.is_halted());
             let should_wait =
                 self.battle.aborted || (self.battle.is_last_round() && robot.is_winner());
             let status = convert::status(&self.battle.status(i));
@@ -592,8 +596,11 @@ impl<'a> BattleLoop<'a> {
                 link.awaiting = Some(turn);
             } else {
                 link.active = false;
-                if alive && !round_over {
-                    // Halted: one final Execute still counts.
+                if final_execute {
+                    // Halted or just died: one final Execute still counts. Classic stores
+                    // it before throwing, and loads a dead robot's commands too, so a robot
+                    // that regained energy in the turn it died fires once more (a ghost
+                    // shot, engine-spec §15.3).
                     link.awaiting = Some(turn);
                     link.final_execute = true;
                 }

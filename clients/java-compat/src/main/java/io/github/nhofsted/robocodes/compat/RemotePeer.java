@@ -142,9 +142,18 @@ final class RemotePeer implements IRobotPeer {
      */
     @Override
     public ExecResults waitForBattleEndImpl(ExecCommands commands) {
-        if (finalExecute != null) {
-            // Classic's peer keeps the robot's bullet and team message lists, not copies
-            // (ExecCommands(origin, fromRobot)), and a robot whose execute threw keeps
+        if (finalExecute != null && dead) {
+            // A dead robot isn't halted: classic stores its commands once more, as they are
+            // now, after its handlers ran (a robot that regained energy in the turn it died
+            // fires its ghost shot from them, engine-spec §15.3).
+            finalExecute.setCommands(Convert.commands(commands))
+                    .setOutput(finalExecute.getOutput() + nullToEmpty(commands.getOutputText()));
+            send(finalExecute);
+            finalExecute = null;
+            finalCommands = null;
+        } else if (finalExecute != null) {
+            // Halted: classic's peer keeps the robot's bullet and team message lists, not
+            // copies (ExecCommands(origin, fromRobot)), and a robot whose execute threw keeps
             // adding to them: what its handlers fire here still counts (lessonz.robocode.Oz
             // fires in a custom event after winning). The rest is as it was at the execute.
             RobotCommands late = Convert.commands(finalCommands);
@@ -154,14 +163,20 @@ final class RemotePeer implements IRobotPeer {
             send(finalExecute);
             finalExecute = null;
             finalCommands = null;
-        } else if (!stopping && !finished) {
-            send(Execute.newBuilder()
+        } else if (!finished && (!stopping || dead)) {
+            // The robot's code ended: classic stores its commands once more (also when it just
+            // died without executing again; then the server awaits this as its final Execute).
+            Execute.Builder execute = Execute.newBuilder()
                     .setTurn(lastTurn)
                     .setCommands(Convert.commands(commands))
                     .setOutput(nullToEmpty(commands.getOutputText()))
                     .setCpuNanos(cpuSinceReturn())
-                    .setDrainEnergy(drained)
-                    .setStopped(true));
+                    .setDrainEnergy(drained);
+            send(stopping ? execute : execute.setStopped(true));
+        } else if (!finished) {
+            // Halted without executing again: classic stores nothing, but the server awaits
+            // a final Execute. One without commands changes nothing.
+            send(Execute.newBuilder().setTurn(lastTurn).setCpuNanos(cpuSinceReturn()));
         }
         Object next;
         do {

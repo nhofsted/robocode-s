@@ -614,10 +614,11 @@ OpenJDK's code is GPL and can't be copied. **Decision:** `crates/geom` is an ind
 ### 15.3 Other notes
 
 - **Math semantics:** classic uses `Math`; with intrinsics, results differ on some JVMs. The reference runs with `StrictMath` semantics (ADR 0003).
-- **Dead robots' energy and ghost shots (classic race):**
-  - **The race:** a dead robot's bullets still hit, and the owner gets `updateEnergy(bulletHitBonus)` (§8.3) until its thread has finished. A robot finishes on its first `execute` after death, which sets `isExecFinishedAndDisabled`. `wakeupRobots` doesn't wait for dead robots, so a robot that does slow work in `onDeath` or `onRoundEnded` (such as saving data files) can still gain energy several turns after dying, depending on thread timing.
-  - **Ghost shots:** classic also loads dead robots' commands (`performLoadCommands`), and `fireBullets` only checks gun heat and energy. A dead robot that regained energy therefore **fires again** with its last commands, and those bullets can hit other robots.
-  - **robocode-s** finishes a dead robot at the wakeup that follows its death, which is classic's result for a robot that finishes quickly: no energy, no ghost shots.
+- **Dead robots' energy and ghost shots:**
+  - **Energy:** a dead robot's bullets still hit, and the owner gets `updateEnergy(bulletHitBonus)` (§8.3) until its thread has finished. A robot finishes on its first `execute` after death, which sets `isExecFinishedAndDisabled`. When its own bullet hits in the turn it dies, it therefore has energy again after dying.
+  - **Ghost shots:** the dead robot's thread still handles that turn's events. Its last `execute` (stored before `DeathException`) and `waitForBattleEnd` (a dead robot isn't halted) store its commands once more. Classic loads dead robots' commands too (`performLoadCommands`), and `fireBullets` only checks gun heat and energy, so a bullet it fires there **flies on the next turn** and can hit other robots (`robo.PartsBot`).
+  - **The race:** `wakeupRobots` doesn't wait for dead robots. Whether the robot gets there before the battle's next turn, and whether more of its bullets hit before its thread finishes, depends on thread timing (e.g. slow work in `onDeath`).
+  - **robocode-s** models the robot that finishes quickly: a robot that just died sends one final `Execute`, the server waits for it, and its commands count from the next turn. Energy from later hits is not gained (its thread has finished).
   - **The difftest** doesn't compare a dead robot's energy. It reports a difference as a known race (`RACE`) when classic's recording shows a dead robot with energy earlier in that round.
 - **Classic timing bug:** `RobotPeer.startRound` has a lost-wakeup race. It affects timing only, never results; the oracle patches it (`ClassicPatches`).
 - **Out of scope for the engine:** painting, debug properties, robot console output, interactive (keyboard and mouse) events, and the robot-side API semantics (blocking calls, custom events, event dispatch and interruption). The robot-side API will be specified separately for `java-compat`.
