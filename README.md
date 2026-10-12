@@ -21,6 +21,15 @@ cargo test --workspace     # engine, protocol, server, runner, cli
 
 The website (`web/`) needs Node 24 and pnpm; see [web/README.md](web/README.md).
 
+## Running a battle
+
+```sh
+./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
+cargo run --release -p robocode-s-cli -- battle sample.Fire,sample.Walls,sampleteam.MyFirstTeam --rounds 10
+```
+
+Every robot runs in its own JVM; a pinned JRE is downloaded on first use. Battles are deterministic by default: the same seed gives the same battle. `--classic` uses classic's timing instead, where slow robots skip turns. Other robots: `--jar path/to/robot.jar`. All options: `robocode-s battle --help`.
+
 ## Repository layout
 
 - `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli)

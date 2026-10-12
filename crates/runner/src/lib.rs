@@ -4,6 +4,7 @@
 //! robot running the robocode-s robot host (`clients/java-compat`).
 
 pub mod jre;
+pub mod local;
 
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -43,14 +44,16 @@ pub struct RobotLaunch {
     pub memory_mb: u32,
 }
 
+/// Same module openings as classic's robocode.sh; classic's repository needs them.
+pub const MODULE_OPENINGS: [&str; 2] = [
+    "--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+];
+
 /// The JVM arguments for a robot.
 pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
-    let mut args = vec![
-        format!("-Xmx{}m", launch.memory_mb),
-        // Same module openings as classic's robocode.sh.
-        "--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED".into(),
-        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED".into(),
-    ];
+    let mut args = vec![format!("-Xmx{}m", launch.memory_mb)];
+    args.extend(MODULE_OPENINGS.map(String::from));
     if launch.deterministic {
         args.push("-XX:+UnlockDiagnosticVMOptions".into());
         args.push("-XX:-InlineMathNatives".into());
