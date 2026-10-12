@@ -129,6 +129,9 @@ public final class RobotRandomness {
         }
     }
 
+    /** Stack frames per trace line ({@code -Drobocodes.traceDepth}, default 3). */
+    private static final int TRACE_DEPTH = Integer.getInteger("robocodes.traceDepth", 3);
+
     private static final ThreadLocal<Boolean> TRACING = ThreadLocal.withInitial(() -> false);
 
     private static void trace(String what) {
@@ -153,7 +156,7 @@ public final class RobotRandomness {
                 continue;
             }
             b.append(" < ").append(c).append('.').append(e.getMethodName());
-            if (++shown == 3) {
+            if (++shown == TRACE_DEPTH) {
                 break;
             }
         }

@@ -496,6 +496,8 @@ The command state is what a robot sends with every `execute`. It replaces the ro
 
 Each round starts with a new command state that only keeps the colors (`RobotPeer.initializeRound`). That includes the robot side's record of whether `setAdjustRadarForRobotTurn` was called. While it wasn't, `setAdjustRadarForGunTurn(b)` also sets `adjustRadarForBodyTurn = b`. A robot that turns body adjustment off in one round, then only calls `setAdjustRadarForGunTurn(true)` in the next round, therefore has its radar adjusted for the body again (`catcat20.Matcha`).
 
+**(quirk) Late bullets.** When the engine stores a robot's commands (`new ExecCommands(commands, true)`), it shares the bullet and team message lists with the robot side instead of copying them. After a normal `execute` the robot gets a fresh copy back. When `execute` throws instead (the robot died, or was halted), the robot keeps the shared lists. Bullets and team messages its handlers add while it waits for the battle's end (`waitForBattleEnd` processes events once more) still reach the engine with the next turn's `loadCommands`. Example: `lessonz.robocode.Oz` fires from a custom event after winning, when the winner is halted 120 turns after the round's last death. The robocode-s Java host sends that last `Execute` only after this event processing.
+
 **Validation on receipt:**
 - `maxTurnRate = min(abs(maxTurnRate), MAX_TURN_RATE_RADIANS)`;
 - `maxVelocity = min(abs(maxVelocity), 8)`;

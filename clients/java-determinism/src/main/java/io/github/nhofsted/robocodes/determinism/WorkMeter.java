@@ -89,12 +89,21 @@ final class WorkMeter {
      * Diagnostics only: after each call into the Robocode API that returns a primitive,
      * {@code hook.accept(boxed result, "Owner.method")}. Not counted as work.
      */
+    /** Robot API methods traced whatever class robot code calls them on (its own robot class). */
+    private static final Set<String> TRACED_ROBOT_METHODS = Set.of("getTime", "getGunHeat", "getEnergy",
+            "setFireBullet", "setFire", "fireBullet", "fire");
+
     private static void traceApiCalls(InsnList instructions) {
         for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (!(insn instanceof MethodInsnNode call) || !call.owner.startsWith("robocode/")) {
+            if (!(insn instanceof MethodInsnNode call) || !(call.owner.startsWith("robocode/")
+                    || TRACED_ROBOT_METHODS.contains(call.name))) {
                 continue;
             }
             char ret = call.desc.charAt(call.desc.indexOf(')') + 1);
+            boolean object = ret == 'L' || ret == '[';
+            if (object) {
+                ret = 'Z';
+            }
             String box = switch (ret) {
                 case 'D' -> "(D)Ljava/lang/Double;";
                 case 'J' -> "(J)Ljava/lang/Long;";
@@ -113,6 +122,11 @@ final class WorkMeter {
             };
             InsnList trace = new InsnList();
             trace.add(new InsnNode(ret == 'D' || ret == 'J' ? Opcodes.DUP2 : Opcodes.DUP));
+            if (object) {
+                // An object result: traced as whether it is null.
+                trace.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Objects", "isNull",
+                        "(Ljava/lang/Object;)Z", false));
+            }
             trace.add(new MethodInsnNode(Opcodes.INVOKESTATIC, boxed, "valueOf", box, false));
             trace.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
                     "()Ljava/util/Properties;", false));
@@ -121,7 +135,8 @@ final class WorkMeter {
                     "(Ljava/lang/Object;)Ljava/lang/Object;", false));
             trace.add(new TypeInsnNode(Opcodes.CHECKCAST, "java/util/function/BiConsumer"));
             trace.add(new InsnNode(Opcodes.SWAP));
-            trace.add(new LdcInsnNode(call.owner.substring(call.owner.lastIndexOf('/') + 1) + "." + call.name));
+            trace.add(new LdcInsnNode(call.owner.substring(call.owner.lastIndexOf('/') + 1) + "." + call.name
+                    + (object ? " isNull" : "")));
             trace.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/function/BiConsumer", "accept",
                     "(Ljava/lang/Object;Ljava/lang/Object;)V", true));
             AbstractInsnNode last = trace.getLast();
