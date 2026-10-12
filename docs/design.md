@@ -399,7 +399,7 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 
 ## 13. Compatibility reference and differential testing
 
-- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. The version used by current RoboRumble clients will be investigated in M1 (O2). Robots are tuned against that version, so if it differs in rule-relevant ways, the harness also runs against it.
+- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. LiteRumble accepts uploads from 1.10.3, 1.11.0 and 1.11.1 (O2). The only rule-relevant difference among them is classic's fix #89 in 1.11.0: in 1.10.3, a pending fire command of a robot that stopped sending commands (returned from `run()`, crashed, skipped turns) fired again each time its gun cooled down, with the same bullet id. robocode-s follows 1.11.x (each command fires once, engine-spec §5); it only affects robots that stop executing, so the harness doesn't run against 1.10.3.
 - **Harness (`tools/difftest`):**
   1. Runs a battle in classic Robocode via the `robocode.control` API (`RobocodeEngine`, `BattleListener`, `ITurnSnapshot`) with `RANDOMSEED`, `-Ddebug=true` (no timing-based skipped turns), `-XX:-InlineMathNatives` and the determinism agent. Recordings are byte-identical across runs (`tools/difftest/README.md`).
   2. Runs the same battle in robocode-s, deterministic mode, with the same seed.
@@ -471,7 +471,7 @@ robocode-s/
 ## 17. Open questions
 
 - **O1** ~~LiteRumble contribution~~ Decided: no; it's a non-goal.
-- **O2** Which classic version do current rumble clients use? Are there rule-relevant differences from 1.11.1? *To investigate in M1.*
+- **O2** ~~Classic version of current rumble clients~~ Answered (2026-10-12): LiteRumble's statistics page allows 1.10.3, 1.11.0 and 1.11.1. Of the changes since 1.10.3, only 1.11.0's fix #89 (a fire command fires at most once) touches the rules; robocode-s follows 1.11.x (§13).
 - **O3** ~~Container network isolation~~ Decided: relay container on an internal Docker network (§6.3).
 - **O4** ~~Meaning of bit-exact~~ Decided: exact against classic with StrictMath (fdlibm) semantics (§4.3).
 - **O5** ~~JRE distribution~~ Decided: a pinned Temurin JRE, downloaded on demand (§6.1).
