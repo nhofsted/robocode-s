@@ -244,7 +244,10 @@ Native APIs for new robots, all generated from the same `.proto`:
 - **Stack:** `wgpu` (Vulkan / Metal / DX12 / GL fallback) for the battlefield, `egui` for panels and dialogs. Bevy is not used, to avoid ECS overhead for a simple 2D scene and to keep the engine independent.
 - **Features (scope v1):** battle setup (robot selection, rules, number of rounds, seed, launcher mode), live viewer with speed control, pause and single-step, robot debug painting per robot, robot console output, results table, recording and replay with scrubbing.
 - **Headless:** the same battles run from `cli` without a GUI, or with a remote GUI attached as an observer.
-- The battlefield is drawn with instanced sprites (tank body, gun, radar), bullets, explosions and vector debug paint. All of it is cheap on the GPU even at very high turn rates. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- The battlefield is drawn with egui's painter (meshes on wgpu): classic's floor tiles, textured quads for the tank parts (classic's images, recoloured with classic's `ColorFilter`), bullets, explosions and vector debug paint. That is cheap even with dozens of robots; a dedicated instanced wgpu pass can replace it if profiling asks for it. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- **Embedded server:** a live battle runs the server and the robot processes on a background thread (`runner::local`); the GUI is its observer and sends pause, step, speed and debug-paint toggles (`ObserverControl`).
+- **Debug paint:** the robot host replays classic's serialized `onPaint` calls onto a recording `Graphics2D` that emits `PaintOp`s. The server asks a robot for paint only while an observer has it on, as classic does.
+- **Replay:** opening a recording runs it once and keeps an engine keyframe every 200 turns, so scrubbing replays at most 199 turns.
 
 ## 11. Recording and replay
 

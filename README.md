@@ -30,6 +30,17 @@ cargo run --release -p robocode-s-cli -- battle sample.Fire,sample.Walls,samplet
 
 Every robot runs in its own JVM; a pinned JRE is downloaded on first use. Battles are deterministic by default: the same seed gives the same battle. `--classic` uses classic's timing instead, where slow robots skip turns. Other robots: `--jar path/to/robot.jar`. All options: `robocode-s battle --help`.
 
+`--record FILE` records a battle (`--paint` includes the robots' debug painting); `robocode-s replay FILE` re-runs it, checks every turn and prints the results.
+
+## The GUI
+
+```sh
+cargo run --release -p robocode-s-gui                 # battle setup, then the live battle
+cargo run --release -p robocode-s-gui -- battle.rsr   # replay a recording
+```
+
+The battle setup lists the robots in the jars (`ROBOCODES_ROBOT_JARS`). A live battle can be paused, stepped and sped up, with each robot's debug painting and console output; a replay can be scrubbed through.
+
 ## Repository layout
 
 - `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli)
