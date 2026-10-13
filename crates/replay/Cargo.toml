@@ -1,0 +1,25 @@
+[package]
+name = "robocode-s-replay"
+description = "Compact lossy replay format for the browser viewer (ADR 0017)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Conversion from difftest oracle recordings (JSON Lines), used by the size report.
+json = ["dep:serde_json", "dep:flate2"]
+
+[dependencies]
+robocode-s-fdlibm.workspace = true
+serde_json = { version = "=1.0.151", features = ["float_roundtrip"], optional = true }
+flate2 = { version = "1.1.10", optional = true }
+
+[[bin]]
+name = "replay-size"
+required-features = ["json"]

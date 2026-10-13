@@ -263,6 +263,7 @@ Native APIs for new robots, all generated from the same `.proto`:
 - A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output and debug paint) and a 64-bit hash of the snapshot, so every replayed turn is verified.
 - Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
 - `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
+- Rumble replays in the browser use a different, lossy format (§12.7, ADR 0017).
 - Classic `.br` recordings can be imported if feasible (low priority).
 
 ## 12. robocode-s Rumble
@@ -373,7 +374,7 @@ Rankings:
 
 ### 12.7 Recordings and replays
 
-Recordings are stored per **round**, not per battle. A recording starts from a state keyframe at the beginning of a round and contains the intents of that round. Estimated size is 10–20 KB for a 1v1 round; to be measured in M1.
+Recordings are stored per **round**, not per battle. A rumble recording is a **lossy viewer track** (ADR 0017, `crates/replay`): the round as the viewer draws it, quantized to what a screen shows, predicted and range-coded. The exact round is reproducible from its seed, bot versions and round index. Measured on top bots: 3.3–3.8 bytes per turn in 1v1, so about 3.5 KB for a 900-turn round and 20 KB for a 6,000-turn one. Lossless intents would take 37–39 bytes per turn.
 
 **Stored round slots:**
 - **Which matchups:** every matchup where **at least one bot is in the top 50** of its division.
@@ -393,7 +394,7 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 
 | Item | Estimate |
 |---|---|
-| Stored rounds | about 520k (1v1) + other divisions → **about 8–10 GB** → about $0.20–0.25/month |
+| Stored rounds | about 520k (1v1) + other divisions → **about 3–5 GB** (5–10 KB per round, depending on round length) → about $0.07–0.12/month |
 | Initial fill | about 550k PUTs, **one-time about $2.75** |
 | Ongoing uploads | new bot outside the top 50: about 500 rounds; new bot entering the top 50: about 11k rounds. At a few dozen new versions/month: **about $0.10–0.50/month** |
 | Downloads | Served through CloudFront and cached; within CloudFront's free allowance |
@@ -403,7 +404,7 @@ Recordings are stored per **round**, not per battle. A recording starts from a s
 - Rankings tables per division and weight class, sortable by every metric, with filters and search.
 - Bot pages: metadata, author, versions, rating history chart, best and worst pairings, and a full pairing matrix with heatmap.
 - Pairing pages: per-pairing statistics and a "watch a battle" button (§12.7).
-- **Battle replay in the browser:** the engine and viewer are compiled to **WebAssembly** (WebGPU, with WebGL2 fallback) and play the recordings. Scrubbing works the same as in the desktop GUI (§11).
+- **Battle replay in the browser:** the replay decoder (`crates/replay`, compiled to WebAssembly) and a canvas viewer play the recordings. No engine runs in the browser: tracks are what the viewer draws (ADR 0017). Scrubbing jumps between decoded frames.
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 - **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
 - **Data contract:** the rankings Lambda writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). Until it exists, the site's dev server serves seeded synthetic data in the same format.
@@ -477,7 +478,7 @@ robocode-s/
 | M3 | Isolation and distribution | Docker runner images, network relay, warm pools, remote runner agents with TLS and tokens |
 | M4 | Polyglot | Python, .NET, Rust, C/C++ and modern Java/Kotlin client libraries plus sample robots |
 | M5 | Rumble | Free-tier AWS backend (work/results/auth/submit/rankings), rumble client, seeding import from RoboWiki, website with rankings, reputation-based cross-checks |
-| M5b | Web replay | Engine + viewer compiled to WASM; on-demand replays in the browser |
+| M5b | Web replay | Replay decoder (WASM) and canvas viewer; on-demand replays in the browser |
 | M6+ | Extras | WASM runner, Tank Royale adapter, .NET compat |
 
 ## 17. Open questions
@@ -524,5 +525,5 @@ robocode-s/
 | Rumble clients | Anyone with GitHub login; server-assigned seeded work; reputation-based verification by other volunteers (new users ~20%, trusted users ~1%) with optimistic acceptance |
 | IaC | AWS CDK (TypeScript) |
 | AWS deployment | Own member account `robocode-s` (ADR 0016), eu-west-1; `rumble.planethofstede.be` (API under `/api`) in the existing Route 53 zone of the management account |
-| Replays | Per-round recordings: 5 rounds won by each side, for matchups involving at least one top-50 bot; never expire, replaced only by new bots or versions; the rest on demand. About $0.50/month plus about $2.75 one-time |
+| Replays | Per-round lossy viewer tracks (ADR 0017): 5 rounds won by each side, for matchups involving at least one top-50 bot; never expire, replaced only by new bots or versions; the rest on demand. About $0.40/month plus about $2.75 one-time |
 | AWS cost | Stay within the free tier (S3 aside, which costs cents): AWS never runs battles; Lambda function URLs behind CloudFront (no API Gateway); provisioned DynamoDB at 25/25; capped S3 |
