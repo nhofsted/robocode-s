@@ -4,7 +4,7 @@
 
 use crate::results;
 use robocode_s_engine::BattleRules;
-use robocode_s_protocol::v1::server_message;
+use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::local::{
     LocalBattle, LocalRobot, battle_statics, describe, lookup_name, run_local_battle,
 };
@@ -46,6 +46,7 @@ Robots and runtime:
 Output:
   --json                 results as JSON instead of a table
   --record FILE          record the battle (replay with `robocode-s replay FILE`)
+  --paint                ask every robot for its debug painting (stored by --record)
 ";
 
 /// The parsed command line.
@@ -64,6 +65,7 @@ pub struct Options {
     pub agent_jar: PathBuf,
     pub json: bool,
     pub record: Option<PathBuf>,
+    pub paint: bool,
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -98,6 +100,7 @@ impl Options {
             }),
             json: false,
             record: None,
+            paint: false,
         }
     }
 
@@ -136,6 +139,7 @@ impl Options {
                 "--agent-jar" => o.agent_jar = value(arg)?.into(),
                 "--json" => o.json = true,
                 "--record" => o.record = Some(value(arg)?.into()),
+                "--paint" => o.paint = true,
                 a if a.starts_with("--") => return Err(format!("unknown option {a}")),
                 robot => o.robots.extend(
                     robot
@@ -241,7 +245,19 @@ pub fn run(o: &Options) -> Result<(), String> {
     let progress = !o.json && std::io::stderr().is_terminal();
     let rounds = o.rules.num_rounds;
     let mut outputs: Vec<Option<File>> = statics.iter().map(|_| None).collect();
-    let local = run_local_battle(&host, &battle, |msg| match msg {
+    let controls = o.paint.then(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for robot_index in 0..statics.len() as i32 {
+            let _ = tx.send(v1::ObserverControl {
+                control: Some(v1::observer_control::Control::Paint(v1::PaintToggle {
+                    robot_index,
+                    enabled: true,
+                })),
+            });
+        }
+        rx
+    });
+    let local = run_local_battle(&host, &battle, controls, |msg| match msg {
         server_message::Msg::TurnSnapshot(s) => {
             for (i, r) in s.robots.iter().enumerate() {
                 if r.output.is_empty() {

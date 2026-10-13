@@ -452,6 +452,8 @@ message ArcShape {
 message Polygon {
   repeated double xs = 1;
   repeated double ys = 2;
+  // An open path (polyline): the last point isn't joined to the first.
+  bool open = 3;
 }
 
 message DrawString {

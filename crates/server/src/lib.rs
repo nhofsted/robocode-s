@@ -112,6 +112,10 @@ struct Link {
     /// The turn of the `Tick` (0: `RoundStart`) we await an `Execute` for.
     awaiting: Option<i64>,
     output: String,
+    /// Debug paint of the robot's last `Execute`, for the next snapshot.
+    paint: Vec<v1::PaintOp>,
+    /// An observer turned this robot's debug painting on (`PaintToggle`).
+    paint_enabled: bool,
     io_robot: bool,
     events: Vec<Event>,
     bullet_updates: Vec<v1::BulletStatus>,
@@ -499,6 +503,7 @@ impl<'a> BattleLoop<'a> {
         link.awaiting = None;
         link.final_execute = false;
         link.output.push_str(&execute.output);
+        link.paint = execute.paint;
         let robot = i as i32;
         if let Some(c) = execute.commands {
             link.io_robot |= c.io_robot;
@@ -546,6 +551,14 @@ impl<'a> BattleLoop<'a> {
             Some(v1::observer_control::Control::Pause(pause)) => self.paused = pause,
             Some(v1::observer_control::Control::Step(true)) => self.steps += 1,
             Some(v1::observer_control::Control::TurnsPerSecond(tps)) => self.turns_per_second = tps,
+            Some(v1::observer_control::Control::Paint(toggle)) => {
+                if let Some(link) = usize::try_from(toggle.robot_index)
+                    .ok()
+                    .and_then(|i| self.links.get_mut(i))
+                {
+                    link.paint_enabled = toggle.enabled;
+                }
+            }
             _ => {}
         }
     }
@@ -598,7 +611,7 @@ impl<'a> BattleLoop<'a> {
                 bullet_updates: std::mem::take(&mut link.bullet_updates),
                 halt: !running,
                 should_wait,
-                paint_enabled: false,
+                paint_enabled: link.paint_enabled,
                 budget_nanos: if deterministic { 0 } else { budget },
             };
             if running {
@@ -628,18 +641,33 @@ impl<'a> BattleLoop<'a> {
             return;
         }
         let links = &mut self.links;
-        let snapshot = self.engine.driver.snapshot(&mut |i| {
+        let mut snapshot = self.engine.driver.snapshot(&mut |i| {
             if with_output {
                 std::mem::take(&mut links[i].output)
             } else {
                 String::new()
             }
         });
+        let check = recording::check(&snapshot);
+        if with_output {
+            for (r, link) in snapshot.robots.iter_mut().zip(&mut self.links) {
+                r.paint = std::mem::take(&mut link.paint);
+            }
+        }
         if self.engine.is_recording() {
             let marker = v1::RecordedSnapshot {
                 output: snapshot.robots.iter().map(|r| r.output.clone()).collect(),
-                paint: Vec::new(),
-                check: recording::check(&snapshot),
+                paint: snapshot
+                    .robots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| !r.paint.is_empty())
+                    .map(|(i, r)| v1::RobotPaint {
+                        robot: i as i32,
+                        ops: r.paint.clone(),
+                    })
+                    .collect(),
+                check,
             };
             self.engine.record(&Entry::Snapshot(marker));
         }

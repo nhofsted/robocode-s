@@ -93,6 +93,7 @@ final class RemotePeer implements IRobotPeer {
                 .setTurn(lastTurn)
                 .setCommands(Convert.commands(commands))
                 .setOutput(nullToEmpty(commands.getOutputText()))
+                .addAllPaint(PaintRecorder.ops(commands.getGraphicsCalls()))
                 .setCpuNanos(cpuSinceReturn());
         if (finished) {
             sleep();

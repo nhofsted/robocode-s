@@ -54,9 +54,9 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
         };
         let mut bullet_id = 0;
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut stream) {
-            let turn = match message.msg {
-                Some(server_message::Msg::RoundStart(_)) => 0,
-                Some(server_message::Msg::Tick(t)) => t.turn,
+            let (turn, paint_enabled) = match message.msg {
+                Some(server_message::Msg::RoundStart(_)) => (0, false),
+                Some(server_message::Msg::Tick(t)) => (t.turn, t.paint_enabled),
                 Some(server_message::Msg::BattleOver(_)) => break,
                 _ => continue,
             };
@@ -87,6 +87,26 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
                     turn,
                     commands: Some(commands),
                     output,
+                    // Debug paint only while the server asks for it.
+                    paint: if paint_enabled {
+                        vec![
+                            v1::PaintOp {
+                                op: Some(v1::paint_op::Op::SetColor(0x7fff_0000)),
+                            },
+                            v1::PaintOp {
+                                op: Some(v1::paint_op::Op::Draw(v1::Shape {
+                                    shape: Some(v1::shape::Shape::Line(v1::Line {
+                                        x1: Some(0.0),
+                                        y1: Some(0.0),
+                                        x2: Some(turn as f64),
+                                        y2: Some(next() * 400.0),
+                                    })),
+                                })),
+                            },
+                        ]
+                    } else {
+                        Vec::new()
+                    },
                     ..Default::default()
                 })),
             };
@@ -120,6 +140,16 @@ fn a_recorded_battle_replays_exactly() {
     let server = thread::spawn(move || run_battle(listener, &config, robots));
 
     let mut observer = connect(&address, v1::Role::Observer, "");
+    // Robot a paints; b doesn't.
+    let toggle = v1::ClientMessage {
+        msg: Some(client_message::Msg::ObserverControl(v1::ObserverControl {
+            control: Some(v1::observer_control::Control::Paint(v1::PaintToggle {
+                robot_index: 0,
+                enabled: true,
+            })),
+        })),
+    };
+    write_message(&mut observer, &toggle).unwrap();
     let watcher = thread::spawn(move || {
         let mut frames = Vec::new();
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {
@@ -153,6 +183,12 @@ fn a_recorded_battle_replays_exactly() {
             .any(|f| matches!(f, Frame::Snapshot { snapshot, .. }
             if snapshot.robots.iter().any(|r| !r.output.is_empty()))),
         "no console output in the battle"
+    );
+    let painted = |f: &Frame, i: usize| matches!(f, Frame::Snapshot { snapshot, .. } if !snapshot.robots[i].paint.is_empty());
+    assert!(seen.iter().any(|f| painted(f, 0)), "robot a never painted");
+    assert!(
+        !seen.iter().any(|f| painted(f, 1)),
+        "robot b painted unasked"
     );
     assert_eq!(replayed.len(), seen.len());
     for (i, (r, s)) in replayed.iter().zip(&seen).enumerate() {

@@ -201,9 +201,11 @@ pub struct LocalOutcome {
 
 /// Fights `battle`: starts the server, connects an observer that hands every message to
 /// `observe` (on this thread), launches each robot and waits for the end of the battle.
+/// `controls` are forwarded to the server as the observer's (pause, step, speed, paint).
 pub fn run_local_battle(
     host: &JavaHost,
     battle: &LocalBattle,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
     mut observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -232,6 +234,20 @@ pub fn run_local_battle(
         })),
     };
     write_message(&mut observer, &hello).map_err(|e| e.to_string())?;
+    // Observer controls (pause, step, speed, paint) go to the server as they come.
+    if let Some(controls) = controls {
+        let mut writer = observer.try_clone().map_err(|e| e.to_string())?;
+        thread::spawn(move || {
+            for control in controls {
+                let message = v1::ClientMessage {
+                    msg: Some(client_message::Msg::ObserverControl(control)),
+                };
+                if write_message(&mut writer, &message).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {

@@ -23,10 +23,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let recording =
         Recording::read(Path::new(file.as_str())).map_err(|e| format!("{file}: {e}"))?;
     let mut replay = recording.replay();
-    let (mut turns, mut unverified) = (0usize, Vec::new());
+    let (mut turns, mut painted, mut unverified) = (0usize, 0usize, Vec::new());
     for frame in replay.by_ref() {
         if let Frame::Snapshot { snapshot, verified } = frame {
             turns += 1;
+            painted += usize::from(snapshot.robots.iter().any(|r| !r.paint.is_empty()));
             if !verified && unverified.len() < 5 {
                 unverified.push(format!("round {} turn {}", snapshot.round, snapshot.turn));
             }
@@ -39,6 +40,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "seed": recording.header.seed,
             "rounds": recording.rounds(),
             "turns": turns,
+            "paintedTurns": painted,
             "verified": unverified.is_empty(),
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "results": results::json(&rows),
@@ -46,7 +48,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         println!("{out}");
     } else {
         println!(
-            "{} rounds, seed {}, recorded by robocode-s {}; {turns} turns {}\n",
+            "{} rounds, seed {}, recorded by robocode-s {}; {turns} turns {}{}\n",
             recording.rounds(),
             recording.header.seed,
             recording.header.engine,
@@ -54,6 +56,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 "replayed identically"
             } else {
                 "replayed, NOT identical"
+            },
+            if painted > 0 {
+                format!(", {painted} with debug paint")
+            } else {
+                String::new()
             }
         );
         print!("{}", results::table(&rows));
