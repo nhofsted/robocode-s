@@ -40,7 +40,9 @@ pub fn describe(
 ) -> Result<Vec<Described>, String> {
     std::fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
     let lib = std::path::absolute(&host.lib_dir).map_err(|e| e.to_string())?;
-    let mut command = Command::new(&host.java);
+    // Java runs in `home`, so a relative path to it must become absolute first.
+    let java = crate::absolute_if_path(&host.java).map_err(|e| e.to_string())?;
+    let mut command = Command::new(&java);
     command
         .args(MODULE_OPENINGS)
         .arg("-cp")
@@ -61,13 +63,10 @@ pub fn describe(
         .current_dir(home)
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| format!("starting {}: {e}", host.java.display()))?;
+        .map_err(|e| format!("starting {}: {e}", java.display()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let reason: Vec<&str> = stderr
-            .lines()
-            .filter(|l| !l.starts_with("Loaded ") && !l.trim().is_empty())
-            .collect();
+        let reason: Vec<&str> = stderr.lines().filter(|l| !is_classic_noise(l)).collect();
         return Err(reason.join("\n"));
     }
     parse_description(&String::from_utf8_lossy(&output.stdout))
@@ -279,16 +278,22 @@ pub fn run_local_battle(
             }
             p.stderr_tail()
                 .lines()
-                .filter(|l| {
-                    !l.starts_with("Loaded ")
-                        && !l.contains("robocode.properties")
-                        && !l.trim().is_empty()
-                })
+                .filter(|l| !is_classic_noise(l))
                 .collect::<Vec<_>>()
                 .join("\n")
         })
         .collect();
     Ok(LocalOutcome { outcome, stderr })
+}
+
+/// Messages classic's robot side prints in every headless host: module loading, its
+/// properties file, and the missing GUI module (no `robocode.ui` jar).
+fn is_classic_noise(line: &str) -> bool {
+    line.starts_with("Loaded ")
+        || line.contains("robocode.properties")
+        || line.starts_with("setVisible: No window manager was found.")
+        || line.starts_with("Perhaps you are missing the robocode.ui")
+        || line.trim().is_empty()
 }
 
 /// The classic name to look a robot up by: its unique name without a duplicate suffix.
