@@ -68,7 +68,10 @@ fn battles_end_with_classic_results() {
         return;
     }
     let mut failures = Vec::new();
+    let records = std::env::temp_dir().join(format!("robocodes-cli-test-{}", std::process::id()));
+    std::fs::create_dir_all(&records).unwrap();
     for file in &files {
+        let record = records.join("battle.rsr");
         let lines = load(file);
         let header = &lines[0];
         let classic = lines
@@ -95,6 +98,8 @@ fn battles_end_with_classic_results() {
                     .then_some("--hide-enemy-names"),
             )
             .arg("--json")
+            .arg("--record")
+            .arg(&record)
             .output()
             .unwrap();
         let name = file.file_name().unwrap().to_string_lossy();
@@ -146,6 +151,19 @@ fn battles_end_with_classic_results() {
                     ));
                 }
             }
+        }
+        // The recording replays to the same battle and results.
+        let replay = Command::new(env!("CARGO_BIN_EXE_robocode-s"))
+            .args(["replay", "--json"])
+            .arg(&record)
+            .output()
+            .unwrap();
+        let replayed: Value = serde_json::from_slice(&replay.stdout).unwrap_or_default();
+        if !replay.status.success() || replayed["results"] != ours["results"] {
+            failures.push(format!(
+                "{name}: replay of the recording differs: {}",
+                String::from_utf8_lossy(&replay.stderr)
+            ));
         }
         eprintln!("{name}: checked");
     }

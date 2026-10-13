@@ -252,13 +252,17 @@ Native APIs for new robots, all generated from the same `.proto`:
 - **Stack:** `wgpu` (Vulkan / Metal / DX12 / GL fallback) for the battlefield, `egui` for panels and dialogs. Bevy is not used, to avoid ECS overhead for a simple 2D scene and to keep the engine independent.
 - **Features (scope v1):** battle setup (robot selection, rules, number of rounds, seed, launcher mode), live viewer with speed control, pause and single-step, robot debug painting per robot, robot console output, results table, recording and replay with scrubbing.
 - **Headless:** the same battles run from `cli` without a GUI, or with a remote GUI attached as an observer.
-- The battlefield is drawn with instanced sprites (tank body, gun, radar), bullets, explosions and vector debug paint. All of it is cheap on the GPU even at very high turn rates. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- The battlefield is drawn with egui's painter (meshes on wgpu): classic's floor tiles, textured quads for the tank parts (classic's images, recoloured with classic's `ColorFilter`), bullets, explosions and vector debug paint. That is cheap even with dozens of robots; a dedicated instanced wgpu pass can replace it if profiling asks for it. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- **Embedded server:** a live battle runs the server and the robot processes on a background thread (`runner::local`); the GUI is its observer and sends pause, step, speed and debug-paint toggles (`ObserverControl`).
+- **Debug paint:** the robot host replays classic's serialized `onPaint` calls onto a recording `Graphics2D` that emits `PaintOp`s. The server asks a robot for paint only while an observer has it on, as classic does.
+- **Replay:** opening a recording runs it once and keeps an engine keyframe every 200 turns, so scrubbing replays at most 199 turns.
 
 ## 11. Recording and replay
 
-- **Format:** a header (battle config, robot identities and hashes, engine version, seed) followed by per-turn **intents** of all robots, plus a **state keyframe** every N turns.
-- Replay re-runs the deterministic engine from the nearest keyframe. This makes recordings small and allows scrubbing.
-- Debug paint and console output are stored in an optional side stream.
+- **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, engine version, seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, and the drained, disabled and stopped robots. The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
+- A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output and debug paint) and a 64-bit hash of the snapshot, so every replayed turn is verified.
+- Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
+- `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
 - Classic `.br` recordings can be imported if feasible (low priority).
 
 ## 12. robocode-s Rumble

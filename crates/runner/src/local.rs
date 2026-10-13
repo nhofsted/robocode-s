@@ -38,6 +38,45 @@ pub fn describe(
     robots: &[String],
     home: &Path,
 ) -> Result<Vec<Described>, String> {
+    if robots.is_empty() {
+        return Ok(Vec::new());
+    }
+    parse_description(&run_describe(host, jars, robots, home)?)
+}
+
+/// A robot or team found in the jars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    /// The name to select it by, with version (`jk.mega.DrussGT 3.1.16`).
+    pub name: String,
+    pub team: bool,
+}
+
+/// Every robot and team in `jars`, as classic's repository finds them.
+pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec<Listed>, String> {
+    let text = run_describe(host, jars, &[], home)?;
+    let mut robots: Vec<Listed> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("list\t"))
+        .filter_map(|l| {
+            let (name, team) = l.rsplit_once('\t')?;
+            Some(Listed {
+                name: name.to_string(),
+                team: team == "1",
+            })
+        })
+        .collect();
+    robots.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(robots)
+}
+
+/// Runs the robot host's `--describe` and returns its output.
+fn run_describe(
+    host: &JavaHost,
+    jars: &[PathBuf],
+    robots: &[String],
+    home: &Path,
+) -> Result<String, String> {
     std::fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
     let lib = std::path::absolute(&host.lib_dir).map_err(|e| e.to_string())?;
     // Java runs in `home`, so a relative path to it must become absolute first.
@@ -69,7 +108,7 @@ pub fn describe(
         let reason: Vec<&str> = stderr.lines().filter(|l| !is_classic_noise(l)).collect();
         return Err(reason.join("\n"));
     }
-    parse_description(&String::from_utf8_lossy(&output.stdout))
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Parses the robot host's `--describe` output; other lines (classic's logging) are skipped.
@@ -170,6 +209,132 @@ pub fn battle_statics(robots: &[Described]) -> Vec<v1::RobotStatics> {
         .collect()
 }
 
+/// Where the Java side, the robots and the battle files are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Environment {
+    /// The `java` executable; `None` downloads the pinned JRE into `data`.
+    pub java: Option<PathBuf>,
+    /// The robot host's `lib` directory.
+    pub host_lib: PathBuf,
+    /// The determinism agent.
+    pub agent_jar: PathBuf,
+    /// The pinned JRE and battle files.
+    pub data: PathBuf,
+    /// Robot jars.
+    pub jars: Vec<PathBuf>,
+}
+
+impl Environment {
+    /// From `ROBOCODES_JAVA`, `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_DATA`
+    /// and `ROBOCODES_ROBOT_JARS` (a path list), else the paths of a built source tree.
+    pub fn from_env() -> Self {
+        let var = |name: &str| {
+            std::env::var_os(name)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        let jars: Vec<PathBuf> = std::env::var_os("ROBOCODES_ROBOT_JARS")
+            .map(|v| {
+                std::env::split_paths(&v)
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            java: var("ROBOCODES_JAVA"),
+            host_lib: var("ROBOCODES_HOST_LIB")
+                .unwrap_or_else(|| "clients/java-compat/build/install/robot-host/lib".into()),
+            agent_jar: var("ROBOCODES_AGENT_JAR").unwrap_or_else(|| {
+                "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
+            }),
+            data: var("ROBOCODES_DATA").unwrap_or_else(|| "target/robocodes-data".into()),
+            jars: if jars.is_empty() {
+                vec!["robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar".into()]
+            } else {
+                jars
+            },
+        }
+    }
+
+    /// Checks the paths and finds Java (downloading the pinned JRE if needed).
+    pub fn host(&self, deterministic: bool) -> Result<JavaHost, String> {
+        for jar in &self.jars {
+            if !jar.is_file() {
+                return Err(format!("robot jar not found: {}", jar.display()));
+            }
+        }
+        if !self.host_lib.is_dir() {
+            return Err(format!(
+                "robot host not found in {} (./gradlew :clients:java-compat:installDist)",
+                self.host_lib.display()
+            ));
+        }
+        if deterministic && !self.agent_jar.is_file() {
+            return Err(format!(
+                "determinism agent not found: {} (./gradlew :clients:java-determinism:jar)",
+                self.agent_jar.display()
+            ));
+        }
+        let java = match &self.java {
+            Some(java) => java.clone(),
+            None => crate::jre::java(&self.data).map_err(|e| format!("no Java runtime: {e}"))?,
+        };
+        Ok(JavaHost {
+            java,
+            lib_dir: self.host_lib.clone(),
+            agent_jar: self.agent_jar.clone(),
+        })
+    }
+}
+
+/// A seed for battles without one: different per run (report it, so the battle can be
+/// fought again).
+pub fn random_seed() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    // splitmix64 finalizer over the time and process id.
+    let mut z = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (z ^ (z >> 31)) as i64
+}
+
+/// Prepares a battle of `robots` (classic names; teams expand): describes and names them
+/// and gives the battle its own directory under the data directory.
+pub fn prepare(
+    env: &Environment,
+    robots: &[String],
+    mut config: ServerConfig,
+    memory_mb: u32,
+) -> Result<(JavaHost, LocalBattle), String> {
+    let host = env.host(config.deterministic)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let dir = std::path::absolute(env.data.join("battles"))
+        .map_err(|e| e.to_string())?
+        .join(format!("{stamp}-{}", std::process::id()));
+    let described = describe(&host, &env.jars, robots, &dir.join("describe"))?;
+    if let Some(path) = &config.record {
+        config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
+    }
+    let battle = LocalBattle {
+        config,
+        robots: battle_statics(&described)
+            .into_iter()
+            .map(|s| LocalRobot {
+                lookup: lookup_name(&s.name).to_string(),
+                statics: s,
+            })
+            .collect(),
+        jars: env.jars.clone(),
+        dir,
+        memory_mb,
+    };
+    Ok((host, battle))
+}
+
 /// One robot of a local battle.
 #[derive(Debug, Clone)]
 pub struct LocalRobot {
@@ -201,9 +366,11 @@ pub struct LocalOutcome {
 
 /// Fights `battle`: starts the server, connects an observer that hands every message to
 /// `observe` (on this thread), launches each robot and waits for the end of the battle.
+/// `controls` are forwarded to the server as the observer's (pause, step, speed, paint).
 pub fn run_local_battle(
     host: &JavaHost,
     battle: &LocalBattle,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
     mut observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -232,6 +399,20 @@ pub fn run_local_battle(
         })),
     };
     write_message(&mut observer, &hello).map_err(|e| e.to_string())?;
+    // Observer controls (pause, step, speed, paint) go to the server as they come.
+    if let Some(controls) = controls {
+        let mut writer = observer.try_clone().map_err(|e| e.to_string())?;
+        thread::spawn(move || {
+            for control in controls {
+                let message = v1::ClientMessage {
+                    msg: Some(client_message::Msg::ObserverControl(control)),
+                };
+                if write_message(&mut writer, &message).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {

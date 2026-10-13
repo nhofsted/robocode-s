@@ -4,16 +4,13 @@
 
 use crate::results;
 use robocode_s_engine::BattleRules;
-use robocode_s_protocol::v1::server_message;
-use robocode_s_runner::local::{
-    LocalBattle, LocalRobot, battle_statics, describe, lookup_name, run_local_battle,
-};
-use robocode_s_runner::{JavaHost, jre};
+use robocode_s_protocol::v1::{self, server_message};
+use robocode_s_runner::local::{Environment, prepare, random_seed, run_local_battle};
 use robocode_s_server::ServerConfig;
 use std::fs::File;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 pub const USAGE: &str = "\
 usage: robocode-s battle [options] <robot>...
@@ -45,6 +42,8 @@ Robots and runtime:
 
 Output:
   --json                 results as JSON instead of a table
+  --record FILE          record the battle (replay with `robocode-s replay FILE`)
+  --paint                ask every robot for its debug painting (stored by --record)
 ";
 
 /// The parsed command line.
@@ -55,19 +54,12 @@ pub struct Options {
     pub seed: Option<i64>,
     pub classic: bool,
     pub turn_timeout: Duration,
-    pub jars: Vec<PathBuf>,
+    /// Java, robot host, data directory and robot jars.
+    pub env: Environment,
     pub memory_mb: u32,
-    pub data: PathBuf,
-    pub java: Option<PathBuf>,
-    pub host_lib: PathBuf,
-    pub agent_jar: PathBuf,
     pub json: bool,
-}
-
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+    pub record: Option<PathBuf>,
+    pub paint: bool,
 }
 
 impl Options {
@@ -79,22 +71,11 @@ impl Options {
             seed: None,
             classic: false,
             turn_timeout: ServerConfig::default().turn_timeout,
-            jars: std::env::var_os("ROBOCODES_ROBOT_JARS")
-                .map(|v| {
-                    std::env::split_paths(&v)
-                        .filter(|p| !p.as_os_str().is_empty())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            env: Environment::from_env(),
             memory_mb: 512,
-            data: env_path("ROBOCODES_DATA").unwrap_or_else(|| "target/robocodes-data".into()),
-            java: env_path("ROBOCODES_JAVA"),
-            host_lib: env_path("ROBOCODES_HOST_LIB")
-                .unwrap_or_else(|| "clients/java-compat/build/install/robot-host/lib".into()),
-            agent_jar: env_path("ROBOCODES_AGENT_JAR").unwrap_or_else(|| {
-                "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
-            }),
             json: false,
+            record: None,
+            paint: false,
         }
     }
 
@@ -127,11 +108,13 @@ impl Options {
                 }
                 "--jar" => jars.push(PathBuf::from(value(arg)?)),
                 "--memory" => o.memory_mb = number(arg, value(arg)?)?,
-                "--data" => o.data = value(arg)?.into(),
-                "--java" => o.java = Some(value(arg)?.into()),
-                "--host-lib" => o.host_lib = value(arg)?.into(),
-                "--agent-jar" => o.agent_jar = value(arg)?.into(),
+                "--data" => o.env.data = value(arg)?.into(),
+                "--java" => o.env.java = Some(value(arg)?.into()),
+                "--host-lib" => o.env.host_lib = value(arg)?.into(),
+                "--agent-jar" => o.env.agent_jar = value(arg)?.into(),
                 "--json" => o.json = true,
+                "--record" => o.record = Some(value(arg)?.into()),
+                "--paint" => o.paint = true,
                 a if a.starts_with("--") => return Err(format!("unknown option {a}")),
                 robot => o.robots.extend(
                     robot
@@ -143,11 +126,7 @@ impl Options {
             }
         }
         if !jars.is_empty() {
-            o.jars = jars;
-        }
-        if o.jars.is_empty() {
-            o.jars
-                .push("robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar".into());
+            o.env.jars = jars;
         }
         if o.robots.is_empty() {
             return Err("no robots given".into());
@@ -159,79 +138,36 @@ impl Options {
     }
 }
 
-/// A seed for battles without one: different per run, printed so it can be repeated.
-fn random_seed() -> i64 {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    // splitmix64 finalizer over the time and process id.
-    let mut z = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    (z ^ (z >> 31)) as i64
-}
-
 pub fn run(o: &Options) -> Result<(), String> {
-    for jar in &o.jars {
-        if !jar.is_file() {
-            return Err(format!("robot jar not found: {}", jar.display()));
-        }
-    }
-    if !o.host_lib.is_dir() {
-        return Err(format!(
-            "robot host not found in {} (./gradlew :clients:java-compat:installDist, or --host-lib)",
-            o.host_lib.display()
-        ));
-    }
-    if !o.classic && !o.agent_jar.is_file() {
-        return Err(format!(
-            "determinism agent not found: {} (./gradlew :clients:java-determinism:jar, or --agent-jar)",
-            o.agent_jar.display()
-        ));
-    }
-    let java = match &o.java {
-        Some(java) => java.clone(),
-        None => jre::java(&o.data).map_err(|e| format!("no Java runtime: {e}"))?,
-    };
-    let host = JavaHost {
-        java,
-        lib_dir: o.host_lib.clone(),
-        agent_jar: o.agent_jar.clone(),
-    };
     let seed = o.seed.unwrap_or_else(random_seed);
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
-    let dir = std::path::absolute(o.data.join("battles"))
-        .map_err(|e| e.to_string())?
-        .join(format!("{stamp}-{}", std::process::id()));
-
-    let described = describe(&host, &o.jars, &o.robots, &dir.join("describe"))?;
-    let statics = battle_statics(&described);
-    let battle = LocalBattle {
-        config: ServerConfig {
-            rules: o.rules.clone(),
-            seed,
-            deterministic: !o.classic,
-            turn_timeout: o.turn_timeout,
-            ..Default::default()
-        },
-        robots: statics
-            .iter()
-            .map(|s| LocalRobot {
-                lookup: lookup_name(&s.name).to_string(),
-                statics: s.clone(),
-            })
-            .collect(),
-        jars: o.jars.clone(),
-        dir: dir.clone(),
-        memory_mb: o.memory_mb,
+    let config = ServerConfig {
+        rules: o.rules.clone(),
+        seed,
+        deterministic: !o.classic,
+        turn_timeout: o.turn_timeout,
+        record: o.record.clone(),
+        ..Default::default()
     };
+    let (host, battle) = prepare(&o.env, &o.robots, config, o.memory_mb)?;
+    let statics: Vec<v1::RobotStatics> = battle.robots.iter().map(|r| r.statics.clone()).collect();
+    let dir = battle.dir.clone();
 
     let progress = !o.json && std::io::stderr().is_terminal();
     let rounds = o.rules.num_rounds;
     let mut outputs: Vec<Option<File>> = statics.iter().map(|_| None).collect();
-    let local = run_local_battle(&host, &battle, |msg| match msg {
+    let controls = o.paint.then(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for robot_index in 0..statics.len() as i32 {
+            let _ = tx.send(v1::ObserverControl {
+                control: Some(v1::observer_control::Control::Paint(v1::PaintToggle {
+                    robot_index,
+                    enabled: true,
+                })),
+            });
+        }
+        rx
+    });
+    let local = run_local_battle(&host, &battle, controls, |msg| match msg {
         server_message::Msg::TurnSnapshot(s) => {
             for (i, r) in s.robots.iter().enumerate() {
                 if r.output.is_empty() {
@@ -335,7 +271,7 @@ mod tests {
             "a.B --jar x.jar --jar y.jar --classic --turn-timeout 20",
         ))
         .unwrap();
-        assert_eq!(o.jars, [PathBuf::from("x.jar"), PathBuf::from("y.jar")]);
+        assert_eq!(o.env.jars, [PathBuf::from("x.jar"), PathBuf::from("y.jar")]);
         assert!(o.classic);
         assert_eq!(o.turn_timeout, Duration::from_millis(20));
     }

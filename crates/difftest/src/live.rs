@@ -79,7 +79,7 @@ pub fn live_battle(
         memory_mb: 512,
     };
     let mut snapshots = Vec::new();
-    let local = run_local_battle(host, &battle, |msg| {
+    let local = run_local_battle(host, &battle, None, |msg| {
         if let server_message::Msg::TurnSnapshot(s) = msg {
             snapshots.push(s.clone());
         }
