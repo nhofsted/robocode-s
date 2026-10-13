@@ -3,6 +3,7 @@
 //! `robocode-s` command-line interface.
 
 mod battle;
+mod replay;
 mod results;
 
 use std::process::ExitCode;
@@ -12,6 +13,7 @@ usage: robocode-s <command> [options]
 
 Commands:
   battle     run a headless battle and print the results
+  replay     re-run a recorded battle, verify it and print the results
   --version  print the version
 
 `robocode-s battle --help` describes the battle options.
@@ -36,6 +38,19 @@ fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("robocode-s battle: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("replay") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", replay::USAGE);
+                return ExitCode::SUCCESS;
+            }
+            match replay::run(&args[1..]) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("robocode-s replay: {e}");
                     ExitCode::FAILURE
                 }
             }

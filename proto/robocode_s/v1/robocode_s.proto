@@ -601,3 +601,59 @@ message PaintToggle {
   int32 robot_index = 1;
   bool enabled = 2;
 }
+
+// ============================================================================
+// Recordings (design §11): a battle as the inputs its engine received
+// ============================================================================
+//
+// A recording file is a gzip stream of length-delimited RecordingEntry messages: first
+// a header, then every input the server gave the engine, in order. Replaying them into
+// a new engine reproduces the battle exactly. A snapshot entry marks each point where
+// the server published a TurnSnapshot, with what the engine doesn't know: console
+// output and debug paint.
+
+message RecordingEntry {
+  oneof entry {
+    RecordingHeader header = 1;
+    bool start_round = 2;
+    bool finish_round = 3;
+    bool step = 4;
+    // A robot's Execute brought new commands (applied at the next step).
+    RecordedCommands commands = 5;
+    // A robot's pending commands are dropped (too many skipped turns). Robot index.
+    int32 discard_commands = 6;
+    int32 drain_energy = 7;
+    int32 disable = 8;
+    int32 stop = 9;
+    RecordedSnapshot snapshot = 10;
+  }
+}
+
+message RecordingHeader {
+  // Version of this format.
+  uint32 format = 1;
+  // robocode-s version that recorded it.
+  string engine = 2;
+  int64 seed = 3;
+  BattleRules rules = 4;
+  repeated RobotStatics robots = 5;
+}
+
+message RecordedCommands {
+  int32 robot = 1;
+  RobotCommands commands = 2;
+}
+
+message RecordedSnapshot {
+  // Per robot, by index: console output in this snapshot.
+  repeated string output = 1;
+  // Debug paint, for robots that painted.
+  repeated RobotPaint paint = 2;
+  // FNV-1a hash of the snapshot without output and paint, to verify a replay.
+  fixed64 check = 3;
+}
+
+message RobotPaint {
+  int32 robot = 1;
+  repeated PaintOp ops = 2;
+}

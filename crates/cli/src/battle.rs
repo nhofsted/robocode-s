@@ -45,6 +45,7 @@ Robots and runtime:
 
 Output:
   --json                 results as JSON instead of a table
+  --record FILE          record the battle (replay with `robocode-s replay FILE`)
 ";
 
 /// The parsed command line.
@@ -62,6 +63,7 @@ pub struct Options {
     pub host_lib: PathBuf,
     pub agent_jar: PathBuf,
     pub json: bool,
+    pub record: Option<PathBuf>,
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -95,6 +97,7 @@ impl Options {
                 "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
             }),
             json: false,
+            record: None,
         }
     }
 
@@ -132,6 +135,7 @@ impl Options {
                 "--host-lib" => o.host_lib = value(arg)?.into(),
                 "--agent-jar" => o.agent_jar = value(arg)?.into(),
                 "--json" => o.json = true,
+                "--record" => o.record = Some(value(arg)?.into()),
                 a if a.starts_with("--") => return Err(format!("unknown option {a}")),
                 robot => o.robots.extend(
                     robot
@@ -214,6 +218,12 @@ pub fn run(o: &Options) -> Result<(), String> {
             seed,
             deterministic: !o.classic,
             turn_timeout: o.turn_timeout,
+            record: o
+                .record
+                .as_ref()
+                .map(std::path::absolute)
+                .transpose()
+                .map_err(|e| e.to_string())?,
             ..Default::default()
         },
         robots: statics

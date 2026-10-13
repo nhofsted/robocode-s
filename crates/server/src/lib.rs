@@ -7,13 +7,17 @@
 //! messages to the battle loop, which owns the engine and does all writing.
 
 pub mod convert;
+pub mod driver;
+pub mod recording;
 
-use convert::Passthrough;
+use driver::RecordingDriver;
+use recording::Recorder;
 use robocode_s_engine::{Battle, BattleRules, Event};
-use robocode_s_protocol::v1::{self, client_message, server_message};
+use robocode_s_protocol::v1::{self, client_message, recording_entry::Entry, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use std::io;
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -40,6 +44,8 @@ pub struct ServerConfig {
     pub hard_limit: Duration,
     /// How long robots get to connect before the battle starts without them.
     pub connect_timeout: Duration,
+    /// Record the battle to this file (design §11, [`recording`]).
+    pub record: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -52,6 +58,7 @@ impl Default for ServerConfig {
             start_timeout: Duration::from_secs(5),
             hard_limit: Duration::from_secs(60),
             connect_timeout: Duration::from_secs(30),
+            record: None,
         }
     }
 }
@@ -104,9 +111,6 @@ struct Link {
     final_execute: bool,
     /// The turn of the `Tick` (0: `RoundStart`) we await an `Execute` for.
     awaiting: Option<i64>,
-    /// Commands received for the next turn.
-    pending: Option<robocode_s_engine::Commands>,
-    passthrough: Passthrough,
     output: String,
     io_robot: bool,
     events: Vec<Event>,
@@ -129,7 +133,7 @@ pub fn run_battle(
         thread::spawn(move || accept_loop(&listener, &tokens, &tx, &stop))
     };
     drop(tx);
-    let result = BattleLoop::new(config, robots, rx).run();
+    let result = BattleLoop::new(config, robots, rx).and_then(BattleLoop::run);
     stop.store(true, Ordering::SeqCst);
     let _ = acceptor.join();
     result
@@ -245,7 +249,8 @@ fn server(msg: server_message::Msg) -> v1::ServerMessage {
 struct BattleLoop<'a> {
     config: &'a ServerConfig,
     statics: Vec<v1::RobotStatics>,
-    battle: Battle,
+    /// The engine; every input goes through it and into the recording.
+    engine: RecordingDriver,
     links: Vec<Link>,
     observers: Vec<TcpStream>,
     rx: Receiver<Incoming>,
@@ -255,17 +260,36 @@ struct BattleLoop<'a> {
 }
 
 impl<'a> BattleLoop<'a> {
-    fn new(config: &'a ServerConfig, robots: Vec<RobotEntry>, rx: Receiver<Incoming>) -> Self {
+    fn new(
+        config: &'a ServerConfig,
+        robots: Vec<RobotEntry>,
+        rx: Receiver<Incoming>,
+    ) -> io::Result<Self> {
         let mut statics: Vec<v1::RobotStatics> = robots.into_iter().map(|r| r.statics).collect();
+        let rules = convert::rules(&config.rules, config.deterministic);
         for (i, s) in statics.iter_mut().enumerate() {
             s.robot_index = i as i32;
-            s.rules = Some(convert::rules(&config.rules, config.deterministic));
+            s.rules = Some(rules);
         }
         let setups = statics.iter().map(convert::robot_setup).collect();
         let links = statics.iter().map(|_| Link::default()).collect();
-        Self {
+        let recorder = match &config.record {
+            Some(path) => Some(Recorder::create(
+                path,
+                v1::RecordingHeader {
+                    format: recording::FORMAT,
+                    engine: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: config.seed,
+                    rules: Some(rules),
+                    robots: statics.clone(),
+                },
+            )?),
+            None => None,
+        };
+        let battle = Battle::new(config.rules.clone(), setups, config.seed);
+        Ok(Self {
             config,
-            battle: Battle::new(config.rules.clone(), setups, config.seed),
+            engine: RecordingDriver::new(battle, recorder),
             statics,
             links,
             observers: Vec::new(),
@@ -273,14 +297,14 @@ impl<'a> BattleLoop<'a> {
             paused: false,
             steps: 0,
             turns_per_second: 0,
-        }
+        })
     }
 
     fn run(mut self) -> io::Result<BattleOutcome> {
         self.await_robots();
         for _ in 0..self.config.rules.num_rounds {
             self.run_round();
-            self.battle.finish_round();
+            self.engine.input(Entry::FinishRound(true));
         }
         for i in 0..self.links.len() {
             self.send(
@@ -288,12 +312,7 @@ impl<'a> BattleLoop<'a> {
                 server_message::Msg::BattleOver(v1::BattleOver { aborted: false }),
             );
         }
-        let results = self
-            .battle
-            .robots
-            .iter()
-            .map(|r| convert::results(&r.setup.name, &r.stats.final_results()))
-            .collect();
+        let results = recording::round_result(self.battle()).results;
         // Reader threads hold clones of the sockets; shutting them down closes the
         // connections and ends those threads.
         for stream in self
@@ -304,6 +323,7 @@ impl<'a> BattleLoop<'a> {
         {
             let _ = stream.shutdown(Shutdown::Both);
         }
+        self.engine.finish()?;
         Ok(BattleOutcome {
             results,
             rounds: self.config.rules.num_rounds,
@@ -326,32 +346,25 @@ impl<'a> BattleLoop<'a> {
     }
 
     fn run_round(&mut self) {
-        self.battle.start_round();
-        let round = self.battle.round;
+        self.engine.input(Entry::StartRound(true));
+        let round = self.battle().round;
         for i in 0..self.links.len() {
             let link = &mut self.links[i];
             link.events.clear();
             link.bullet_updates.clear();
             link.team_messages.clear();
-            link.pending = None;
             link.awaiting = None;
             link.active = false;
             link.final_execute = false;
-            // Classic starts each round with new `ExecCommands` that only keep the colors.
-            // Whether `setAdjustRadarForRobotTurn` was called is forgotten too, so that
-            // `setAdjustRadarForGunTurn` again sets the radar's body adjustment (engine-spec §8).
-            link.passthrough = Passthrough {
-                colors: link.passthrough.colors.take(),
-                ..Passthrough::default()
-            };
             if link.stream.is_none() {
                 // Could not be started: classic disables it (CANNOT_START).
-                self.battle.disable(i);
+                self.engine.input(Entry::Disable(i as i32));
                 continue;
             }
+            let driver = &self.engine.driver;
             let commands =
-                convert::commands_copy(&self.battle.robots[i].commands, &self.links[i].passthrough);
-            let status = convert::status(&self.battle.status(i));
+                convert::commands_copy(&driver.battle.robots[i].commands, &driver.passthrough[i]);
+            let status = convert::status(&driver.battle.status(i));
             self.links[i].awaiting = Some(0);
             self.links[i].active = true;
             self.send(
@@ -370,12 +383,7 @@ impl<'a> BattleLoop<'a> {
         self.collect_executes();
         self.snapshot_with(false);
         loop {
-            for i in 0..self.links.len() {
-                if let Some(commands) = self.links[i].pending.take() {
-                    self.battle.set_commands(i, commands);
-                }
-            }
-            self.battle.step();
+            self.engine.input(Entry::Step(true));
             self.deliver();
             // As classic (`runTurn` ends with `wakeupRobots`, then `finalizeTurn` publishes):
             // a turn's snapshot includes what robots did while handling it, such as a
@@ -383,23 +391,19 @@ impl<'a> BattleLoop<'a> {
             self.collect_executes();
             self.snapshot();
             self.pace();
-            if self.battle.is_round_over() {
+            if self.battle().is_round_over() {
                 break;
             }
         }
         for i in 0..self.links.len() {
             self.send(i, server_message::Msg::RoundOver(v1::RoundOver { round }));
         }
-        let results = self
-            .battle
-            .robots
-            .iter()
-            .map(|r| convert::results(&r.setup.name, &r.stats.final_results()))
-            .collect();
-        self.broadcast(server_message::Msg::RoundResult(v1::RoundResult {
-            round,
-            results,
-        }));
+        let result = recording::round_result(self.battle());
+        self.broadcast(server_message::Msg::RoundResult(result));
+    }
+
+    fn battle(&self) -> &Battle {
+        &self.engine.driver.battle
     }
 
     /// Whether we still expect an `Execute` from this robot before the next turn.
@@ -407,14 +411,14 @@ impl<'a> BattleLoop<'a> {
         let link = &self.links[i];
         link.awaiting.is_some()
             && link.stream.is_some()
-            && (self.battle.robots[i].is_running() || link.final_execute)
+            && (self.battle().robots[i].is_running() || link.final_execute)
     }
 
     /// Waits for the `Execute`s of this turn (engine-spec §11.3).
     fn collect_executes(&mut self) {
         let timeout = if self.config.deterministic {
             self.config.hard_limit
-        } else if self.battle.time == 0 {
+        } else if self.battle().time == 0 {
             self.config.start_timeout
         } else {
             self.config.turn_timeout
@@ -433,7 +437,7 @@ impl<'a> BattleLoop<'a> {
             // Too slow for the hard limit: disabled.
             for i in 0..self.links.len() {
                 if self.expecting(i) {
-                    self.battle.disable(i);
+                    self.engine.input(Entry::Disable(i as i32));
                     self.links[i].awaiting = None;
                 }
             }
@@ -495,30 +499,33 @@ impl<'a> BattleLoop<'a> {
         link.awaiting = None;
         link.final_execute = false;
         link.output.push_str(&execute.output);
-        if let Some(c) = &execute.commands {
-            let (commands, passthrough) = convert::commands(c);
-            link.io_robot |= commands.io;
-            link.pending = Some(commands);
-            link.passthrough = passthrough;
+        let robot = i as i32;
+        if let Some(c) = execute.commands {
+            link.io_robot |= c.io_robot;
+            self.engine.input(Entry::Commands(v1::RecordedCommands {
+                robot,
+                commands: Some(c),
+            }));
         }
         if execute.drain_energy {
-            self.battle.drain_energy(i);
+            self.engine.input(Entry::DrainEnergy(robot));
         }
         if execute.disable {
-            self.battle.disable(i);
+            self.engine.input(Entry::Disable(robot));
         }
         if execute.stopped {
-            let link = &mut self.links[i];
-            link.active = false;
-            self.battle.stop(i);
+            self.links[i].active = false;
+            self.engine.input(Entry::Stop(robot));
         }
         // `checkSkippedTurn`: turns that ran since the Tick this robot answers.
-        let skipped = self.battle.time - execute.turn;
+        let time = self.battle().time;
+        let alive = self.battle().robots[i].is_alive();
+        let skipped = time - execute.turn;
         if skipped >= 1 {
             let link = &mut self.links[i];
             link.events.retain(convert::is_critical);
-            if self.battle.robots[i].is_alive() {
-                for turn in execute.turn + 1..=self.battle.time {
+            if alive {
+                for turn in execute.turn + 1..=time {
                     link.events.push(Event::SkippedTurn { turn });
                 }
             }
@@ -528,8 +535,8 @@ impl<'a> BattleLoop<'a> {
                 MAX_SKIPPED_TURNS
             };
             if skipped > max {
-                link.pending = None;
-                self.battle.disable(i);
+                self.engine.input(Entry::DiscardCommands(robot));
+                self.engine.input(Entry::Disable(robot));
             }
         }
     }
@@ -546,24 +553,26 @@ impl<'a> BattleLoop<'a> {
     /// Sends each robot that answered its last `Tick` the results of this turn. A robot
     /// that is still busy (skipping turns) gets them, accumulated, after its `Execute`.
     fn deliver(&mut self) {
-        let turn = self.battle.time;
-        let round_over = self.battle.is_round_over();
+        let turn = self.battle().time;
+        let round_over = self.battle().is_round_over();
         let deterministic = self.config.deterministic;
         let budget = self.config.turn_timeout.as_nanos() as u64;
         for i in 0..self.links.len() {
-            let name = self.battle.robots[i].setup.name.clone();
-            let events = self.battle.take_events(i);
-            let bullets = self.battle.take_bullet_updates(i);
-            let messages = self.battle.take_team_messages(i);
-            let robot = &self.battle.robots[i];
+            let driver = &mut self.engine.driver;
+            let battle = &mut driver.battle;
+            let name = battle.robots[i].setup.name.clone();
+            let events = battle.take_events(i);
+            let bullets = battle.take_bullet_updates(i);
+            let messages = battle.take_team_messages(i);
+            let robot = &battle.robots[i];
             let running = robot.is_running() && !round_over;
             let alive = robot.is_alive();
             // A robot whose thread still runs into this turn's stop: halted (alive), or just
             // died (not halted; a disabled robot is both dead and halted, and has stopped).
             let final_execute = !round_over && (alive || !robot.is_halted());
-            let should_wait =
-                self.battle.aborted || (self.battle.is_last_round() && robot.is_winner());
-            let status = convert::status(&self.battle.status(i));
+            let should_wait = battle.aborted || (battle.is_last_round() && robot.is_winner());
+            let status = convert::status(&battle.status(i));
+            let commands = convert::commands_copy(&robot.commands, &driver.passthrough[i]);
             let link = &mut self.links[i];
             if !link.active {
                 continue;
@@ -579,7 +588,7 @@ impl<'a> BattleLoop<'a> {
             let tick = v1::Tick {
                 turn,
                 status: Some(status),
-                commands: Some(convert::commands_copy(&robot.commands, &link.passthrough)),
+                commands: Some(commands),
                 events: link
                     .events
                     .drain(..)
@@ -615,34 +624,25 @@ impl<'a> BattleLoop<'a> {
 
     /// Broadcasts the current turn; `with_output` takes the robots' console output so far.
     fn snapshot_with(&mut self, with_output: bool) {
-        if self.observers.is_empty() {
+        if self.observers.is_empty() && !self.engine.is_recording() {
             return;
         }
-        let robots = self
-            .battle
-            .robots
-            .iter()
-            .zip(self.links.iter_mut())
-            .map(|(r, l)| {
-                let output = if with_output {
-                    std::mem::take(&mut l.output)
-                } else {
-                    String::new()
-                };
-                convert::robot_snapshot(r, &l.passthrough, output)
-            })
-            .collect();
-        let snapshot = v1::TurnSnapshot {
-            round: self.battle.round,
-            turn: self.battle.time,
-            robots,
-            bullets: self
-                .battle
-                .bullets
-                .iter()
-                .map(convert::bullet_snapshot)
-                .collect(),
-        };
+        let links = &mut self.links;
+        let snapshot = self.engine.driver.snapshot(&mut |i| {
+            if with_output {
+                std::mem::take(&mut links[i].output)
+            } else {
+                String::new()
+            }
+        });
+        if self.engine.is_recording() {
+            let marker = v1::RecordedSnapshot {
+                output: snapshot.robots.iter().map(|r| r.output.clone()).collect(),
+                paint: Vec::new(),
+                check: recording::check(&snapshot),
+            };
+            self.engine.record(&Entry::Snapshot(marker));
+        }
         self.broadcast(server_message::Msg::TurnSnapshot(snapshot));
     }
 

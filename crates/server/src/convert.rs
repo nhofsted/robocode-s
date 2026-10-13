@@ -33,6 +33,19 @@ pub fn rules(rules: &engine::BattleRules, deterministic: bool) -> v1::BattleRule
     }
 }
 
+/// The engine's rules from the protocol's (the reverse of [`rules`]).
+pub fn rules_in(r: &v1::BattleRules) -> engine::BattleRules {
+    engine::BattleRules {
+        width: r.battlefield_width,
+        height: r.battlefield_height,
+        num_rounds: r.num_rounds,
+        gun_cooling_rate: r.gun_cooling_rate.unwrap_or(0.1),
+        inactivity_time: r.inactivity_time,
+        hide_enemy_names: r.hide_enemy_names,
+        sentry_border_size: r.sentry_border_size,
+    }
+}
+
 /// Parts of the command state the engine doesn't use but robots and observers do.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Passthrough {

@@ -248,9 +248,10 @@ Native APIs for new robots, all generated from the same `.proto`:
 
 ## 11. Recording and replay
 
-- **Format:** a header (battle config, robot identities and hashes, engine version, seed) followed by per-turn **intents** of all robots, plus a **state keyframe** every N turns.
-- Replay re-runs the deterministic engine from the nearest keyframe. This makes recordings small and allows scrubbing.
-- Debug paint and console output are stored in an optional side stream.
+- **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, engine version, seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, and the drained, disabled and stopped robots. The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
+- A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output and debug paint) and a 64-bit hash of the snapshot, so every replayed turn is verified.
+- Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
+- `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
 - Classic `.br` recordings can be imported if feasible (low priority).
 
 ## 12. robocode-s Rumble
