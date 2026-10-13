@@ -5,8 +5,8 @@
 
 	const milestones: { id: string; name: string; state: 'done' | 'active' | 'planned' }[] = [
 		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
-		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'active' },
-		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'planned' },
+		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'done' },
+		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'done' },
 		{ id: 'M3', name: 'Isolation: containers, remote runners', state: 'planned' },
 		{ id: 'M4', name: 'Robots in Python, .NET, Rust, C/C++, Kotlin', state: 'planned' },
 		{ id: 'M5', name: 'The rumble: rankings, volunteers, submissions', state: 'planned' },
@@ -83,9 +83,10 @@
 	<section class="status panel">
 		<h2>Where we are</h2>
 		<p>
-			robocode-s is in early development. The engine, protocol, server and the host for classic
-			Java robots already fight real RoboRumble robots identically to classic; there is no
-			release to download yet. Follow along on <a href={REPO_URL}>GitHub</a>.
+			robocode-s is in early development. Classic Java robots, the samples and real RoboRumble
+			bots alike, fight identically to classic: headless from the command line, or in the
+			desktop GUI with debug painting, recordings and replays. There is no release to download
+			yet. Follow along on <a href={REPO_URL}>GitHub</a>.
 		</p>
 		<ol class="milestones">
 			{#each milestones as m (m.id)}
