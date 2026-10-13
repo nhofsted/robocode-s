@@ -149,17 +149,18 @@ fn robot(
                         }
                     }
                 }
-                // A halted robot still sends its final commands (classic stores them before
-                // stopping); a dead one has none.
+                // After a halting Tick the server awaits one final Execute (a halted or just
+                // died robot, engine-spec §15.3). Like the robot host, the robot sends the
+                // commands classic stored, or none when it recorded none (dead): those
+                // change nothing. An Execute the server doesn't await is ignored.
                 let next = rounds[round].turns.get(turn).map(|l| &l["commands"][index]);
-                if !tick.halt || next.is_some_and(|c| !c.is_null()) {
-                    let execute = v1::Execute {
-                        turn: tick.turn,
-                        commands: Some(commands(round, turn + 1)),
-                        ..Default::default()
-                    };
-                    send(&mut stream, client_message::Msg::Execute(execute));
-                }
+                let recorded = next.is_some_and(|c| !c.is_null());
+                let execute = v1::Execute {
+                    turn: tick.turn,
+                    commands: (!tick.halt || recorded).then(|| commands(round, turn + 1)),
+                    ..Default::default()
+                };
+                send(&mut stream, client_message::Msg::Execute(execute));
             }
             server_message::Msg::BattleOver(_) => break,
             _ => {}

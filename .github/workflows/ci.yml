@@ -68,6 +68,11 @@ jobs:
         run: cargo run --locked --release -p robocode-s-difftest --bin live -- "$RUNNER_TEMP"/recordings/*.jsonl.gz
         env:
           ROBOCODES_JAVA: ${{ env.JAVA_HOME }}/bin/java
+      - name: Fight them with the command-line battle runner
+        run: cargo test --locked --release -p robocode-s-cli
+        env:
+          ROBOCODES_RECORDINGS: ${{ runner.temp }}/recordings
+          ROBOCODES_JAVA: ${{ env.JAVA_HOME }}/bin/java
 
   web:
     name: Website

@@ -1,0 +1,12 @@
+{
+ "seed": 1100,
+ "robots": [
+  {
+   "name": "sample",
+   "version": "",
+   "file": "samples-0.1.0-SNAPSHOT.jar",
+   "pools": [],
+   "exclude": "not a robot: the samples jar, for sample-plan.py's battles"
+  }
+ ]
+}

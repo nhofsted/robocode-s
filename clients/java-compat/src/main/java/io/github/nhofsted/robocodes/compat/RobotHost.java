@@ -13,6 +13,7 @@ import net.sf.robocode.core.ContainerBase;
 import net.sf.robocode.host.IHostManager;
 import net.sf.robocode.host.RobotStatics;
 import net.sf.robocode.host.proxies.IHostingRobotProxy;
+import net.sf.robocode.repository.IRobotItem;
 import net.sf.robocode.security.HiddenAccess;
 import robocode.BattleRules;
 import robocode.control.RobocodeEngine;
@@ -20,6 +21,7 @@ import robocode.control.RobotSpecification;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
@@ -27,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,6 +41,14 @@ import java.util.regex.Pattern;
  * <p>Usage: {@code robot-host --server host:port --token T --robot sample.Fire
  * --jar robot.jar [--jar ...] --home dir [--seed N]}. With the determinism agent loaded,
  * the robot's random streams are derived from the seed and its unique name (ADR 0009).
+ *
+ * <p>{@code robot-host --describe --home dir --jar robot.jar --robot a [--robot b ...]}
+ * instead prints what classic's repository knows about each robot, teams expanded into
+ * their members, in battle order. One tab-separated line per robot: {@code robot}, the
+ * unique class name with version, the full class name, the team id (empty without a
+ * team) and the type flags junior, advanced, team, droid, sentry, interactive and paint
+ * as {@code 0}/{@code 1}. The battle's unique names are derived from these as in
+ * classic's {@code Battle.createPeers}.
  */
 public final class RobotHost {
 
@@ -45,9 +56,13 @@ public final class RobotHost {
     }
 
     public static void main(String[] args) throws Exception {
+        boolean describe = args.length > 0 && args[0].equals("--describe");
+        if (describe) {
+            args = Arrays.copyOfRange(args, 1, args.length);
+        }
         String server = null;
         String token = "";
-        String robot = null;
+        List<String> robots = new ArrayList<>();
         Path home = null;
         long seed = 0;
         List<Path> jars = new ArrayList<>();
@@ -55,13 +70,21 @@ public final class RobotHost {
             switch (args[i]) {
                 case "--server" -> server = args[i + 1];
                 case "--token" -> token = args[i + 1];
-                case "--robot" -> robot = args[i + 1];
+                case "--robot" -> robots.add(args[i + 1]);
                 case "--jar" -> jars.add(Path.of(args[i + 1]));
                 case "--home" -> home = Path.of(args[i + 1]);
                 case "--seed" -> seed = Long.parseLong(args[i + 1]);
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
         }
+        if (describe) {
+            if (robots.isEmpty() || home == null) {
+                throw new IllegalArgumentException("usage: robot-host --describe --home dir "
+                        + "--jar robot.jar --robot name [--robot name ...]");
+            }
+            System.exit(describe(robots, jars, home));
+        }
+        String robot = robots.isEmpty() ? null : robots.get(0);
         if (server == null || robot == null || home == null) {
             throw new IllegalArgumentException("usage: robot-host --server host:port --token T --robot name "
                     + "--jar robot.jar --home dir [--seed N]");
@@ -75,10 +98,7 @@ public final class RobotHost {
         // share types. Classic's package and thread checks are off; robocode-s isolates
         // robots by process and container instead (design §6).
         System.setProperty("NOSECURITY", "true");
-        Path robots = Files.createDirectories(home.resolve("robots"));
-        for (Path jar : jars) {
-            Files.copy(jar, robots.resolve(jar.getFileName()), StandardCopyOption.REPLACE_EXISTING);
-        }
+        copyJars(jars, home);
 
         int colon = server.lastIndexOf(':');
         try (Socket socket = new Socket(server.substring(0, colon), Integer.parseInt(server.substring(colon + 1)))) {
@@ -111,6 +131,45 @@ public final class RobotHost {
             RemotePeer peer = new RemotePeer(out);
             IHostingRobotProxy proxy = createProxy(found[0], statics, peer);
             return serve(in, proxy, peer);
+        }
+    }
+
+    static int describe(List<String> robots, List<Path> jars, Path home) throws Exception {
+        System.setProperty("NOSECURITY", "true");
+        copyJars(jars, home);
+        RobocodeEngine engine = new RobocodeEngine(home.toFile());
+        // Classic skips robots it can't find, so each one is looked up on its own first.
+        for (String robot : robots) {
+            if (engine.getLocalRepository(robot).length == 0) {
+                System.err.println("robot " + robot + " not found in " + jars);
+                return 1;
+            }
+        }
+        // Then all in one selection, as classic does: a team's id numbers it by its
+        // position in the selection, which tells two copies of the same team apart.
+        StringBuilder out = new StringBuilder();
+        for (RobotSpecification spec : engine.getLocalRepository(String.join(",", robots))) {
+            IRobotItem item = (IRobotItem) HiddenAccess.getFileSpecification(spec);
+            String team = HiddenAccess.getRobotTeamName(spec);
+            out.append("robot\t").append(item.getUniqueFullClassNameWithVersion())
+                    .append('\t').append(item.getFullClassName())
+                    .append('\t').append(team == null ? "" : team);
+            for (boolean flag : new boolean[] {item.isJuniorRobot(), item.isAdvancedRobot(),
+                    item.isTeamRobot(), item.isDroid(), item.isSentryRobot(),
+                    item.isInteractiveRobot(), item.isPaintRobot()}) {
+                out.append('\t').append(flag ? '1' : '0');
+            }
+            out.append('\n');
+        }
+        System.out.print(out);
+        System.out.flush();
+        return 0;
+    }
+
+    private static void copyJars(List<Path> jars, Path home) throws IOException {
+        Path robots = Files.createDirectories(home.resolve("robots"));
+        for (Path jar : jars) {
+            Files.copy(jar, robots.resolve(jar.getFileName()), StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

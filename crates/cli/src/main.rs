@@ -2,16 +2,51 @@
 
 //! `robocode-s` command-line interface.
 
-fn main() {
-    match std::env::args().nth(1).as_deref() {
-        Some("--version" | "-V") => println!("robocode-s {}", env!("CARGO_PKG_VERSION")),
+mod battle;
+mod results;
+
+use std::process::ExitCode;
+
+const USAGE: &str = "\
+usage: robocode-s <command> [options]
+
+Commands:
+  battle     run a headless battle and print the results
+  --version  print the version
+
+`robocode-s battle --help` describes the battle options.
+";
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("--version" | "-V") => {
+            println!("robocode-s {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Some("battle") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", battle::USAGE);
+                return ExitCode::SUCCESS;
+            }
+            let result = battle::Options::parse(&args[1..])
+                .map_err(|e| format!("{e}\n\n{}", battle::USAGE))
+                .and_then(|o| battle::run(&o));
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("robocode-s battle: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--help" | "-h" | "help") => {
+            print!("{USAGE}");
+            ExitCode::SUCCESS
+        }
         _ => {
-            eprintln!(
-                "robocode-s {}: nothing to run yet",
-                env!("CARGO_PKG_VERSION")
-            );
-            eprintln!("usage: robocode-s --version");
-            std::process::exit(2);
+            eprint!("{USAGE}");
+            ExitCode::from(2)
         }
     }
 }
