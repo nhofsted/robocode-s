@@ -14,6 +14,7 @@ import net.sf.robocode.host.IHostManager;
 import net.sf.robocode.host.RobotStatics;
 import net.sf.robocode.host.proxies.IHostingRobotProxy;
 import net.sf.robocode.repository.IRobotItem;
+import net.sf.robocode.repository.IRobotSpecItem;
 import net.sf.robocode.security.HiddenAccess;
 import robocode.BattleRules;
 import robocode.control.RobocodeEngine;
@@ -48,7 +49,9 @@ import java.util.regex.Pattern;
  * unique class name with version, the full class name, the team id (empty without a
  * team) and the type flags junior, advanced, team, droid, sentry, interactive and paint
  * as {@code 0}/{@code 1}. The battle's unique names are derived from these as in
- * classic's {@code Battle.createPeers}.
+ * classic's {@code Battle.createPeers}. Without {@code --robot} it lists every robot and
+ * team in the jars instead: {@code list}, the name to select it by (with version) and
+ * {@code 1} for a team, else {@code 0}.
  */
 public final class RobotHost {
 
@@ -78,9 +81,9 @@ public final class RobotHost {
             }
         }
         if (describe) {
-            if (robots.isEmpty() || home == null) {
+            if (home == null) {
                 throw new IllegalArgumentException("usage: robot-host --describe --home dir "
-                        + "--jar robot.jar --robot name [--robot name ...]");
+                        + "--jar robot.jar [--robot name ...]");
             }
             System.exit(describe(robots, jars, home));
         }
@@ -138,6 +141,17 @@ public final class RobotHost {
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
+        if (robots.isEmpty()) {
+            StringBuilder out = new StringBuilder();
+            for (RobotSpecification spec : engine.getLocalRepository()) {
+                IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
+                out.append("list\t").append(spec.getNameAndVersion())
+                        .append('\t').append(item.isTeam() ? '1' : '0').append('\n');
+            }
+            System.out.print(out);
+            System.out.flush();
+            return 0;
+        }
         // Classic skips robots it can't find, so each one is looked up on its own first.
         for (String robot : robots) {
             if (engine.getLocalRepository(robot).length == 0) {

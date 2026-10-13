@@ -38,6 +38,45 @@ pub fn describe(
     robots: &[String],
     home: &Path,
 ) -> Result<Vec<Described>, String> {
+    if robots.is_empty() {
+        return Ok(Vec::new());
+    }
+    parse_description(&run_describe(host, jars, robots, home)?)
+}
+
+/// A robot or team found in the jars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    /// The name to select it by, with version (`jk.mega.DrussGT 3.1.16`).
+    pub name: String,
+    pub team: bool,
+}
+
+/// Every robot and team in `jars`, as classic's repository finds them.
+pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec<Listed>, String> {
+    let text = run_describe(host, jars, &[], home)?;
+    let mut robots: Vec<Listed> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("list\t"))
+        .filter_map(|l| {
+            let (name, team) = l.rsplit_once('\t')?;
+            Some(Listed {
+                name: name.to_string(),
+                team: team == "1",
+            })
+        })
+        .collect();
+    robots.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(robots)
+}
+
+/// Runs the robot host's `--describe` and returns its output.
+fn run_describe(
+    host: &JavaHost,
+    jars: &[PathBuf],
+    robots: &[String],
+    home: &Path,
+) -> Result<String, String> {
     std::fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
     let lib = std::path::absolute(&host.lib_dir).map_err(|e| e.to_string())?;
     // Java runs in `home`, so a relative path to it must become absolute first.
@@ -69,7 +108,7 @@ pub fn describe(
         let reason: Vec<&str> = stderr.lines().filter(|l| !is_classic_noise(l)).collect();
         return Err(reason.join("\n"));
     }
-    parse_description(&String::from_utf8_lossy(&output.stdout))
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Parses the robot host's `--describe` output; other lines (classic's logging) are skipped.

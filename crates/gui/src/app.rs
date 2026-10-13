@@ -9,10 +9,11 @@ use crate::view::{self, Field};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1;
-use robocode_s_runner::local::{Environment, prepare, random_seed};
+use robocode_s_runner::local::{Environment, Listed, list_robots, prepare, random_seed};
 use robocode_s_server::ServerConfig;
 use robocode_s_server::results::contestants;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
 
 /// The battle setup form.
 #[derive(Clone, Debug)]
@@ -79,6 +80,10 @@ pub struct App {
     error: Option<String>,
     screenshot: Option<Screenshot>,
     open_path: String,
+    /// The robots in the jars, listed in the background.
+    available: Option<Result<Vec<Listed>, String>>,
+    listing: Option<Receiver<Result<Vec<Listed>, String>>>,
+    filter: String,
 }
 
 impl App {
@@ -99,13 +104,116 @@ impl App {
             error: None,
             screenshot,
             open_path: String::new(),
+            available: None,
+            listing: None,
+            filter: String::new(),
         };
+        app.list_robots(&cc.egui_ctx);
         if let Some(path) = replay {
             app.open_replay(path);
         } else if start {
             app.start(&cc.egui_ctx);
         }
         app
+    }
+
+    /// Lists the robots in the jars on a background thread (it starts a JVM).
+    fn list_robots(&mut self, ctx: &egui::Context) {
+        let (tx, rx) = mpsc::channel();
+        let env = self.env.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let home = env.data.join("list");
+            let result = env
+                .host(false)
+                .and_then(|host| list_robots(&host, &env.jars, &home));
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
+        self.listing = Some(rx);
+    }
+
+    /// The available robots: click one to add it to the battle.
+    fn robot_chooser(&mut self, ui: &mut egui::Ui) {
+        if let Some(rx) = &self.listing
+            && let Ok(result) = rx.try_recv()
+        {
+            self.available = Some(result);
+            self.listing = None;
+        }
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Available robots").strong());
+                ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("filter"));
+                egui::ScrollArea::vertical()
+                    .id_salt("available")
+                    .max_height(260.0)
+                    .min_scrolled_height(260.0)
+                    .show(ui, |ui| match &self.available {
+                        None => {
+                            ui.spinner();
+                        }
+                        Some(Err(e)) => {
+                            ui.colored_label(Color32::LIGHT_RED, e);
+                        }
+                        Some(Ok(robots)) => {
+                            let filter = self.filter.to_lowercase();
+                            for r in robots
+                                .iter()
+                                .filter(|r| r.name.to_lowercase().contains(&filter))
+                            {
+                                let label = if r.team {
+                                    format!("{} (team)", r.name)
+                                } else {
+                                    r.name.clone()
+                                };
+                                if ui
+                                    .selectable_label(false, label)
+                                    .on_hover_text("add")
+                                    .clicked()
+                                {
+                                    let robots = &mut self.setup.robots;
+                                    if !robots.trim().is_empty() {
+                                        robots.push_str(", ");
+                                    }
+                                    robots.push_str(&r.name);
+                                }
+                            }
+                        }
+                    });
+            });
+            ui.add_space(24.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new("In the battle").strong());
+                let selected: Vec<String> = self
+                    .setup
+                    .robots
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                    .map(String::from)
+                    .collect();
+                let mut remove = None;
+                egui::ScrollArea::vertical()
+                    .id_salt("selected")
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        for (i, name) in selected.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.small_button("x").on_hover_text("remove").clicked() {
+                                    remove = Some(i);
+                                }
+                                ui.label(name);
+                            });
+                        }
+                    });
+                if let Some(i) = remove {
+                    let mut rest = selected;
+                    rest.remove(i);
+                    self.setup.robots = rest.join(", ");
+                }
+            });
+        });
     }
 
     fn start(&mut self, ctx: &egui::Context) {
@@ -173,6 +281,8 @@ impl App {
         egui::CentralPanel::default().show(root, |ui| {
             ui.heading("robocode-s");
             ui.add_space(8.0);
+            self.robot_chooser(ui);
+            ui.add_space(12.0);
             let s = &mut self.setup;
             egui::Grid::new("setup")
                 .num_columns(2)
