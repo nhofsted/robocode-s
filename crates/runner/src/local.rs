@@ -170,6 +170,132 @@ pub fn battle_statics(robots: &[Described]) -> Vec<v1::RobotStatics> {
         .collect()
 }
 
+/// Where the Java side, the robots and the battle files are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Environment {
+    /// The `java` executable; `None` downloads the pinned JRE into `data`.
+    pub java: Option<PathBuf>,
+    /// The robot host's `lib` directory.
+    pub host_lib: PathBuf,
+    /// The determinism agent.
+    pub agent_jar: PathBuf,
+    /// The pinned JRE and battle files.
+    pub data: PathBuf,
+    /// Robot jars.
+    pub jars: Vec<PathBuf>,
+}
+
+impl Environment {
+    /// From `ROBOCODES_JAVA`, `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_DATA`
+    /// and `ROBOCODES_ROBOT_JARS` (a path list), else the paths of a built source tree.
+    pub fn from_env() -> Self {
+        let var = |name: &str| {
+            std::env::var_os(name)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        let jars: Vec<PathBuf> = std::env::var_os("ROBOCODES_ROBOT_JARS")
+            .map(|v| {
+                std::env::split_paths(&v)
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            java: var("ROBOCODES_JAVA"),
+            host_lib: var("ROBOCODES_HOST_LIB")
+                .unwrap_or_else(|| "clients/java-compat/build/install/robot-host/lib".into()),
+            agent_jar: var("ROBOCODES_AGENT_JAR").unwrap_or_else(|| {
+                "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
+            }),
+            data: var("ROBOCODES_DATA").unwrap_or_else(|| "target/robocodes-data".into()),
+            jars: if jars.is_empty() {
+                vec!["robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar".into()]
+            } else {
+                jars
+            },
+        }
+    }
+
+    /// Checks the paths and finds Java (downloading the pinned JRE if needed).
+    pub fn host(&self, deterministic: bool) -> Result<JavaHost, String> {
+        for jar in &self.jars {
+            if !jar.is_file() {
+                return Err(format!("robot jar not found: {}", jar.display()));
+            }
+        }
+        if !self.host_lib.is_dir() {
+            return Err(format!(
+                "robot host not found in {} (./gradlew :clients:java-compat:installDist)",
+                self.host_lib.display()
+            ));
+        }
+        if deterministic && !self.agent_jar.is_file() {
+            return Err(format!(
+                "determinism agent not found: {} (./gradlew :clients:java-determinism:jar)",
+                self.agent_jar.display()
+            ));
+        }
+        let java = match &self.java {
+            Some(java) => java.clone(),
+            None => crate::jre::java(&self.data).map_err(|e| format!("no Java runtime: {e}"))?,
+        };
+        Ok(JavaHost {
+            java,
+            lib_dir: self.host_lib.clone(),
+            agent_jar: self.agent_jar.clone(),
+        })
+    }
+}
+
+/// A seed for battles without one: different per run (report it, so the battle can be
+/// fought again).
+pub fn random_seed() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    // splitmix64 finalizer over the time and process id.
+    let mut z = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (z ^ (z >> 31)) as i64
+}
+
+/// Prepares a battle of `robots` (classic names; teams expand): describes and names them
+/// and gives the battle its own directory under the data directory.
+pub fn prepare(
+    env: &Environment,
+    robots: &[String],
+    mut config: ServerConfig,
+    memory_mb: u32,
+) -> Result<(JavaHost, LocalBattle), String> {
+    let host = env.host(config.deterministic)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let dir = std::path::absolute(env.data.join("battles"))
+        .map_err(|e| e.to_string())?
+        .join(format!("{stamp}-{}", std::process::id()));
+    let described = describe(&host, &env.jars, robots, &dir.join("describe"))?;
+    if let Some(path) = &config.record {
+        config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
+    }
+    let battle = LocalBattle {
+        config,
+        robots: battle_statics(&described)
+            .into_iter()
+            .map(|s| LocalRobot {
+                lookup: lookup_name(&s.name).to_string(),
+                statics: s,
+            })
+            .collect(),
+        jars: env.jars.clone(),
+        dir,
+        memory_mb,
+    };
+    Ok((host, battle))
+}
+
 /// One robot of a local battle.
 #[derive(Debug, Clone)]
 pub struct LocalRobot {

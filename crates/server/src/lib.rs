@@ -9,6 +9,7 @@
 pub mod convert;
 pub mod driver;
 pub mod recording;
+pub mod results;
 
 use driver::RecordingDriver;
 use recording::Recorder;
