@@ -1,0 +1,25 @@
+{
+ "seed": 15,
+ "robots": [
+  {
+   "name": "dylanb.xyz",
+   "version": "2.0",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/dylanb.xyz_2.0.jar",
+   "sha256": "e7c2e40c3f11c758a671bb611e795fec5518a175bd3479d1ea382266edf11c93",
+   "file": "dylanb.xyz_2.0.jar"
+  },
+  {
+   "name": "jd.Nullstride",
+   "version": "2.3.3",
+   "pools": [
+    "melee"
+   ],
+   "url": "https://jord-jd-robocode.pages.dev/robots/jd.Nullstride_2.3.3.jar",
+   "sha256": "0c2825d831dfbfaaf5750dd8cbae3840d0265b17a86d2f91502203b723357d76",
+   "file": "jd.Nullstride_2.3.3.jar"
+  }
+ ]
+}

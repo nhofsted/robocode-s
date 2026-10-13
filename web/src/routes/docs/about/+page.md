@@ -22,8 +22,8 @@ On top of that come a GPU-accelerated desktop viewer, a deterministic mode where
 | Milestone | What | State |
 |---|---|---|
 | M0 | Repository, CI on Linux, Windows and macOS, design | Done |
-| M1 | Headless engine, protocol, server, classic Java robots, bit-exact | In progress: engine, server and robot host fight real RoboRumble robots identically to classic; the command-line battle runner is next |
-| M2 | Desktop GUI: battle setup, viewer, debug painting, replay | Planned |
+| M1 | Headless engine, protocol, server, classic Java robots, bit-exact | Done: every sample robot and real RoboRumble robots fight identically to classic; `robocode-s battle` runs headless battles |
+| M2 | Desktop GUI: battle setup, viewer, debug painting, replay | Done: setup, live viewer with debug paint, exact recordings with replay and scrubbing |
 | M3 | Isolation: Docker images, remote runners | Planned |
 | M4 | Native APIs for Python, .NET, Rust, C/C++ and Java/Kotlin | Planned |
 | M5 | The rumble: backend, volunteer client, rankings website | Planned (this website is its start) |

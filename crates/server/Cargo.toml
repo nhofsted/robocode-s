@@ -14,6 +14,7 @@ workspace = true
 robocode-s-engine.workspace = true
 robocode-s-protocol.workspace = true
 prost = "0.14.4"
+flate2 = "1.1.10"
 
 [dev-dependencies]
 robocode-s-engine.workspace = true

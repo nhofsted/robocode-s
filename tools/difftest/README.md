@@ -83,6 +83,20 @@ cargo run --release -p robocode-s-difftest --bin live -- /tmp/recordings/*.jsonl
 
 `ROBOCODES_JAVA` selects the Java runtime; without it the pinned Temurin JRE is downloaded. `ROBOCODES_ROBOT_JARS` (a path list) adds robot jars, e.g. RoboRumble bots.
 
+The command-line battle runner is checked the same way: `cargo test -p robocode-s-cli` with `ROBOCODES_RECORDINGS` set fights each recorded battle with `robocode-s battle` and compares the robot names and the final results with classic's.
+
+## Sample corpus
+
+M1's exit criterion: every classic sample robot, identical to classic over more than 1000 seeded rounds. `corpus/sample-plan.py` writes the plan: all 171 duels between the 19 ordinary sample robots (including `sampleex` and the interactive ones), six melees, five battles with the sentry `BorderGuard` and five with `MyFirstTeam`, 10 rounds each.
+
+```sh
+python3 tools/difftest/corpus/sample-plan.py > /tmp/samples-plan.json
+python3 tools/difftest/corpus/run-corpus.py --manifest tools/difftest/corpus/samples-manifest.json \
+  --jars robots/samples/build/libs --plan /tmp/samples-plan.json --out /tmp/samples-run --check-oracle
+```
+
+Result (2026-10-13, classic 1.11.1, OpenJDK 21): 187 battles, all `OK`; 1870 of 1870 rounds identical, and classic reproduced every battle in both of its recordings.
+
 ## RoboRumble corpus
 
 Sample robots are too simple to cover classic's corners, so #11 also tests a fixed, seeded selection of **real RoboRumble robots** (duels, melee, teams). `corpus/rumble-corpus.json` lists them with source URL and SHA-256. The jars themselves aren't committed, because they belong to their authors.

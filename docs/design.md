@@ -115,6 +115,14 @@ Classic Robocode calls `java.lang.Math.sin/cos/atan2/...`. On HotSpot these may 
 
 Robot-side math runs in the robot's own runtime and is not affected.
 
+### 4.4 Engine version
+
+A battle's outcome depends on more than the protocol: rules and physics, the PRNG, fuel counting and its calibration (§7.2), the pinned JRE and java-compat. A change to any of them can change who wins, so a result only means something together with the engine that produced it.
+
+- The engine gets an explicit **engine version**, separate from the protocol version (§5.1) and from release versions. It changes with every change that can alter a battle's outcome.
+- It is stored with every result: in replay headers (§11), in rumble result submissions (§12.3), in the rumble data model (§12.6), in CLI battle results and in difftest reports. Results are only compared or verified within one engine version (§12.4).
+- `robocode-s --version` shows it.
+
 ## 5. Protocol
 
 ### 5.1 Encoding and transport
@@ -244,13 +252,17 @@ Native APIs for new robots, all generated from the same `.proto`:
 - **Stack:** `wgpu` (Vulkan / Metal / DX12 / GL fallback) for the battlefield, `egui` for panels and dialogs. Bevy is not used, to avoid ECS overhead for a simple 2D scene and to keep the engine independent.
 - **Features (scope v1):** battle setup (robot selection, rules, number of rounds, seed, launcher mode), live viewer with speed control, pause and single-step, robot debug painting per robot, robot console output, results table, recording and replay with scrubbing.
 - **Headless:** the same battles run from `cli` without a GUI, or with a remote GUI attached as an observer.
-- The battlefield is drawn with instanced sprites (tank body, gun, radar), bullets, explosions and vector debug paint. All of it is cheap on the GPU even at very high turn rates. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- The battlefield is drawn with egui's painter (meshes on wgpu): classic's floor tiles, textured quads for the tank parts (classic's images, recoloured with classic's `ColorFilter`), bullets, explosions and vector debug paint. That is cheap even with dozens of robots; a dedicated instanced wgpu pass can replace it if profiling asks for it. Turns that can't be displayed are dropped, so rendering never slows down the simulation.
+- **Embedded server:** a live battle runs the server and the robot processes on a background thread (`runner::local`); the GUI is its observer and sends pause, step, speed and debug-paint toggles (`ObserverControl`).
+- **Debug paint:** the robot host replays classic's serialized `onPaint` calls onto a recording `Graphics2D` that emits `PaintOp`s. The server asks a robot for paint only while an observer has it on, as classic does.
+- **Replay:** opening a recording runs it once and keeps an engine keyframe every 200 turns, so scrubbing replays at most 199 turns.
 
 ## 11. Recording and replay
 
-- **Format:** a header (battle config, robot identities and hashes, engine version, seed) followed by per-turn **intents** of all robots, plus a **state keyframe** every N turns.
-- Replay re-runs the deterministic engine from the nearest keyframe. This makes recordings small and allows scrubbing.
-- Debug paint and console output are stored in an optional side stream.
+- **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, engine version, seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, and the drained, disabled and stopped robots. The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
+- A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output and debug paint) and a 64-bit hash of the snapshot, so every replayed turn is verified.
+- Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
+- `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
 - Rumble replays in the browser use a different, lossy format (§12.7, ADR 0017).
 - Classic `.br` recordings can be imported if feasible (low priority).
 
@@ -400,7 +412,7 @@ Recordings are stored per **round**, not per battle. A rumble recording is a **l
 
 ## 13. Compatibility reference and differential testing
 
-- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. The version used by current RoboRumble clients will be investigated in M1 (O2). Robots are tuned against that version, so if it differs in rule-relevant ways, the harness also runs against it.
+- **Reference version:** classic Robocode **1.11.1** (released 2026-07-13, the latest at the time of writing). Before 1.10, the 1.9.x line received bug fixes and Java-version support, not rule changes. LiteRumble accepts uploads from 1.10.3, 1.11.0 and 1.11.1 (O2). The only rule-relevant difference among them is classic's fix #89 in 1.11.0: in 1.10.3, a pending fire command of a robot that stopped sending commands (returned from `run()`, crashed, skipped turns) fired again each time its gun cooled down, with the same bullet id. robocode-s follows 1.11.x (each command fires once, engine-spec §5); it only affects robots that stop executing, so the harness doesn't run against 1.10.3.
 - **Harness (`tools/difftest`):**
   1. Runs a battle in classic Robocode via the `robocode.control` API (`RobocodeEngine`, `BattleListener`, `ITurnSnapshot`) with `RANDOMSEED`, `-Ddebug=true` (no timing-based skipped turns), `-XX:-InlineMathNatives` and the determinism agent. Recordings are byte-identical across runs (`tools/difftest/README.md`).
   2. Runs the same battle in robocode-s, deterministic mode, with the same seed.
@@ -472,7 +484,7 @@ robocode-s/
 ## 17. Open questions
 
 - **O1** ~~LiteRumble contribution~~ Decided: no; it's a non-goal.
-- **O2** Which classic version do current rumble clients use? Are there rule-relevant differences from 1.11.1? *To investigate in M1.*
+- **O2** ~~Classic version of current rumble clients~~ Answered (2026-10-12): LiteRumble's statistics page allows 1.10.3, 1.11.0 and 1.11.1. Of the changes since 1.10.3, only 1.11.0's fix #89 (a fire command fires at most once) touches the rules; robocode-s follows 1.11.x (§13).
 - **O3** ~~Container network isolation~~ Decided: relay container on an internal Docker network (§6.3).
 - **O4** ~~Meaning of bit-exact~~ Decided: exact against classic with StrictMath (fdlibm) semantics (§4.3).
 - **O5** ~~JRE distribution~~ Decided: a pinned Temurin JRE, downloaded on demand (§6.1).
@@ -484,6 +496,7 @@ robocode-s/
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
+- **O14** Engine version (§4.4, #22): one number or components (rules, metering calibration, runtime)? And what happens to rumble results when it changes: rerun, keep but rank separately, or mark as stale?
 
 ## 18. Decisions so far
 

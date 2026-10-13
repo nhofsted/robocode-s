@@ -1,0 +1,245 @@
+{
+ "seed": 14,
+ "robots": [
+  {
+   "name": "suzushin7.nano.Galaxy01",
+   "version": "1.01",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/suzushin7.nano.Galaxy01_1.01.jar",
+   "sha256": "ad0ea6afc73ac85943875581d5fa91e1f30523c313393cd51c0c56689a28bbe3",
+   "file": "suzushin7.nano.Galaxy01_1.01.jar"
+  },
+  {
+   "name": "whind.Strength",
+   "version": "0.6.4",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/whind.Strength_0.6.4.jar",
+   "sha256": "20a62939f54c8cbab4af4a68d180da3bb48565053830fa0568acae37e16f42cb",
+   "file": "whind.Strength_0.6.4.jar"
+  },
+  {
+   "name": "pez.mini2.Pugilist",
+   "version": "2.5.15",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pez.mini2.Pugilist_2.5.15.jar",
+   "sha256": "c882d59ae12d88053e9c00a6bad2f858ad69eae6ff97874ec9b7eb8238ec08c4",
+   "file": "pez.mini2.Pugilist_2.5.15.jar"
+  },
+  {
+   "name": "conscience.Bulldozer",
+   "version": "1.0a",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/conscience.Bulldozer_1.0a.jar",
+   "sha256": "f822506ece11632ca21436cfede847408f696140c474ae3b35e25187fbe27875",
+   "file": "conscience.Bulldozer_1.0a.jar"
+  },
+  {
+   "name": "ma.is.fon.rs.RobotA",
+   "version": "0.01",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/ma.is.fon.rs.RobotA_0.01.jar",
+   "sha256": "4462fc6c458c7a65d32345b0940116241c43416c7448dc02c7dd8c743c764f5b",
+   "file": "ma.is.fon.rs.RobotA_0.01.jar"
+  },
+  {
+   "name": "suh.nano.StopAndGoL",
+   "version": "1.01",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/suh.nano.StopAndGoL_1.01.jar",
+   "sha256": "652fad2e00b39e8a7805926ef3b0b61947abf433dbbb7ac5a53784907e52a9cd",
+   "file": "suh.nano.StopAndGoL_1.01.jar"
+  },
+  {
+   "name": "kawigi.sbf.FloodMini",
+   "version": "1.4",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kawigi.sbf.FloodMini_1.4.jar",
+   "sha256": "20738f02721b92618b22914ecc328252dc219906232b9b3aa67ac77e3e0c61dd",
+   "file": "kawigi.sbf.FloodMini_1.4.jar"
+  },
+  {
+   "name": "leb.ShootAnArrow",
+   "version": "0.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/leb.ShootAnArrow_0.1.jar",
+   "sha256": "cda587546a722389d0afcba2e6ea3b46d13699a5d95d528f8e316b9999f94b80",
+   "file": "leb.ShootAnArrow_0.1.jar"
+  },
+  {
+   "name": "suh.nano.MyFirstAdvancedRobot",
+   "version": "1.00",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/suh.nano.MyFirstAdvancedRobot_1.00.jar",
+   "sha256": "e08fcc771e4315c3845ee2ae6526242c74a2e9310c8a26c53dfe65bb215c3416",
+   "file": "suh.nano.MyFirstAdvancedRobot_1.00.jar"
+  },
+  {
+   "name": "simonton.mega.SniperFrog",
+   "version": "1.0.fix2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/simonton.mega.SniperFrog_1.0.fix2.jar",
+   "sha256": "6b8fc4136722c7fab006efd6ab865a95f0a1875283c70826587ecd59b4bdf0b3",
+   "file": "simonton.mega.SniperFrog_1.0.fix2.jar"
+  },
+  {
+   "name": "pez.gloom.GloomyDark",
+   "version": "0.9.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/pez.gloom.GloomyDark_0.9.2.jar",
+   "sha256": "913ae0d7e60638ae9bdbadaa45b6b2e5d64eb2b188377f82394796eed083ff82",
+   "file": "pez.gloom.GloomyDark_0.9.2.jar"
+  },
+  {
+   "name": "supersample.SuperCorners",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/supersample.SuperCorners_1.0.jar",
+   "sha256": "5450c1599b90e8a8c513a5d79746106a4ed3b41c58201c8f476eefc33377ff5f",
+   "file": "supersample.SuperCorners_1.0.jar"
+  },
+  {
+   "name": "seed.Weed",
+   "version": "3.0.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/seed.Weed_3.0.2.jar",
+   "sha256": "1a26ff686dc01f070bd8cee85ee724e12bfe60a863348adde38c03d95500d688",
+   "file": "seed.Weed_3.0.2.jar"
+  },
+  {
+   "name": "jeremyreeder.Bully",
+   "version": "1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/jeremyreeder.Bully_1.jar",
+   "sha256": "8e36fc4b0f0342c1e456edf026a6f884607e733d2362878fa34b7da13be9fa62",
+   "file": "jeremyreeder.Bully_1.jar"
+  },
+  {
+   "name": "theo.Hydrogen",
+   "version": "2.1r",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/theo.Hydrogen_2.1r.jar",
+   "sha256": "0a8b286b6796de6e95e6346cff04028436e6a6b05ea1bb31a231f3ddf01ffbad",
+   "file": "theo.Hydrogen_2.1r.jar"
+  },
+  {
+   "name": "kawigi.nano.ThnikkaBot",
+   "version": "0.9",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/kawigi.nano.ThnikkaBot_0.9.jar",
+   "sha256": "dbd3b7f5db346f198fd40c764f9a3335fe188f4278ff4336166a77536aafed66",
+   "file": "kawigi.nano.ThnikkaBot_0.9.jar"
+  },
+  {
+   "name": "blir.nano.Cabbage",
+   "version": "R1.0.1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/blir.nano.Cabbage_R1.0.1.jar",
+   "sha256": "6048d93ca6c18440d2442930806a4edb783d6bc3e7b019f324fad7aebaccb222",
+   "file": "blir.nano.Cabbage_R1.0.1.jar"
+  },
+  {
+   "name": "bons.NanoStalker",
+   "version": "1.2",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/bons.NanoStalker_1.2.jar",
+   "sha256": "25169213aa301260dbe320aab5011618b95dd7283102fc6272cdd2e5afdc0936",
+   "file": "bons.NanoStalker_1.2.jar"
+  },
+  {
+   "name": "traker.Eraser",
+   "version": "1",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/traker.Eraser_1.jar",
+   "sha256": "cb5db64763078480a174f8204bf2f3c7c678118ba5011763d75d63131f7a4f3d",
+   "file": "traker.Eraser_1.jar"
+  },
+  {
+   "name": "supersample.SuperWalls",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/supersample.SuperWalls_1.0.jar",
+   "sha256": "2ca5398b7e5c67ab76c19afc9ea622a1c997d8b36b7428a15d72e247aaa620ce",
+   "file": "supersample.SuperWalls_1.0.jar"
+  },
+  {
+   "name": "metal.small.MCool",
+   "version": "1.21",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/metal.small.MCool_1.21.jar",
+   "sha256": "cd1dd4593985a1a8f571acccf38afbc4ea9c45cf13bd9d9ad0d19c17bb9cd5f2",
+   "file": "metal.small.MCool_1.21.jar"
+  },
+  {
+   "name": "rdt.AgentSmith.AgentSmithRedux",
+   "version": "0.02",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/rdt.AgentSmith.AgentSmithRedux_0.02.jar",
+   "sha256": "37f88dc7791275e41764e35fc7dec2cbded3ca41a8dfa0f31498d69f3c37b804",
+   "file": "rdt.AgentSmith.AgentSmithRedux_0.02.jar"
+  },
+  {
+   "name": "genprog.Zafaran",
+   "version": "1.0",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/genprog.Zafaran_1.0.jar",
+   "sha256": "a64700257e423fef63c891167552958ef41932fb775e22802da628ddd523649f",
+   "file": "genprog.Zafaran_1.0.jar"
+  },
+  {
+   "name": "krillr.mega.Psyche",
+   "version": "0.0.3",
+   "pools": [
+    "duel"
+   ],
+   "url": "https://robocode-archive.strangeautomata.com/robots/krillr.mega.Psyche_0.0.3.jar",
+   "sha256": "843e33621f73b105c46c993abc96938a119d5595cffc3f5a965067cd5f310cf1",
+   "file": "krillr.mega.Psyche_0.0.3.jar"
+  }
+ ]
+}

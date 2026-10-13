@@ -16,3 +16,5 @@ sha2 = "0.11.0"
 flate2 = "1.1.10"
 tar = "0.4.46"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+robocode-s-protocol.workspace = true
+robocode-s-server.workspace = true

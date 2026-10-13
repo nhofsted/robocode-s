@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: EPL-2.0
+
+//! A battle running locally: the server and robot processes on a background thread
+//! (`runner::local`), observed by the GUI.
+
+use eframe::egui;
+use robocode_s_protocol::v1::{self, server_message};
+use robocode_s_runner::JavaHost;
+use robocode_s_runner::local::{LocalBattle, LocalOutcome, run_local_battle};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+
+/// How much console output is kept per robot.
+const OUTPUT_LIMIT: usize = 64 * 1024;
+
+enum Update {
+    Message(Box<server_message::Msg>),
+    Done(Result<LocalOutcome, String>),
+}
+
+pub struct Live {
+    updates: Receiver<Update>,
+    controls: Sender<v1::ObserverControl>,
+    pub robots: Vec<v1::RobotStatics>,
+    pub width: f64,
+    pub height: f64,
+    pub rounds: i32,
+    pub seed: i64,
+    pub latest: Option<v1::TurnSnapshot>,
+    /// Console output per robot.
+    pub output: Vec<String>,
+    pub paint: Vec<bool>,
+    pub paused: bool,
+    pub turns_per_second: u32,
+    /// Results at the end of the battle, or why it failed.
+    pub outcome: Option<Result<Vec<v1::Results>, String>>,
+}
+
+impl Live {
+    pub fn start(ctx: &egui::Context, host: JavaHost, battle: LocalBattle) -> Self {
+        let (updates_tx, updates) = mpsc::channel();
+        let (controls, controls_rx) = mpsc::channel();
+        let robots: Vec<v1::RobotStatics> =
+            battle.robots.iter().map(|r| r.statics.clone()).collect();
+        let rules = &battle.config.rules;
+        let (width, height, rounds) = (
+            f64::from(rules.width),
+            f64::from(rules.height),
+            rules.num_rounds,
+        );
+        let ctx = ctx.clone();
+        thread::spawn(move || {
+            let tx = updates_tx.clone();
+            let repaint = ctx.clone();
+            let result = run_local_battle(&host, &battle, Some(controls_rx), |msg| {
+                let _ = tx.send(Update::Message(Box::new(msg.clone())));
+                repaint.request_repaint();
+            });
+            let _ = updates_tx.send(Update::Done(result));
+            ctx.request_repaint();
+        });
+        let n = robots.len();
+        Self {
+            updates,
+            controls,
+            robots,
+            width,
+            height,
+            rounds,
+            seed: 0,
+            latest: None,
+            output: vec![String::new(); n],
+            paint: vec![false; n],
+            paused: false,
+            turns_per_second: 30,
+            outcome: None,
+        }
+        .with_initial_speed()
+    }
+
+    fn with_initial_speed(self) -> Self {
+        self.control(v1::observer_control::Control::TurnsPerSecond(
+            self.turns_per_second,
+        ));
+        self
+    }
+
+    /// Takes what arrived since the last frame.
+    pub fn poll(&mut self) {
+        while let Ok(update) = self.updates.try_recv() {
+            let update = match update {
+                Update::Message(msg) => Ok(*msg),
+                Update::Done(result) => Err(result),
+            };
+            match update {
+                Ok(server_message::Msg::TurnSnapshot(s)) => {
+                    for (out, r) in self.output.iter_mut().zip(&s.robots) {
+                        if !r.output.is_empty() {
+                            out.push_str(&r.output);
+                            if out.len() > OUTPUT_LIMIT {
+                                let cut = out.len() - OUTPUT_LIMIT;
+                                let cut = (cut..out.len())
+                                    .find(|&i| out.is_char_boundary(i))
+                                    .unwrap_or(out.len());
+                                out.drain(..cut);
+                            }
+                        }
+                    }
+                    self.latest = Some(s);
+                }
+                Ok(_) => {}
+                Err(result) => {
+                    self.outcome = Some(result.map(|o| o.outcome.results));
+                }
+            }
+        }
+    }
+
+    pub fn control(&self, control: v1::observer_control::Control) {
+        let _ = self.controls.send(v1::ObserverControl {
+            control: Some(control),
+        });
+    }
+
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+        self.control(v1::observer_control::Control::Pause(paused));
+    }
+
+    pub fn step(&self) {
+        self.control(v1::observer_control::Control::Step(true));
+    }
+
+    pub fn set_speed(&mut self, turns_per_second: u32) {
+        self.turns_per_second = turns_per_second;
+        self.control(v1::observer_control::Control::TurnsPerSecond(
+            turns_per_second,
+        ));
+    }
+
+    pub fn set_paint(&mut self, robot: usize, enabled: bool) {
+        self.paint[robot] = enabled;
+        self.control(v1::observer_control::Control::Paint(v1::PaintToggle {
+            robot_index: robot as i32,
+            enabled,
+        }));
+    }
+}

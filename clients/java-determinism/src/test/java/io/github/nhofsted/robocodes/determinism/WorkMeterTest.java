@@ -37,10 +37,32 @@ class WorkMeterTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static long[] measure(String robot, int iterations) throws Exception {
-        ClassLoader loader = new RobotClassLoader(WorkMeterTest.class.getClassLoader(), Set.of(Worker.class.getName()));
-        Class<?> worker = loader.loadClass(Worker.class.getName());
+        return run(Worker.class, robot, iterations);
+    }
+
+    /** Robot code that asks the JDK for the time. */
+    public static class Dates implements java.util.function.Function<Integer, long[]> {
+        @Override
+        public long[] apply(Integer unused) {
+            return new long[] {new java.util.Date().getTime(), java.util.Calendar.getInstance().getTimeInMillis(),
+                    java.time.Instant.now().toEpochMilli(), System.currentTimeMillis()};
+        }
+    }
+
+    @Test
+    void jdkTimeReadsTheVirtualClock() throws Exception {
+        long[] r = run(Dates.class, "sample.Fire (25)", 0);
+        for (long millis : r) {
+            assertTrue(millis >= RobotRandomness.EPOCH_MILLIS && millis < RobotRandomness.EPOCH_MILLIS + 1000,
+                    "virtual time: " + java.util.Arrays.toString(r));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static long[] run(Class<?> robotClass, String robot, int iterations) throws Exception {
+        ClassLoader loader = new RobotClassLoader(WorkMeterTest.class.getClassLoader(), Set.of(robotClass.getName()));
+        Class<?> worker = loader.loadClass(robotClass.getName());
         AtomicReference<long[]> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Thread thread = new Thread(new ThreadGroup(robot), () -> {

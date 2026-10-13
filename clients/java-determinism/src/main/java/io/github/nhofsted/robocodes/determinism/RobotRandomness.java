@@ -85,8 +85,12 @@ public final class RobotRandomness {
      * The virtual clock (ADR 0014). Part of the deterministic rules: changing a constant
      * changes what time-reading robots do.
      */
-    /** Virtual time per counted instruction, in picoseconds (calibrated, #15). */
-    public static final long PICOS_PER_INSTRUCTION = 1000;
+    /**
+     * Virtual time per counted instruction, in picoseconds. Calibrated on 2026-10-13 against
+     * classic 1.11.1 on OpenJDK 21 (x86-64, WSL2): robots doing over 100 000 counted
+     * instructions per turn take 820-1010 ps each (#15, ADR 0014).
+     */
+    public static final long PICOS_PER_INSTRUCTION = 900;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
     /** Value of the virtual {@code nanoTime()} before the robot did anything. */
@@ -129,6 +133,18 @@ public final class RobotRandomness {
         }
     }
 
+    /**
+     * Calibration of the virtual clock (#15): with {@code -Drobocodes.calibrate=<file>},
+     * each robot's turns, counted work, clock reads and real CPU time are written to the
+     * file when the JVM exits. With {@code -Drobocodes.meterWork=false} robot code isn't
+     * counted (and reads the real clock), to measure its CPU time without that overhead.
+     */
+    private static final String CALIBRATE = System.getProperty("robocodes.calibrate");
+    static final boolean METER_WORK = !"false".equals(System.getProperty("robocodes.meterWork"));
+
+    /** Stack frames per trace line ({@code -Drobocodes.traceDepth}, default 3). */
+    private static final int TRACE_DEPTH = Integer.getInteger("robocodes.traceDepth", 3);
+
     private static final ThreadLocal<Boolean> TRACING = ThreadLocal.withInitial(() -> false);
 
     private static void trace(String what) {
@@ -153,7 +169,7 @@ public final class RobotRandomness {
                 continue;
             }
             b.append(" < ").append(c).append('.').append(e.getMethodName());
-            if (++shown == 3) {
+            if (++shown == TRACE_DEPTH) {
                 break;
             }
         }
@@ -196,6 +212,9 @@ public final class RobotRandomness {
         System.getProperties().put(RANDOM_SEED_KEY, (Supplier<Long>) randomness::nextSeed);
         System.getProperties().put(UTILS_RANDOM_KEY, (Supplier<Random>) randomness::utilsRandom);
         current = randomness;
+        if (CALIBRATE != null) {
+            Runtime.getRuntime().addShutdownHook(new Thread(randomness::writeCalibration));
+        }
     }
 
     /**
@@ -328,9 +347,9 @@ public final class RobotRandomness {
         synchronized (FUEL) {
             fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
         }
-        if (TRACE != null) {
+        if (TRACE != null || CALIBRATE != null) {
             // Robot classes initialize on the robot's thread: remember the counter for the
-            // per-turn trace.
+            // per-turn trace and the calibration.
             RobotRandomness randomness = current;
             Stream stream = randomness == null ? null : randomness.currentStream();
             if (stream != null) {
@@ -346,6 +365,9 @@ public final class RobotRandomness {
         Stream stream = randomness == null ? null : randomness.currentStream();
         if (stream != null) {
             stream.turn();
+            if (CALIBRATE != null) {
+                stream.measureCpu();
+            }
             if (TRACE != null && stream.fuel != null) {
                 trace("turn " + stream.turns() + " fuel " + stream.fuel[0]);
             }
@@ -363,7 +385,40 @@ public final class RobotRandomness {
         return elapsedNanos(stream == null ? 0 : stream.turns(), ((long[]) fuel)[0]);
     }
 
+    /** Counts a robot's clock reads, for the calibration (robots that read it are left out). */
+    private static void countClockRead() {
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream != null) {
+            stream.clockReads++;
+        }
+    }
+
+    /** One line per robot: name, turns, counted work, clock reads, CPU nanos. */
+    private void writeCalibration() {
+        StringBuilder out = new StringBuilder();
+        synchronized (streams) {
+            for (Map.Entry<String, Stream> e : streams.entrySet()) {
+                Stream st = e.getValue();
+                synchronized (st) {
+                    out.append(e.getKey()).append('\t').append(st.turns).append('\t')
+                            .append(st.fuel == null ? 0 : st.fuel[0]).append('\t').append(st.clockReads)
+                            .append('\t').append(st.cpuNanos).append('\n');
+                }
+            }
+        }
+        try {
+            java.nio.file.Files.writeString(java.nio.file.Path.of(CALIBRATE), out,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (java.io.IOException e) {
+            System.err.println("robocode-s: could not write calibration: " + e);
+        }
+    }
+
     static long virtualNanos(Object fuel) {
+        if (CALIBRATE != null) {
+            countClockRead();
+        }
         long nanos = NANO_ORIGIN + elapsedNanos(fuel);
         if (TRACE != null) {
             trace("nanoTime " + nanos);
@@ -372,6 +427,9 @@ public final class RobotRandomness {
     }
 
     static long virtualMillis(Object fuel) {
+        if (CALIBRATE != null) {
+            countClockRead();
+        }
         long millis = EPOCH_MILLIS + elapsedNanos(fuel) / 1_000_000;
         if (TRACE != null) {
             trace("currentTimeMillis " + millis);
@@ -418,8 +476,13 @@ public final class RobotRandomness {
         private long hashed;
         private long turns;
         private long tabled;
-        /** The robot's work counter, for the trace only. */
+        /** The robot's work counter, for the trace and the calibration only. */
         volatile long[] fuel;
+        /** Calibration: clock reads, and the CPU time of the robot's threads at its turns. */
+        long clockReads;
+        long cpuNanos;
+        private Thread cpuThread;
+        private long cpuSeen;
         /** Table identity hashes, by object identity; entries go when the object does. */
         private final Map<IdentityKey, Integer> table = new HashMap<>();
         private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
@@ -455,6 +518,16 @@ public final class RobotRandomness {
                 }
             }
             return hash;
+        }
+
+        /** At a turn of the robot's thread: adds the CPU time it used since its last turn. */
+        synchronized void measureCpu() {
+            long now = java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime();
+            Thread thread = Thread.currentThread();
+            // A new thread (classic starts one per round) counts from its start.
+            cpuNanos += thread == cpuThread ? now - cpuSeen : now;
+            cpuThread = thread;
+            cpuSeen = now;
         }
 
         synchronized void turn() {

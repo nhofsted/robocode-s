@@ -5,6 +5,7 @@ package io.github.nhofsted.robocodes.compat;
 
 import io.github.nhofsted.robocodes.protocol.v1.ClientMessage;
 import io.github.nhofsted.robocodes.protocol.v1.Execute;
+import io.github.nhofsted.robocodes.protocol.v1.RobotCommands;
 import io.github.nhofsted.robocodes.protocol.v1.Tick;
 import net.sf.robocode.peer.BadBehavior;
 import net.sf.robocode.peer.ExecCommands;
@@ -29,8 +30,9 @@ import java.util.concurrent.LinkedBlockingQueue;
  * Classic's robot side talks to the engine through {@link IRobotPeer}. This peer forwards
  * each {@code execute} to the robocode-s server and returns the next {@code Tick} as
  * classic's {@link ExecResults}, following classic's {@code RobotPeer.executeImpl}:
- * the commands are sent first; a robot that died or was halted then gets
- * {@link DeathException}, {@link WinException} or {@link AbortedException}.
+ * the commands count first; a robot that died or was halted then gets
+ * {@link DeathException}, {@link WinException} or {@link AbortedException}, and its final
+ * commands are sent from {@link #waitForBattleEndImpl}.
  */
 final class RemotePeer implements IRobotPeer {
 
@@ -50,6 +52,12 @@ final class RemotePeer implements IRobotPeer {
     private boolean finished;
     private boolean drained;
     private long cpuAtReturn = -1;
+    /**
+     * The final {@code Execute} of a robot that died or was halted, sent from
+     * {@link #waitForBattleEndImpl} (see there), and the commands it was made from.
+     */
+    private Execute.Builder finalExecute;
+    private ExecCommands finalCommands;
 
     RemotePeer(OutputStream out) {
         this.out = out;
@@ -65,6 +73,8 @@ final class RemotePeer implements IRobotPeer {
         finished = false;
         drained = false;
         cpuAtReturn = -1;
+        finalExecute = null;
+        finalCommands = null;
     }
 
     /** Main thread: results of a turn arrived. */
@@ -79,16 +89,22 @@ final class RemotePeer implements IRobotPeer {
 
     @Override
     public ExecResults executeImpl(ExecCommands commands) {
+        Execute.Builder execute = finished ? null : Execute.newBuilder()
+                .setTurn(lastTurn)
+                .setCommands(Convert.commands(commands))
+                .setOutput(nullToEmpty(commands.getOutputText()))
+                .addAllPaint(PaintRecorder.ops(commands.getGraphicsCalls()))
+                .setCpuNanos(cpuSinceReturn());
         if (finished) {
             sleep();
-        } else {
-            send(Execute.newBuilder()
-                    .setTurn(lastTurn)
-                    .setCommands(Convert.commands(commands))
-                    .setOutput(nullToEmpty(commands.getOutputText()))
-                    .setCpuNanos(cpuSinceReturn()));
+        } else if (!stopping) {
+            send(execute);
         }
         if (stopping) {
+            if (execute != null) {
+                finalExecute = execute;
+                finalCommands = commands;
+            }
             finished = true;
             if (dead) {
                 throw new DeathException();
@@ -120,19 +136,48 @@ final class RemotePeer implements IRobotPeer {
      * waits for the round's end. Classic stores its current commands once more, including
      * a {@code setFire} that wasn't executed yet, after draining its energy right away.
      * After that it only re-sends the server's copy each turn, so a final {@code Execute}
-     * with {@code stopped} is equivalent. A halted robot (the last round's winner) sends
-     * nothing, as in classic.
+     * with {@code stopped} is equivalent. A robot whose last {@code execute} threw (it
+     * died or was halted) sends that execute's commands now, with the bullets and team
+     * messages its handlers added since. Otherwise a halted robot sends nothing, as in
+     * classic.
      */
     @Override
     public ExecResults waitForBattleEndImpl(ExecCommands commands) {
-        if (!stopping && !finished) {
-            send(Execute.newBuilder()
+        if (finalExecute != null && dead) {
+            // A dead robot isn't halted: classic stores its commands once more, as they are
+            // now, after its handlers ran (a robot that regained energy in the turn it died
+            // fires its ghost shot from them, engine-spec §15.3).
+            finalExecute.setCommands(Convert.commands(commands))
+                    .setOutput(finalExecute.getOutput() + nullToEmpty(commands.getOutputText()));
+            send(finalExecute);
+            finalExecute = null;
+            finalCommands = null;
+        } else if (finalExecute != null) {
+            // Halted: classic's peer keeps the robot's bullet and team message lists, not
+            // copies (ExecCommands(origin, fromRobot)), and a robot whose execute threw keeps
+            // adding to them: what its handlers fire here still counts (lessonz.robocode.Oz
+            // fires in a custom event after winning). The rest is as it was at the execute.
+            RobotCommands late = Convert.commands(finalCommands);
+            finalExecute.getCommandsBuilder()
+                    .clearBullets().addAllBullets(late.getBulletsList())
+                    .clearTeamMessages().addAllTeamMessages(late.getTeamMessagesList());
+            send(finalExecute);
+            finalExecute = null;
+            finalCommands = null;
+        } else if (!finished && (!stopping || dead)) {
+            // The robot's code ended: classic stores its commands once more (also when it just
+            // died without executing again; then the server awaits this as its final Execute).
+            Execute.Builder execute = Execute.newBuilder()
                     .setTurn(lastTurn)
                     .setCommands(Convert.commands(commands))
                     .setOutput(nullToEmpty(commands.getOutputText()))
                     .setCpuNanos(cpuSinceReturn())
-                    .setDrainEnergy(drained)
-                    .setStopped(true));
+                    .setDrainEnergy(drained);
+            send(stopping ? execute : execute.setStopped(true));
+        } else if (!finished) {
+            // Halted without executing again: classic stores nothing, but the server awaits
+            // a final Execute. One without commands changes nothing.
+            send(Execute.newBuilder().setTurn(lastTurn).setCpuNanos(cpuSinceReturn()));
         }
         Object next;
         do {
