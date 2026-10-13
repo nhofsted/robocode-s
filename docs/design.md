@@ -115,6 +115,14 @@ Classic Robocode calls `java.lang.Math.sin/cos/atan2/...`. On HotSpot these may 
 
 Robot-side math runs in the robot's own runtime and is not affected.
 
+### 4.4 Engine version
+
+A battle's outcome depends on more than the protocol: rules and physics, the PRNG, fuel counting and its calibration (§7.2), the pinned JRE and java-compat. A change to any of them can change who wins, so a result only means something together with the engine that produced it.
+
+- The engine gets an explicit **engine version**, separate from the protocol version (§5.1) and from release versions. It changes with every change that can alter a battle's outcome.
+- It is stored with every result: in replay headers (§11), in rumble result submissions (§12.3), in the rumble data model (§12.6), in CLI battle results and in difftest reports. Results are only compared or verified within one engine version (§12.4).
+- `robocode-s --version` shows it.
+
 ## 5. Protocol
 
 ### 5.1 Encoding and transport
@@ -483,6 +491,7 @@ robocode-s/
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
+- **O14** Engine version (§4.4, #22): one number or components (rules, metering calibration, runtime)? And what happens to rumble results when it changes: rerun, keep but rank separately, or mark as stale?
 
 ## 18. Decisions so far
 
