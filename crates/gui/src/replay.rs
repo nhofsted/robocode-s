@@ -4,16 +4,21 @@
 //! Opening a recording runs it once and keeps a keyframe (a clone of the replay) every
 //! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many.
 
+use crate::icons;
+use crate::screen;
 use crate::sprites::Sprites;
 use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
 use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
 use robocode_s_server::results::contestants;
+use std::borrow::Cow;
 use std::path::Path;
 use std::time::Instant;
 
 const KEYFRAME: usize = 200;
+/// Turns a second at the speed slider's "max".
+const FASTEST: f64 = 10_000.0;
 
 pub struct ReplayView {
     title: String,
@@ -38,7 +43,8 @@ pub struct ReplayView {
     /// The turn before the shown one, for the scan arcs.
     previous: Option<v1::TurnSnapshot>,
     playing: bool,
-    turns_per_second: f64,
+    /// Turns a second; 0 for as fast as possible.
+    turns_per_second: u32,
     last_tick: Option<Instant>,
     paint_visible: Vec<bool>,
 }
@@ -100,7 +106,7 @@ impl ReplayView {
             current: None,
             previous: None,
             playing: true,
-            turns_per_second: 30.0,
+            turns_per_second: 30,
             last_tick: None,
         };
         view.seek(0);
@@ -146,7 +152,11 @@ impl ReplayView {
         }
         let now = Instant::now();
         let last = *self.last_tick.get_or_insert(now);
-        let due = (now - last).as_secs_f64() * self.turns_per_second;
+        let rate = match self.turns_per_second {
+            0 => FASTEST,
+            tps => f64::from(tps),
+        };
+        let due = (now - last).as_secs_f64() * rate;
         if due >= 1.0 {
             let steps = (due as usize).min(1000);
             let target = (self.position + steps).min(self.turns - 1);
@@ -159,14 +169,12 @@ impl ReplayView {
                     self.seek(next);
                 }
             }
-            self.last_tick = Some(
-                last + std::time::Duration::from_secs_f64(steps as f64 / self.turns_per_second),
-            );
+            self.last_tick = Some(last + std::time::Duration::from_secs_f64(steps as f64 / rate));
         }
         ctx.request_repaint();
     }
 
-    /// Draws the replay; true when the user closes it.
+    /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
     pub fn ui(
         &mut self,
         root: &mut egui::Ui,
@@ -177,60 +185,40 @@ impl ReplayView {
         let ctx = &root.ctx().clone();
         self.play(ctx);
         let mut back = false;
-        egui::Panel::top("replay-controls").show(root, |ui| {
-            ui.horizontal(|ui| {
-                if ui
-                    .button("Close")
-                    .on_hover_text("open another recording")
-                    .clicked()
-                {
-                    back = true;
-                }
-                ui.separator();
-                let label = if self.playing { "Pause" } else { "Play" };
-                if ui.button(label).clicked() {
-                    self.playing = !self.playing;
-                    self.last_tick = None;
-                }
-                if ui.button("⏴").on_hover_text("previous turn").clicked() {
-                    self.playing = false;
-                    self.seek(self.position.saturating_sub(1));
-                }
-                if ui.button("⏵").on_hover_text("next turn").clicked() {
-                    self.playing = false;
-                    self.seek(self.position + 1);
-                }
-                ui.label("Turns/s");
-                ui.add(
-                    egui::Slider::new(&mut self.turns_per_second, 1.0..=2000.0).logarithmic(true),
-                );
-                ui.separator();
-                let round = self.round_of(self.position);
-                egui::ComboBox::from_id_salt("round")
-                    .selected_text(format!("Round {}/{}", round + 1, self.rounds))
-                    .show_ui(ui, |ui| {
-                        for (r, &start) in self.round_starts.clone().iter().enumerate() {
-                            if ui
-                                .selectable_label(r == round, format!("Round {}", r + 1))
-                                .clicked()
-                            {
-                                self.seek(start);
-                            }
-                        }
-                    });
-                if let Some(s) = &self.current {
-                    ui.label(format!("turn {}", s.turn));
-                }
-                ui.label(RichText::new(format!("{} · seed {}", self.title, self.seed)).weak());
-                if self.unverified > 0 {
-                    ui.colored_label(
-                        Color32::LIGHT_RED,
-                        format!("{} turns differ from the recording", self.unverified),
-                    );
-                }
-            });
+        let current = self.current.clone();
+        screen::robots_panel(
+            root,
+            "replay-robots",
+            &self.robots,
+            current.as_ref(),
+            selected,
+        );
+        let output = &self.output;
+        let position = self.position;
+        let toggled = screen::output_panel(
+            root,
+            "replay-output",
+            &self.robots,
+            current.as_ref(),
+            selected,
+            &self.paint_visible,
+            |i| {
+                let text: String = output
+                    .iter()
+                    .take_while(|(turn, _, _)| *turn <= position)
+                    .filter(|(_, robot, _)| *robot == i)
+                    .map(|(_, _, t)| t.as_str())
+                    .collect();
+                Cow::Owned(text)
+            },
+        );
+        if let Some(i) = toggled {
+            self.paint_visible[i] = !self.paint_visible[i];
+        }
+        screen::controls_panel(root, "replay-controls", |ui| {
+            // The timeline, as wide as the controls.
             let mut position = self.position;
-            ui.spacing_mut().slider_width = (ui.available_width() - 8.0).max(0.0);
+            ui.spacing_mut().slider_width = ui.available_width();
             let slider = ui.add(
                 egui::Slider::new(&mut position, 0..=self.turns.saturating_sub(1))
                     .show_value(false)
@@ -239,49 +227,80 @@ impl ReplayView {
             if slider.changed() {
                 self.seek(position);
             }
-        });
-        egui::Panel::right("replay-robots")
-            .default_size(260.0)
-            .show(root, |ui| {
-                ui.label(RichText::new("Robots").strong());
-                for (i, statics) in self.robots.iter().enumerate() {
-                    let robot = self.current.as_ref().and_then(|s| s.robots.get(i));
-                    let energy = robot.and_then(|r| r.energy).unwrap_or_default();
-                    if ui.selectable_label(*selected == i, &statics.name).clicked() {
-                        *selected = i;
-                    }
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::ProgressBar::new((energy / 100.0).clamp(0.0, 1.0) as f32)
-                                .desired_width(120.0)
-                                .text(format!("{energy:.1}")),
-                        );
-                        ui.checkbox(&mut self.paint_visible[i], "paint");
-                    });
+            ui.horizontal(|ui| {
+                if screen::control(ui, true, "Close the replay", |p, c, color| {
+                    icons::stop(p, c, 6.0, color)
+                }) {
+                    back = true;
                 }
+                let playing = self.playing;
+                let hint = if playing { "Pause" } else { "Play" };
+                if screen::control(ui, true, hint, |p, c, color| {
+                    if playing {
+                        icons::pause(p, c, 6.0, color);
+                    } else {
+                        icons::play(p, c, 7.0, color);
+                    }
+                }) {
+                    self.playing = !self.playing;
+                    self.last_tick = None;
+                }
+                let at_start = self.position == 0;
+                if screen::control(ui, !at_start, "Previous turn", |p, c, color| {
+                    icons::step(p, c, 6.5, -1.0, color)
+                }) {
+                    self.playing = false;
+                    self.seek(self.position.saturating_sub(1));
+                }
+                let at_end = self.position + 1 >= self.turns;
+                if screen::control(ui, !at_end, "Next turn", |p, c, color| {
+                    icons::step(p, c, 6.5, 1.0, color)
+                }) {
+                    self.playing = false;
+                    self.seek(self.position + 1);
+                }
+                screen::divider(ui);
+                screen::speed_slider(ui, &mut self.turns_per_second);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    screen::info(ui, "Seed", self.seed.to_string());
+                    ui.add_space(10.0);
+                    if let Some(s) = &self.current {
+                        screen::info(ui, "Turn", s.turn.to_string());
+                        ui.add_space(10.0);
+                    }
+                    let round = self.round_of(self.position);
+                    egui::ComboBox::from_id_salt("round")
+                        .selected_text(
+                            RichText::new(format!("{} / {}", round + 1, self.rounds)).strong(),
+                        )
+                        .width(70.0)
+                        .show_ui(ui, |ui| {
+                            for (r, &start) in self.round_starts.clone().iter().enumerate() {
+                                if ui
+                                    .selectable_label(r == round, format!("Round {}", r + 1))
+                                    .clicked()
+                                {
+                                    self.seek(start);
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Go to a round");
+                    ui.label(RichText::new("Round").weak());
+                    if self.unverified > 0 {
+                        ui.add_space(10.0);
+                        ui.colored_label(
+                            Color32::LIGHT_RED,
+                            format!("{} turns differ from the recording", self.unverified),
+                        );
+                    }
+                    ui.add_space(10.0);
+                    ui.add(egui::Label::new(RichText::new(&self.title).weak()).truncate());
+                });
             });
-        egui::Panel::bottom("replay-console")
-            .resizable(true)
-            .default_size(140.0)
-            .show(root, |ui| {
-                let i = (*selected).min(self.robots.len().saturating_sub(1));
-                let text: String = self
-                    .output
-                    .iter()
-                    .take_while(|(turn, _, _)| *turn <= self.position)
-                    .filter(|(_, robot, _)| *robot == i)
-                    .map(|(_, _, t)| t.as_str())
-                    .collect();
-                ui.label(
-                    RichText::new(self.robots.get(i).map_or("", |r| r.name.as_str())).strong(),
-                );
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| ui.label(RichText::new(text).monospace()));
-            });
+        });
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(Color32::BLACK))
             .show(root, |ui| {
                 let mut shown = self.current.clone();
                 if let Some(s) = &mut shown {

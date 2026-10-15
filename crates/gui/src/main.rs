@@ -8,6 +8,7 @@ mod backdrop;
 mod icons;
 mod live;
 mod replay;
+mod screen;
 mod settings;
 mod shell;
 mod sprites;
