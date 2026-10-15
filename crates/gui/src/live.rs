@@ -3,10 +3,12 @@
 //! A battle running locally: the server and robot processes on a background thread
 //! (`runner::local`), observed by the GUI.
 
+use crate::graphs::History;
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{LocalBattle, LocalOutcome, run_local_battle};
+use robocode_s_server::BattleOutcome;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -27,13 +29,19 @@ pub struct Live {
     pub rounds: i32,
     pub seed: i64,
     pub latest: Option<v1::TurnSnapshot>,
+    /// The snapshot before `latest`, for the scan arcs.
+    pub previous: Option<v1::TurnSnapshot>,
+    /// Every turn so far, for the graphs and scores.
+    pub history: History,
     /// Console output per robot.
     pub output: Vec<String>,
     pub paint: Vec<bool>,
     pub paused: bool,
     pub turns_per_second: u32,
-    /// Results at the end of the battle, or why it failed.
-    pub outcome: Option<Result<Vec<v1::Results>, String>>,
+    /// Stop was pressed: the battle ends.
+    pub stopping: bool,
+    /// The end of the battle with its results, or why it failed.
+    pub outcome: Option<Result<BattleOutcome, String>>,
 }
 
 impl Live {
@@ -69,10 +77,13 @@ impl Live {
             rounds,
             seed: 0,
             latest: None,
+            previous: None,
+            history: History::new(n),
             output: vec![String::new(); n],
             paint: vec![false; n],
             paused: false,
             turns_per_second: 30,
+            stopping: false,
             outcome: None,
         }
         .with_initial_speed()
@@ -106,11 +117,12 @@ impl Live {
                             }
                         }
                     }
-                    self.latest = Some(s);
+                    self.history.push(&s);
+                    self.previous = self.latest.replace(s);
                 }
                 Ok(_) => {}
                 Err(result) => {
-                    self.outcome = Some(result.map(|o| o.outcome.results));
+                    self.outcome = Some(result.map(|o| o.outcome));
                 }
             }
         }
@@ -125,6 +137,14 @@ impl Live {
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
         self.control(v1::observer_control::Control::Pause(paused));
+    }
+
+    /// Stops the battle (classic's stop): it ends with the results so far.
+    pub fn stop(&mut self) {
+        if !self.stopping && self.outcome.is_none() {
+            self.stopping = true;
+            self.control(v1::observer_control::Control::Abort(true));
+        }
     }
 
     pub fn step(&self) {
@@ -144,5 +164,14 @@ impl Live {
             robot_index: robot as i32,
             enabled,
         }));
+    }
+}
+
+/// A battle that is closed (a new one, or a cancelled start) stops, and its robots with it.
+impl Drop for Live {
+    fn drop(&mut self) {
+        if self.outcome.is_none() {
+            self.control(v1::observer_control::Control::Abort(true));
+        }
     }
 }

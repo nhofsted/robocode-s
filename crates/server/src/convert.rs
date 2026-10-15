@@ -303,6 +303,8 @@ pub fn robot_snapshot(
         colors: passthrough.colors,
         output,
         paint: Vec::new(),
+        cpu_nanos: 0,
+        budget_nanos: 0,
     }
 }
 

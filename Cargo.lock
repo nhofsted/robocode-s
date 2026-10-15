@@ -2341,6 +2341,7 @@ dependencies = [
  "robocode-s-protocol",
  "robocode-s-runner",
  "robocode-s-server",
+ "serde",
  "serde_json",
 ]
 
@@ -2374,6 +2375,7 @@ name = "robocode-s-runner"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "robocode-s-engine",
  "robocode-s-protocol",
  "robocode-s-server",
  "sha2",

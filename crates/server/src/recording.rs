@@ -49,12 +49,15 @@ impl Recorder {
     }
 }
 
-/// The hash a snapshot is verified by: FNV-1a over its encoding without output and paint.
+/// The hash a snapshot is verified by: FNV-1a over its encoding without output, paint and
+/// CPU times (timing, not battle state).
 pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
     let mut s = snapshot.clone();
     for r in &mut s.robots {
         r.output.clear();
         r.paint.clear();
+        r.cpu_nanos = 0;
+        r.budget_nanos = 0;
     }
     s.encode_to_vec()
         .iter()
@@ -168,6 +171,11 @@ impl Iterator for Replay {
                         .driver
                         .snapshot(&mut |i| s.output.get(i).cloned().unwrap_or_default());
                     let verified = check(&snapshot) == s.check;
+                    for (i, r) in snapshot.robots.iter_mut().enumerate() {
+                        // Older recordings have no CPU times: 0.
+                        r.cpu_nanos = s.cpu_nanos.get(i).copied().unwrap_or_default();
+                        r.budget_nanos = s.budget_nanos;
+                    }
                     for p in &s.paint {
                         if let Some(r) = usize::try_from(p.robot)
                             .ok()
@@ -208,7 +216,8 @@ pub fn round_result(battle: &Battle) -> v1::RoundResult {
         results: battle
             .robots
             .iter()
-            .map(|r| convert::results(&r.setup.name, &r.stats.final_results()))
+            .zip(battle.results())
+            .map(|(r, results)| convert::results(&r.setup.name, &results))
             .collect(),
     }
 }
