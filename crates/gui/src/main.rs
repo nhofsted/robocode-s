@@ -8,6 +8,7 @@ mod live;
 mod replay;
 mod sprites;
 mod view;
+mod window;
 
 use app::{App, Screenshot, Setup};
 use robocode_s_runner::local::Environment;
@@ -21,6 +22,8 @@ usage: robocode-s-gui [recording]
 Without arguments: the battle setup. With a recording: its replay.
 Paths come from ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR,
 ROBOCODES_DATA and ROBOCODES_ROBOT_JARS, as for `robocode-s battle`.
+ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window frame on or off (default:
+on under WSLg, whose compositor crashes on the system's frame).
 
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round, otherwise after --after frames (default 120)
@@ -56,10 +59,13 @@ fn main() -> ExitCode {
         }
     }
     let screenshot = shot.map(|path| Screenshot::new(path, after));
+    let own_frame = window::wanted();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("robocode-s")
-            .with_inner_size([1200.0, 860.0]),
+            .with_inner_size([1200.0, 860.0])
+            .with_min_inner_size([760.0, 540.0])
+            .with_decorations(!own_frame),
         ..Default::default()
     };
     let result = eframe::run_native(
@@ -73,6 +79,7 @@ fn main() -> ExitCode {
                 start,
                 replay,
                 screenshot,
+                own_frame,
             )))
         }),
     );

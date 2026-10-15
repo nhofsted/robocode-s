@@ -23,10 +23,24 @@ pub struct Transform {
 }
 
 impl Transform {
+    /// Fits the battlefield into `available`. An empty, inverted or non-finite area (a
+    /// collapsed panel while the window is resized) or battlefield gives scale 0.
     pub fn fit(available: Rect, width: f64, height: f64) -> (Self, Rect) {
-        let scale = (available.width() / width as f32).min(available.height() / height as f32);
+        let (w, h) = (available.width(), available.height());
+        // These comparisons are false for NaN, so a NaN area gets scale 0 as well.
+        let scale = if w > 0.0 && h > 0.0 && width > 0.0 && height > 0.0 {
+            (w / width as f32).min(h / height as f32)
+        } else {
+            0.0
+        };
+        let scale = if scale.is_finite() { scale } else { 0.0 };
+        let center = if available.center().is_finite() {
+            available.center()
+        } else {
+            Pos2::ZERO
+        };
         let size = vec2(width as f32 * scale, height as f32 * scale);
-        let rect = Rect::from_center_size(available.center(), size);
+        let rect = Rect::from_center_size(center, size);
         (
             Self {
                 origin: rect.min,
@@ -110,6 +124,9 @@ pub fn draw(
     let (t, rect) = Transform::fit(available, field.width, field.height);
     let painter = ui.painter_at(available);
     painter.rect_filled(available, 0.0, Color32::BLACK);
+    if t.scale == 0.0 {
+        return rect;
+    }
     ground(&painter, sprites, t, field);
     let Some(snapshot) = snapshot else {
         return rect;
@@ -349,5 +366,49 @@ fn outline(t: Transform, shape: &v1::Shape) -> Vec<(Vec<Pos2>, bool)> {
             !p.open,
         )],
         None => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_keeps_the_aspect_ratio() {
+        let available = Rect::from_min_size(pos2(10.0, 20.0), vec2(1000.0, 600.0));
+        let (t, rect) = Transform::fit(available, 800.0, 600.0);
+        assert_eq!(t.scale, 1.0);
+        assert_eq!(
+            rect,
+            Rect::from_min_size(pos2(110.0, 20.0), vec2(800.0, 600.0))
+        );
+        assert_eq!(t.point(0.0, 0.0), pos2(110.0, 620.0));
+    }
+
+    #[test]
+    fn fit_survives_degenerate_areas() {
+        let degenerate = [
+            Rect::from_min_size(pos2(5.0, 5.0), Vec2::ZERO),
+            Rect::from_min_size(pos2(5.0, 5.0), vec2(300.0, 0.0)),
+            Rect::from_min_max(pos2(100.0, 100.0), pos2(40.0, 30.0)),
+            Rect::NOTHING,
+            Rect::EVERYTHING,
+            Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(10.0, 10.0)),
+        ];
+        for available in degenerate {
+            for (w, h) in [(800.0, 600.0), (0.0, 0.0), (-1.0, 600.0)] {
+                let (t, rect) = Transform::fit(available, w, h);
+                assert!(
+                    t.scale.is_finite() && t.scale >= 0.0,
+                    "{available:?} {w}x{h}"
+                );
+                assert!(
+                    rect.width() >= 0.0 && rect.height() >= 0.0,
+                    "{available:?} {w}x{h} {rect:?} {}",
+                    t.scale
+                );
+                assert!(t.point(400.0, 300.0).is_finite(), "{available:?} {w}x{h}");
+            }
+        }
     }
 }

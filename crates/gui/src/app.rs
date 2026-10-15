@@ -84,6 +84,8 @@ pub struct App {
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
     filter: String,
+    /// Draw the window frame ourselves (see [`crate::window`]).
+    own_frame: bool,
 }
 
 impl App {
@@ -94,6 +96,7 @@ impl App {
         start: bool,
         replay: Option<PathBuf>,
         screenshot: Option<Screenshot>,
+        own_frame: bool,
     ) -> Self {
         let mut app = Self {
             sprites: Sprites::new(&cc.egui_ctx),
@@ -107,6 +110,7 @@ impl App {
             available: None,
             listing: None,
             filter: String::new(),
+            own_frame,
         };
         app.list_robots(&cc.egui_ctx);
         if let Some(path) = replay {
@@ -456,6 +460,9 @@ impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
         let mut back = false;
+        if self.own_frame {
+            crate::window::show(root, "robocode-s");
+        }
         match &mut self.screen {
             Screen::Setup => self.setup_ui(root),
             Screen::Live(live) => {

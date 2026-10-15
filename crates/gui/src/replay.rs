@@ -209,7 +209,7 @@ impl ReplayView {
                 }
             });
             let mut position = self.position;
-            ui.spacing_mut().slider_width = ui.available_width() - 8.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - 8.0).max(0.0);
             let slider = ui.add(
                 egui::Slider::new(&mut position, 0..=self.turns.saturating_sub(1))
                     .show_value(false)
