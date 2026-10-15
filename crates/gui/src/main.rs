@@ -16,7 +16,7 @@ mod sprites;
 mod view;
 mod window;
 
-use app::{App, Launch, Screenshot, Setup, parse_robots};
+use app::{App, Browse, Launch, Screenshot, Setup, parse_robots};
 use robocode_s_runner::local::Environment;
 use settings::Settings;
 use shell::Tab;
@@ -37,6 +37,8 @@ frame on or off (default: on under WSLg, whose compositor crashes on the
 system's frame).
 
   --tab NAME         open a tab at start: start, replay or options
+  --browse FIELD     open the file dialog of a field at start: record, replay or
+                     folder (the options' robot folder), on its tab
   --size WxH         the window's size in points (default 1200x860)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round (or its results, when it ends before),
@@ -58,6 +60,7 @@ fn main() -> ExitCode {
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);
     let mut loading = false;
     let mut tab = None;
+    let mut browse = None;
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -82,6 +85,20 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 };
                 tab = Some(t);
+            }
+            "--browse" => {
+                let name = value();
+                let (field, t) = match name.as_str() {
+                    "record" => (Browse::Record, Tab::Start),
+                    "replay" => (Browse::Replay, Tab::Replay),
+                    "folder" => (Browse::Folder, Tab::Options),
+                    _ => {
+                        eprint!("--browse wants record, replay or folder, not {name:?}\n\n{USAGE}");
+                        return ExitCode::from(2);
+                    }
+                };
+                browse = Some(field);
+                tab = tab.or(Some(t));
             }
             "--size" => {
                 let text = value();
@@ -121,6 +138,7 @@ fn main() -> ExitCode {
                 start,
                 replay,
                 tab,
+                browse,
             };
             Ok(Box::new(App::new(
                 cc,

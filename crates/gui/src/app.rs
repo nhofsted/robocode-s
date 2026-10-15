@@ -13,6 +13,7 @@ use crate::shell::{self, Tab};
 use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
+use egui_file_dialog::{DialogState, FileDialog, OpeningMode};
 use robocode_s_engine::BattleRules;
 use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{
@@ -145,6 +146,21 @@ pub struct App {
     settings_error: Option<String>,
     /// The battles started, so each one's results window opens centred.
     battles: u64,
+    /// The file dialog behind the fields' folder buttons (drawn by egui: WSLg has no
+    /// native one), and the field it is open for. It opens where the last pick was.
+    files: FileDialog,
+    browsing: Option<Browse>,
+}
+
+/// The field a file dialog is open for.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Browse {
+    /// Start Battle's "Record to": a file to save.
+    Record,
+    /// Replay Battle's recording: a file to open.
+    Replay,
+    /// A robot folder for the options.
+    Folder,
 }
 
 /// What the user wants from the battle screen.
@@ -164,6 +180,8 @@ pub struct Launch {
     pub start: bool,
     pub replay: Option<PathBuf>,
     pub tab: Option<Tab>,
+    /// The field whose file dialog opens at start (`--browse`).
+    pub browse: Option<Browse>,
 }
 
 impl App {
@@ -203,6 +221,10 @@ impl App {
             new_folder: String::new(),
             settings_error: None,
             battles: 0,
+            files: FileDialog::new()
+                .id("file-dialog")
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]),
+            browsing: None,
         };
         app.count_folder_jars();
         app.list_robots(&cc.egui_ctx);
@@ -213,6 +235,9 @@ impl App {
         }
         if let Some(tab) = launch.tab {
             app.tab = tab;
+        }
+        if let Some(field) = launch.browse {
+            app.browse(field);
         }
         app
     }
@@ -537,6 +562,7 @@ impl App {
             app.robot_chooser(ui);
 
             section(ui, "Battle");
+            let mut browse = None;
             let s = &mut app.setup;
             egui::Grid::new("setup")
                 .num_columns(2)
@@ -567,16 +593,24 @@ impl App {
                     });
                     ui.end_row();
                     ui.label("Record to");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut s.record)
-                            .hint_text("a file (optional)")
-                            .desired_width(360.0),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.record)
+                                .hint_text("a file (optional)")
+                                .desired_width(360.0),
+                        );
+                        if browse_button(ui, "Choose the file to record to") {
+                            browse = Some(Browse::Record);
+                        }
+                    });
                     ui.end_row();
                     ui.label("Debug paint");
                     ui.checkbox(&mut s.paint, "On for every robot");
                     ui.end_row();
                 });
+            if let Some(field) = browse {
+                app.browse(field);
+            }
 
             ui.add_space(20.0);
             ui.horizontal(|ui| {
@@ -702,6 +736,76 @@ impl App {
         }
     }
 
+    /// Opens the file dialog for `field`, starting from the field's folder if it has one
+    /// (otherwise where the last pick was).
+    pub fn browse(&mut self, field: Browse) {
+        let text = match field {
+            Browse::Record => &self.setup.record,
+            Browse::Replay => &self.open_path,
+            Browse::Folder => &self.new_folder,
+        };
+        let path = expand_home(text.trim());
+        let dir = match field {
+            Browse::Folder => Some(path.as_path()),
+            _ => path.parent(),
+        };
+        let config = self.files.config_mut();
+        config.opening_mode = match dir.filter(|d| d.is_dir()) {
+            Some(dir) => {
+                config.initial_directory = dir.to_path_buf();
+                OpeningMode::AlwaysInitialDir
+            }
+            None => OpeningMode::LastPickedDir,
+        };
+        config.default_file_name = match (field, path.file_name()) {
+            (Browse::Record, Some(name)) => name.to_string_lossy().into_owned(),
+            (Browse::Record, None) => "battle.rec".to_string(),
+            _ => String::new(),
+        };
+        config.title = Some(
+            match field {
+                Browse::Record => "Record to",
+                Browse::Replay => "Open a recording",
+                Browse::Folder => "Add a robot folder",
+            }
+            .to_string(),
+        );
+        match field {
+            Browse::Record => self.files.save_file(),
+            Browse::Replay => self.files.pick_file(),
+            Browse::Folder => self.files.pick_directory(),
+        }
+        self.browsing = Some(field);
+    }
+
+    /// Shows the open file dialog, and puts what was picked where it was asked for: a
+    /// recording opens, a robot folder is added.
+    fn file_dialog(&mut self, ctx: &egui::Context) {
+        let Some(field) = self.browsing else {
+            return;
+        };
+        self.files.update(ctx);
+        if let Some(path) = self.files.take_picked() {
+            self.browsing = None;
+            match field {
+                Browse::Record => self.setup.record = path.display().to_string(),
+                Browse::Replay => {
+                    self.open_path = path.display().to_string();
+                    self.open_replay(path);
+                }
+                Browse::Folder => {
+                    let before = self.settings.clone();
+                    if !self.settings.robot_folders.contains(&path) {
+                        self.settings.robot_folders.push(path);
+                        self.settings_changed(ctx, &before);
+                    }
+                }
+            }
+        } else if *self.files.state() != DialogState::Open {
+            self.browsing = None;
+        }
+    }
+
     /// The Replay Battle tab without a recording: which file to open.
     fn replay_page(&mut self, root: &mut egui::Ui) {
         self.page(root, |app, ui| {
@@ -714,6 +818,9 @@ impl App {
                         .hint_text("a file from --record or \"Record to\"")
                         .desired_width(480.0),
                 );
+                if browse_button(ui, "Choose a recording") {
+                    app.browse(Browse::Replay);
+                }
                 if ui.button("Open").clicked() && !app.open_path.trim().is_empty() {
                     let path = PathBuf::from(app.open_path.trim());
                     app.open_replay(path);
@@ -795,6 +902,9 @@ impl App {
                                 .hint_text("a folder with robot jars, e.g. ~/robocode/robots")
                                 .desired_width(420.0),
                         );
+                        if browse_button(ui, "Choose a folder with robot jars") {
+                            app.browse(Browse::Folder);
+                        }
                         let enter =
                             field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         let text = app.new_folder.trim();
@@ -1089,6 +1199,14 @@ const LABELS: f32 = 150.0;
 
 /// A section heading on a page: a title over a line, with space above unless it comes
 /// first.
+/// The folder button after a file or folder field; true when clicked.
+fn browse_button(ui: &mut egui::Ui, hint: &str) -> bool {
+    icons::button(ui, 22.0, hint, false, |p, c, color| {
+        icons::folder(p, c, 7.0, color);
+    })
+    .clicked()
+}
+
 fn section(ui: &mut egui::Ui, title: &str) {
     if ui.cursor().top() > ui.max_rect().top() {
         ui.add_space(20.0);
@@ -1331,6 +1449,7 @@ impl eframe::App for App {
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
         }
+        self.file_dialog(ctx);
         self.screenshot_step(ctx);
     }
 }
