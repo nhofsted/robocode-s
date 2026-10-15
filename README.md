@@ -39,7 +39,7 @@ cargo run --release -p robocode-s-gui                 # battle setup, then the l
 cargo run --release -p robocode-s-gui -- battle.rsr   # replay a recording
 ```
 
-The window has tabs: Start Battle (the setup, then the live battle), Replay Battle and, later, Run Rumble; the gear opens the options: the robot folders (scanned for `.jar` files), scan arcs, coloured bullets, and the default mode, rounds and battlefield size for new battles. They are saved in `~/.config/robocode-s/gui.json` (the platform's config directory; `ROBOCODES_GUI_CONFIG` names another file). The battle setup lists the robots in the jars of the robot folders and in `ROBOCODES_ROBOT_JARS`. A live battle can be paused, stepped and sped up, with each robot's debug painting and console output; a replay can be scrubbed through.
+The window has tabs: Start Battle (the setup, then the live battle), Replay Battle and, later, Run Rumble; the gear opens the options: the robot folders (scanned for `.jar` files), scan arcs, coloured bullets, and the default mode, rounds and battlefield size for new battles. They are saved in `~/.config/robocode-s/gui.json` (the platform's config directory; `ROBOCODES_GUI_CONFIG` names another file). The battle setup lists the robots in the jars of the robot folders and in `ROBOCODES_ROBOT_JARS` beside the ones in the battle (double-click to add or remove; a robot may be in it more than once), with the rounds, battlefield size and seed below. While a battle starts, a loading screen shows the contestants, or why the battle couldn't start. A live battle can be paused, stepped and sped up, with each robot's debug painting and console output; a replay can be scrubbed through.
 
 ## Repository layout
 

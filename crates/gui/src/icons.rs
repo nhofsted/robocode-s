@@ -39,6 +39,14 @@ pub fn cross(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32)
     painter.line_segment([center - b, center + b], stroke);
 }
 
+/// A plus (add): two strokes, `radius` from the centre to each end.
+pub fn plus(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new((radius * 0.35).max(1.5), color);
+    let (a, b) = (vec2(radius, 0.0), vec2(0.0, radius));
+    painter.line_segment([center - a, center + a], stroke);
+    painter.line_segment([center - b, center + b], stroke);
+}
+
 /// A square, borderless button showing an icon; brighter when hovered.
 pub fn button(
     ui: &mut egui::Ui,

@@ -14,7 +14,7 @@ mod sprites;
 mod view;
 mod window;
 
-use app::{App, Launch, Screenshot, Setup};
+use app::{App, Launch, Screenshot, Setup, parse_robots};
 use robocode_s_runner::local::Environment;
 use settings::Settings;
 use shell::Tab;
@@ -38,6 +38,8 @@ system's frame).
   --size WxH         the window's size in points (default 1200x860)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round, otherwise after --after frames (default 120)
+  --loading          with --battle and --screenshot: shoot the loading screen
+                     after --after frames instead
 ";
 
 /// `--size`: `WxH` in points.
@@ -51,6 +53,7 @@ fn main() -> ExitCode {
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);
+    let mut loading = false;
     let mut tab = None;
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
@@ -58,7 +61,7 @@ fn main() -> ExitCode {
         let mut value = || args.next().unwrap_or_default();
         match arg.as_str() {
             "--battle" => {
-                setup.robots = value();
+                setup.robots = parse_robots(&value());
                 start = true;
             }
             "--rounds" => setup.rounds = value().parse().unwrap_or(setup.rounds),
@@ -68,6 +71,7 @@ fn main() -> ExitCode {
             "--record" => setup.record = value(),
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
+            "--loading" => loading = true,
             "--tab" => {
                 let name = value();
                 let Some(t) = Tab::parse(&name) else {
@@ -95,7 +99,7 @@ fn main() -> ExitCode {
             path => replay = Some(PathBuf::from(path)),
         }
     }
-    let screenshot = shot.map(|path| Screenshot::new(path, after));
+    let screenshot = shot.map(|path| Screenshot::new(path, after, loading));
     let own_frame = window::wanted();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
