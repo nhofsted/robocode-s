@@ -155,14 +155,18 @@ impl ReplayView {
         ctx.request_repaint();
     }
 
-    /// Draws the replay; true when the user goes back to the setup.
+    /// Draws the replay; true when the user closes it.
     pub fn ui(&mut self, root: &mut egui::Ui, sprites: &mut Sprites, selected: &mut usize) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
         let mut back = false;
         egui::Panel::top("replay-controls").show(root, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("◀ Setup").clicked() {
+                if ui
+                    .button("Close")
+                    .on_hover_text("open another recording")
+                    .clicked()
+                {
                     back = true;
                 }
                 ui.separator();

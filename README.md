@@ -39,7 +39,7 @@ cargo run --release -p robocode-s-gui                 # battle setup, then the l
 cargo run --release -p robocode-s-gui -- battle.rsr   # replay a recording
 ```
 
-The battle setup lists the robots in the jars (`ROBOCODES_ROBOT_JARS`). A live battle can be paused, stepped and sped up, with each robot's debug painting and console output; a replay can be scrubbed through.
+The window has tabs: Start Battle (the setup, then the live battle), Replay Battle and, later, Run Rumble; the gear opens the options. The battle setup lists the robots in the jars (`ROBOCODES_ROBOT_JARS`). A live battle can be paused, stepped and sped up, with each robot's debug painting and console output; a replay can be scrubbed through.
 
 ## Repository layout
 

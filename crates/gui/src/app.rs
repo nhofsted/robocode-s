@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! The application: battle setup, a live battle, or a replay.
+//! The application: the tabs (battle setup and a live battle, replays, options) in the
+//! shell (see [`crate::shell`]).
 
+use crate::backdrop::Backdrop;
 use crate::live::Live;
 use crate::replay::ReplayView;
+use crate::shell::{self, Tab};
 use crate::sprites::Sprites;
 use crate::view::{self, Field};
 use eframe::egui::{self, Color32, RichText};
@@ -65,19 +68,19 @@ impl Screenshot {
     }
 }
 
-enum Screen {
-    Setup,
-    Live(Box<Live>),
-    Replay(Box<ReplayView>),
-}
-
 pub struct App {
     sprites: Sprites,
+    backdrop: Backdrop,
     env: Environment,
     setup: Setup,
-    screen: Screen,
+    tab: Tab,
+    /// The battle in the Start Battle tab; the setup when there is none.
+    live: Option<Box<Live>>,
+    /// The recording in the Replay Battle tab; a file field when there is none.
+    replay: Option<Box<ReplayView>>,
     selected: usize,
     error: Option<String>,
+    replay_error: Option<String>,
     screenshot: Option<Screenshot>,
     open_path: String,
     /// The robots in the jars, listed in the background.
@@ -100,11 +103,15 @@ impl App {
     ) -> Self {
         let mut app = Self {
             sprites: Sprites::new(&cc.egui_ctx),
+            backdrop: Backdrop::default(),
             env,
             setup,
-            screen: Screen::Setup,
+            tab: Tab::Start,
+            live: None,
+            replay: None,
             selected: 0,
             error: None,
+            replay_error: None,
             screenshot,
             open_path: String::new(),
             available: None,
@@ -263,31 +270,44 @@ impl App {
                 }
                 self.selected = 0;
                 self.error = None;
-                self.screen = Screen::Live(Box::new(live));
+                self.live = Some(Box::new(live));
+                self.tab = Tab::Start;
             }
             Err(e) => self.error = Some(e),
         }
     }
 
     fn open_replay(&mut self, path: PathBuf) {
+        self.tab = Tab::Replay;
         match ReplayView::open(&path) {
             Ok(view) => {
                 self.selected = 0;
-                self.error = None;
-                self.screen = Screen::Replay(Box::new(view));
+                self.replay_error = None;
+                self.replay = Some(Box::new(view));
             }
-            Err(e) => self.error = Some(format!("{}: {e}", path.display())),
+            Err(e) => self.replay_error = Some(format!("{}: {e}", path.display())),
         }
     }
 
-    fn setup_ui(&mut self, root: &mut egui::Ui) {
+    /// A page over the backdrop (see [`shell::page`]).
+    fn page(&mut self, root: &mut egui::Ui, content: impl FnOnce(&mut Self, &mut egui::Ui)) {
+        shell::page(
+            root,
+            self,
+            |app| (&mut app.backdrop, &mut app.sprites),
+            content,
+        );
+    }
+
+    /// The Start Battle tab without a battle: the setup.
+    fn start_page(&mut self, root: &mut egui::Ui) {
         let ctx = &root.ctx().clone();
-        egui::CentralPanel::default().show(root, |ui| {
-            ui.heading("robocode-s");
+        self.page(root, |app, ui| {
+            ui.heading("Start Battle");
             ui.add_space(8.0);
-            self.robot_chooser(ui);
+            app.robot_chooser(ui);
             ui.add_space(12.0);
-            let s = &mut self.setup;
+            let s = &mut app.setup;
             egui::Grid::new("setup")
                 .num_columns(2)
                 .spacing([12.0, 8.0])
@@ -331,23 +351,16 @@ impl App {
                 });
             ui.add_space(12.0);
             if ui.button(RichText::new("Start battle").strong()).clicked() {
-                self.start(ctx);
+                app.start(ctx);
             }
-            ui.add_space(24.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label("Replay a recording");
-                ui.add(egui::TextEdit::singleline(&mut self.open_path).desired_width(400.0));
-                if ui.button("Open").clicked() && !self.open_path.trim().is_empty() {
-                    let path = PathBuf::from(self.open_path.trim());
-                    self.open_replay(path);
-                }
-            });
+            if let Some(e) = &app.error {
+                ui.colored_label(Color32::LIGHT_RED, e);
+            }
             ui.add_space(12.0);
             ui.label(
                 RichText::new(format!(
                     "Robots are looked up in {}.",
-                    self.env
+                    app.env
                         .jars
                         .iter()
                         .map(|j| j.display().to_string())
@@ -356,10 +369,150 @@ impl App {
                 ))
                 .weak(),
             );
-            if let Some(e) = &self.error {
+        });
+    }
+
+    /// The Replay Battle tab without a recording: which file to open.
+    fn replay_page(&mut self, root: &mut egui::Ui) {
+        self.page(root, |app, ui| {
+            ui.heading("Replay Battle");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Recording");
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.open_path)
+                        .hint_text("a file from --record or \"Record to\"")
+                        .desired_width(480.0),
+                );
+                if ui.button("Open").clicked() && !app.open_path.trim().is_empty() {
+                    let path = PathBuf::from(app.open_path.trim());
+                    app.open_replay(path);
+                }
+            });
+            if let Some(e) = &app.replay_error {
                 ui.colored_label(Color32::LIGHT_RED, e);
             }
         });
+    }
+
+    /// The Run Rumble tab (M5); its tab is disabled until then.
+    fn rumble_page(&mut self, root: &mut egui::Ui) {
+        self.page(root, |_, ui| {
+            ui.heading("Run Rumble");
+            ui.add_space(8.0);
+            ui.label(RichText::new("Coming with the rumble client (M5).").weak());
+        });
+    }
+
+    /// The options, behind the gear (#30 fills them in).
+    fn options_page(&mut self, root: &mut egui::Ui) {
+        self.page(root, |_, ui| {
+            ui.heading("Options");
+            ui.add_space(8.0);
+            ui.label(RichText::new("Nothing to set yet.").weak());
+        });
+    }
+
+    /// The Start Battle tab with a battle: controls, robots, console and the battlefield.
+    /// True when the user goes back to the setup.
+    fn live_ui(&mut self, root: &mut egui::Ui) -> bool {
+        let ctx = &root.ctx().clone();
+        let mut back = false;
+        let Some(live) = &mut self.live else {
+            return true;
+        };
+        egui::Panel::top("controls").show(root, |ui| {
+            ui.horizontal(|ui| {
+                let label = if live.paused { "Resume" } else { "Pause" };
+                if ui.button(label).clicked() {
+                    let paused = !live.paused;
+                    live.set_paused(paused);
+                }
+                if ui
+                    .add_enabled(live.paused, egui::Button::new("Step"))
+                    .clicked()
+                {
+                    live.step();
+                }
+                let mut tps = live.turns_per_second;
+                let max = tps == 0;
+                ui.label("Turns/s");
+                let slider = ui.add_enabled(
+                    !max,
+                    egui::Slider::new(&mut tps, 1..=1000).logarithmic(true),
+                );
+                let mut fastest = max;
+                let toggled = ui.checkbox(&mut fastest, "max").changed();
+                if slider.changed() || toggled {
+                    live.set_speed(if fastest { 0 } else { tps.max(1) });
+                }
+                ui.separator();
+                if let Some(s) = &live.latest {
+                    ui.label(format!(
+                        "Round {}/{} · turn {}",
+                        s.round + 1,
+                        live.rounds,
+                        s.turn
+                    ));
+                }
+                ui.label(RichText::new(format!("seed {}", live.seed)).weak());
+                if live.outcome.is_some() && ui.button("New battle").clicked() {
+                    back = true;
+                }
+            });
+        });
+        egui::Panel::right("robots")
+            .default_size(260.0)
+            .show(root, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let paint = live.paint.clone();
+                    let (robots, latest) = (live.robots.clone(), live.latest.clone());
+                    robot_list(
+                        ui,
+                        &robots,
+                        latest.as_ref(),
+                        &mut self.selected,
+                        Some((&paint, &mut |i, on| live.set_paint(i, on))),
+                    );
+                });
+            });
+        egui::Panel::bottom("console")
+            .resizable(true)
+            .default_size(140.0)
+            .show(root, |ui| {
+                let i = self.selected.min(live.robots.len().saturating_sub(1));
+                let title = live.robots.get(i).map_or("", |r| r.name.as_str());
+                console(ui, title, live.output.get(i).map_or("", String::as_str));
+            });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(root, |ui| {
+                let field = Field {
+                    width: live.width,
+                    height: live.height,
+                    robots: &live.robots,
+                };
+                view::draw(
+                    ui,
+                    &mut self.sprites,
+                    &field,
+                    live.latest.as_ref(),
+                    ui.max_rect(),
+                );
+            });
+        match &live.outcome {
+            Some(Ok(results)) => results_window(ctx, &live.robots, results),
+            Some(Err(e)) => {
+                egui::Window::new("Battle failed").show(ctx, |ui| {
+                    ui.colored_label(Color32::LIGHT_RED, e);
+                    if ui.button("Back").clicked() {
+                        back = true;
+                    }
+                });
+            }
+            None => {}
+        }
+        back
     }
 }
 
@@ -459,114 +612,29 @@ fn results_window(ctx: &egui::Context, robots: &[v1::RobotStatics], results: &[v
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
-        let mut back = false;
-        if self.own_frame {
-            crate::window::show(root, "robocode-s");
+        shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
+        shell::footer(root);
+        // A battle keeps running in its tab while another one is open.
+        if let Some(live) = &mut self.live {
+            live.poll();
         }
-        match &mut self.screen {
-            Screen::Setup => self.setup_ui(root),
-            Screen::Live(live) => {
-                live.poll();
-                egui::Panel::top("controls").show(root, |ui| {
-                    ui.horizontal(|ui| {
-                        let label = if live.paused { "Resume" } else { "Pause" };
-                        if ui.button(label).clicked() {
-                            let paused = !live.paused;
-                            live.set_paused(paused);
-                        }
-                        if ui
-                            .add_enabled(live.paused, egui::Button::new("Step"))
-                            .clicked()
-                        {
-                            live.step();
-                        }
-                        let mut tps = live.turns_per_second;
-                        let max = tps == 0;
-                        ui.label("Turns/s");
-                        let slider = ui.add_enabled(
-                            !max,
-                            egui::Slider::new(&mut tps, 1..=1000).logarithmic(true),
-                        );
-                        let mut fastest = max;
-                        let toggled = ui.checkbox(&mut fastest, "max").changed();
-                        if slider.changed() || toggled {
-                            live.set_speed(if fastest { 0 } else { tps.max(1) });
-                        }
-                        ui.separator();
-                        if let Some(s) = &live.latest {
-                            ui.label(format!(
-                                "Round {}/{} · turn {}",
-                                s.round + 1,
-                                live.rounds,
-                                s.turn
-                            ));
-                        }
-                        ui.label(RichText::new(format!("seed {}", live.seed)).weak());
-                        if live.outcome.is_some() && ui.button("New battle").clicked() {
-                            back = true;
-                        }
-                    });
-                });
-                egui::Panel::right("robots")
-                    .default_size(260.0)
-                    .show(root, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            let paint = live.paint.clone();
-                            let (robots, latest) = (live.robots.clone(), live.latest.clone());
-                            robot_list(
-                                ui,
-                                &robots,
-                                latest.as_ref(),
-                                &mut self.selected,
-                                Some((&paint, &mut |i, on| live.set_paint(i, on))),
-                            );
-                        });
-                    });
-                egui::Panel::bottom("console")
-                    .resizable(true)
-                    .default_size(140.0)
-                    .show(root, |ui| {
-                        let i = self.selected.min(live.robots.len().saturating_sub(1));
-                        let title = live.robots.get(i).map_or("", |r| r.name.as_str());
-                        console(ui, title, live.output.get(i).map_or("", String::as_str));
-                    });
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(root, |ui| {
-                        let field = Field {
-                            width: live.width,
-                            height: live.height,
-                            robots: &live.robots,
-                        };
-                        view::draw(
-                            ui,
-                            &mut self.sprites,
-                            &field,
-                            live.latest.as_ref(),
-                            ui.max_rect(),
-                        );
-                    });
-                match &live.outcome {
-                    Some(Ok(results)) => results_window(ctx, &live.robots, results),
-                    Some(Err(e)) => {
-                        egui::Window::new("Battle failed").show(ctx, |ui| {
-                            ui.colored_label(Color32::LIGHT_RED, e);
-                            if ui.button("Back").clicked() {
-                                back = true;
-                            }
-                        });
+        match self.tab {
+            Tab::Start if self.live.is_some() => {
+                if self.live_ui(root) {
+                    self.live = None;
+                }
+            }
+            Tab::Start => self.start_page(root),
+            Tab::Replay => match &mut self.replay {
+                Some(replay) => {
+                    if replay.ui(root, &mut self.sprites, &mut self.selected) {
+                        self.replay = None;
                     }
-                    None => {}
                 }
-            }
-            Screen::Replay(replay) => {
-                if replay.ui(root, &mut self.sprites, &mut self.selected) {
-                    back = true;
-                }
-            }
-        }
-        if back {
-            self.screen = Screen::Setup;
+                None => self.replay_page(root),
+            },
+            Tab::Rumble => self.rumble_page(root),
+            Tab::Options => self.options_page(root),
         }
         self.screenshot_step(ctx);
     }
@@ -604,8 +672,8 @@ impl App {
             return;
         }
         shot.frames += 1;
-        let ready = match &self.screen {
-            Screen::Live(live) => {
+        let ready = match (&self.live, self.tab) {
+            (Some(live), Tab::Start) => {
                 live.outcome.is_some()
                     || live
                         .latest

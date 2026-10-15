@@ -65,7 +65,13 @@ impl Transform {
 
 /// A textured quad of `size` (screen pixels) centred on `center`, turned by `angle`
 /// radians clockwise (Robocode headings: 0 is up).
-fn sprite(texture: egui::TextureId, center: Pos2, size: Vec2, angle: f32, tint: Color32) -> Shape {
+pub fn sprite(
+    texture: egui::TextureId,
+    center: Pos2,
+    size: Vec2,
+    angle: f32,
+    tint: Color32,
+) -> Shape {
     let (sin, cos) = angle.sin_cos();
     let corner = |dx: f32, dy: f32| center + vec2(dx * cos - dy * sin, dx * sin + dy * cos);
     let (w, h) = (size.x / 2.0, size.y / 2.0);

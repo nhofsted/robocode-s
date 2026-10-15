@@ -15,7 +15,9 @@ use egui::viewport::{ResizeDirection, ViewportCommand};
 const EDGE: f32 = 5.0;
 /// Length of the corner zones along each edge.
 const CORNER: f32 = 16.0;
-const TITLE_HEIGHT: f32 = 28.0;
+const BUTTON_WIDTH: f32 = 44.0;
+/// Height of the top bar: the title bar with our frame, the app's top bar without it.
+pub const BAR_HEIGHT: f32 = 40.0;
 
 /// Whether to draw our own frame: on WSLg under Wayland, unless `ROBOCODES_OWN_FRAME`
 /// says otherwise (`1` or `0`).
@@ -30,20 +32,23 @@ pub fn wanted() -> bool {
     }
 }
 
-/// Draws the frame around the window's content; call it before the other panels.
-pub fn show(root: &mut egui::Ui, title: &str) {
+/// Draws the frame around the window's content; call it before the other panels. The
+/// title bar holds `content` (the app's top bar) left of the window buttons; its empty
+/// parts drag the window, and a double click maximizes it.
+pub fn show(root: &mut egui::Ui, fill: Color32, content: impl FnOnce(&mut egui::Ui)) {
     let ctx = root.ctx().clone();
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
     if !maximized {
-        edges(root);
+        edges(root, fill);
     }
     egui::Panel::top("window-title")
-        .exact_size(TITLE_HEIGHT)
+        .exact_size(BAR_HEIGHT)
         .resizable(false)
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(root.visuals().extreme_bg_color))
+        .frame(egui::Frame::NONE.fill(fill))
         .show(root, |ui| {
             let rect = ui.max_rect();
+            // First, so that the widgets on top of it take their own clicks.
             let bar = ui.interact(rect, Id::new("window-title-bar"), Sense::click_and_drag());
             if bar.drag_started_by(PointerButton::Primary) {
                 ctx.send_viewport_cmd(ViewportCommand::StartDrag);
@@ -51,14 +56,10 @@ pub fn show(root: &mut egui::Ui, title: &str) {
             if bar.double_clicked() {
                 ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
             }
-            ui.painter().text(
-                rect.left_center() + vec2(10.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                title,
-                egui::FontId::proportional(14.0),
-                ui.visuals().text_color(),
-            );
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let buttons = rect.with_min_x(rect.right() - 3.0 * BUTTON_WIDTH);
+            let rest = rect.with_max_x(buttons.left() - 8.0);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rest), content);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(buttons), |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     if button(ui, Icon::Close, "Close").clicked() {
@@ -81,8 +82,7 @@ pub fn show(root: &mut egui::Ui, title: &str) {
 }
 
 /// Thin panels along the four sides that start a resize when pressed.
-fn edges(root: &mut egui::Ui) {
-    let fill = root.visuals().extreme_bg_color;
+fn edges(root: &mut egui::Ui, fill: Color32) {
     let frame = egui::Frame::NONE.fill(fill);
     let sides = [
         egui::Panel::top("window-edge-n"),
@@ -165,7 +165,7 @@ enum Icon {
 
 /// A title-bar button with a drawn icon (the default font lacks some symbols).
 fn button(ui: &mut egui::Ui, icon: Icon, hint: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(40.0, TITLE_HEIGHT), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(BUTTON_WIDTH, BAR_HEIGHT), Sense::click());
     let response = response.on_hover_text(hint);
     let painter = ui.painter();
     if response.hovered() {
@@ -187,12 +187,26 @@ fn button(ui: &mut egui::Ui, icon: Icon, hint: &str) -> egui::Response {
             painter.rect_stroke(square, 0.0, stroke, egui::StrokeKind::Inside);
         }
         Icon::Restore => {
-            let back =
-                egui::Rect::from_center_size(c + vec2(2.0, -2.0), egui::Vec2::splat(1.6 * r));
-            let front = back.translate(vec2(-4.0, 4.0));
-            painter.rect_stroke(back, 0.0, stroke, egui::StrokeKind::Inside);
-            painter.rect_filled(front, 0.0, ui.visuals().extreme_bg_color);
+            // The front window, and of the one behind it only what shows.
+            let front =
+                egui::Rect::from_center_size(c + vec2(-1.5, 1.5), egui::Vec2::splat(1.6 * r));
             painter.rect_stroke(front, 0.0, stroke, egui::StrokeKind::Inside);
+            let (l, t, rt, b) = (
+                front.left() + 3.5,
+                front.top() - 3.0,
+                front.right() + 3.0,
+                front.bottom() - 3.5,
+            );
+            painter.add(egui::Shape::line(
+                vec![
+                    egui::pos2(l, front.top() + 0.5),
+                    egui::pos2(l, t + 0.5),
+                    egui::pos2(rt - 0.5, t + 0.5),
+                    egui::pos2(rt - 0.5, b),
+                    egui::pos2(front.right(), b),
+                ],
+                stroke,
+            ));
         }
         Icon::Close => {
             painter.line_segment([c + vec2(-r, -r), c + vec2(r, r)], stroke);
