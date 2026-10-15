@@ -2341,6 +2341,7 @@ dependencies = [
  "robocode-s-protocol",
  "robocode-s-runner",
  "robocode-s-server",
+ "serde",
  "serde_json",
 ]
 

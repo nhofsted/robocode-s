@@ -27,6 +27,8 @@ pub struct Live {
     pub rounds: i32,
     pub seed: i64,
     pub latest: Option<v1::TurnSnapshot>,
+    /// The snapshot before `latest`, for the scan arcs.
+    pub previous: Option<v1::TurnSnapshot>,
     /// Console output per robot.
     pub output: Vec<String>,
     pub paint: Vec<bool>,
@@ -69,6 +71,7 @@ impl Live {
             rounds,
             seed: 0,
             latest: None,
+            previous: None,
             output: vec![String::new(); n],
             paint: vec![false; n],
             paused: false,
@@ -106,7 +109,7 @@ impl Live {
                             }
                         }
                     }
-                    self.latest = Some(s);
+                    self.previous = self.latest.replace(s);
                 }
                 Ok(_) => {}
                 Err(result) => {

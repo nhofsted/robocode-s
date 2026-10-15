@@ -14,6 +14,21 @@ pub struct Field<'a> {
     pub robots: &'a [v1::RobotStatics],
 }
 
+/// How the battle is drawn (the options).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Style {
+    /// Each robot's radar scan arc, as classic's "Visible scan arcs".
+    pub scan_arcs: bool,
+    /// Bullets in the robots' bullet colours; otherwise all in [`BULLET`].
+    pub colored_bullets: bool,
+}
+
+/// Classic's bullet colour when a robot sets none.
+const BULLET: Color32 = Color32::from_gray(220);
+
+/// How far the radar sees (`Rules.RADAR_SCAN_RADIUS`).
+const RADAR_RANGE: f64 = 1200.0;
+
 /// Maps battlefield coordinates into a screen rectangle, keeping the aspect ratio.
 #[derive(Clone, Copy)]
 pub struct Transform {
@@ -111,7 +126,7 @@ pub fn colors(statics: &v1::RobotStatics, snapshot: &v1::RobotSnapshot) -> ([Rgb
         pick(c.radar, defaults[2]),
     ];
     let bullet = if c.bullet == 0 {
-        Color32::from_gray(220)
+        BULLET
     } else {
         let [r, g, b] = sprites::rgb(c.bullet);
         Color32::from_rgb(r, g, b)
@@ -119,12 +134,79 @@ pub fn colors(statics: &v1::RobotStatics, snapshot: &v1::RobotSnapshot) -> ([Rgb
     (tank, bullet)
 }
 
+/// A robot's scan colour: classic's blue when it sets none.
+fn scan_color(snapshot: &v1::RobotSnapshot) -> Color32 {
+    match snapshot.colors.map_or(0, |c| c.scan) {
+        0 => Color32::from_rgb(0, 0, 255),
+        argb => {
+            let [r, g, b] = sprites::rgb(argb);
+            Color32::from_rgb(r, g, b)
+        }
+    }
+}
+
+/// A robot's scan arc this turn as (start, extent) in Robocode radians (0 up, clockwise):
+/// from its radar heading in the turn before to its radar heading now, the shorter way, as
+/// the engine scans (`RobotPeer.scan`). `None` when `previous` isn't the turn before.
+pub fn scan_arc(
+    previous: &v1::TurnSnapshot,
+    current: &v1::TurnSnapshot,
+    robot: usize,
+) -> Option<(f64, f64)> {
+    if previous.round != current.round || previous.turn + 1 != current.turn {
+        return None;
+    }
+    let (before, now) = (previous.robots.get(robot)?, current.robots.get(robot)?);
+    let alive = |r: &v1::RobotSnapshot| r.state != v1::RobotState::Dead as i32;
+    if !alive(before) || !alive(now) {
+        return None;
+    }
+    let start = before.radar_heading?;
+    let mut extent = now.radar_heading? - start;
+    if extent < -std::f64::consts::PI {
+        extent += std::f64::consts::TAU;
+    } else if extent > std::f64::consts::PI {
+        extent -= std::f64::consts::TAU;
+    }
+    Some((start, extent))
+}
+
+/// Draws the scan arcs: classic fills them in the scan colour at 20% opacity, and draws a
+/// line when the radar barely turned.
+fn scan_arcs(
+    painter: &egui::Painter,
+    t: Transform,
+    previous: &v1::TurnSnapshot,
+    current: &v1::TurnSnapshot,
+) {
+    for (i, robot) in current.robots.iter().enumerate() {
+        let Some((start, extent)) = scan_arc(previous, current, i) else {
+            continue;
+        };
+        let (x, y) = (robot.x.unwrap_or_default(), robot.y.unwrap_or_default());
+        let at = |a: f64| t.point(x + RADAR_RANGE * a.sin(), y + RADAR_RANGE * a.cos());
+        let color = scan_color(robot).gamma_multiply(0.2);
+        let center = t.point(x, y);
+        if extent.abs() < 0.5f64.to_radians() {
+            painter.line_segment([center, at(start)], Stroke::new(1.0, color));
+            continue;
+        }
+        // At most half a turn, so the fan is convex.
+        let steps = ((extent.abs() / 0.05).ceil() as usize).clamp(2, 64);
+        let mut points = vec![center];
+        points.extend((0..=steps).map(|k| at(start + extent * k as f64 / steps as f64)));
+        painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+    }
+}
+
 /// Draws one turn into `available`; returns the battlefield's screen rectangle.
+/// `previous` is the turn before, for the scan arcs.
 pub fn draw(
     ui: &mut egui::Ui,
     sprites: &mut Sprites,
     field: &Field,
-    snapshot: Option<&v1::TurnSnapshot>,
+    style: Style,
+    (previous, snapshot): (Option<&v1::TurnSnapshot>, Option<&v1::TurnSnapshot>),
     available: Rect,
 ) -> Rect {
     let (t, rect) = Transform::fit(available, field.width, field.height);
@@ -139,6 +221,11 @@ pub fn draw(
     };
     let ctx = ui.ctx().clone();
 
+    if style.scan_arcs
+        && let Some(previous) = previous
+    {
+        scan_arcs(&painter.with_clip_rect(rect), t, previous, snapshot);
+    }
     // Debug paint first, under the tanks, as in classic.
     for (r, robot) in snapshot.robots.iter().enumerate() {
         if !robot.paint.is_empty() {
@@ -184,7 +271,7 @@ pub fn draw(
         );
     }
     for b in &snapshot.bullets {
-        bullet(&painter, sprites, t, field, snapshot, b);
+        bullet(&painter, sprites, t, field, style, snapshot, b);
     }
     rect
 }
@@ -219,6 +306,7 @@ fn bullet(
     sprites: &Sprites,
     t: Transform,
     field: &Field,
+    style: Style,
     snapshot: &v1::TurnSnapshot,
     b: &v1::BulletSnapshot,
 ) {
@@ -226,10 +314,12 @@ fn bullet(
     let state = v1::BulletState::try_from(b.state).unwrap_or(v1::BulletState::Inactive);
     match state {
         v1::BulletState::Fired | v1::BulletState::Moving => {
-            let owner = usize::try_from(b.owner).ok();
+            let owner = usize::try_from(b.owner)
+                .ok()
+                .filter(|_| style.colored_bullets);
             let color = owner
                 .and_then(|o| Some(colors(field.robots.get(o)?, snapshot.robots.get(o)?).1))
-                .unwrap_or(Color32::from_gray(220));
+                .unwrap_or(BULLET);
             // Classic: a disc of 2·√(2.5·power), at least 2 screen pixels.
             let d = t.len(2.0 * (2.5 * b.power.unwrap_or(1.0)).sqrt()).max(2.0);
             painter.circle_filled(at, d / 2.0, color);
@@ -389,6 +479,33 @@ mod tests {
             Rect::from_min_size(pos2(110.0, 20.0), vec2(800.0, 600.0))
         );
         assert_eq!(t.point(0.0, 0.0), pos2(110.0, 620.0));
+    }
+
+    #[test]
+    fn scan_arcs_go_from_the_last_radar_heading_the_shorter_way() {
+        let turn = |turn: i64, headings: &[f64]| v1::TurnSnapshot {
+            round: 0,
+            turn,
+            robots: headings
+                .iter()
+                .map(|&h| v1::RobotSnapshot {
+                    radar_heading: Some(h),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let (a, b) = (turn(4, &[0.1, 6.2]), turn(5, &[0.5, 0.1]));
+        let (start, extent) = scan_arc(&a, &b, 0).unwrap();
+        assert_eq!(start, 0.1);
+        assert!((extent - 0.4).abs() < 1e-12);
+        // Across north: clockwise through 0, not back around.
+        let (start, extent) = scan_arc(&a, &b, 1).unwrap();
+        assert_eq!(start, 6.2);
+        assert!((extent - (0.1 + std::f64::consts::TAU - 6.2)).abs() < 1e-12);
+        // Not the turn before: no arc.
+        assert_eq!(scan_arc(&turn(3, &[0.1]), &b, 0), None);
+        assert_eq!(scan_arc(&a, &b, 2), None);
     }
 
     #[test]

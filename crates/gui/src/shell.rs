@@ -44,6 +44,16 @@ impl Tab {
         }
     }
 
+    /// `--tab`: a tab by name.
+    pub fn parse(name: &str) -> Option<Tab> {
+        match name {
+            "start" => Some(Tab::Start),
+            "replay" => Some(Tab::Replay),
+            "options" => Some(Tab::Options),
+            _ => None,
+        }
+    }
+
     /// Why a tab can't be opened yet.
     fn disabled(self) -> Option<&'static str> {
         match self {

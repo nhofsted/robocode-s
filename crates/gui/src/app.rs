@@ -4,11 +4,13 @@
 //! shell (see [`crate::shell`]).
 
 use crate::backdrop::Backdrop;
+use crate::icons;
 use crate::live::Live;
 use crate::replay::ReplayView;
+use crate::settings::Settings;
 use crate::shell::{self, Tab};
 use crate::sprites::Sprites;
-use crate::view::{self, Field};
+use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1;
@@ -32,15 +34,16 @@ pub struct Setup {
     pub turns_per_second: u32,
 }
 
-impl Default for Setup {
-    fn default() -> Self {
+impl Setup {
+    /// A new battle with the defaults from the options.
+    pub fn new(settings: &Settings) -> Self {
         Self {
             robots: "sample.Fire, sample.Walls, sample.Crazy, sample.SpinBot".into(),
-            rounds: 10,
+            rounds: settings.rounds,
             seed: String::new(),
-            width: 800,
-            height: 600,
-            classic: false,
+            width: settings.width,
+            height: settings.height,
+            classic: settings.classic,
             record: String::new(),
             paint: false,
             turns_per_second: 30,
@@ -89,23 +92,40 @@ pub struct App {
     filter: String,
     /// Draw the window frame ourselves (see [`crate::window`]).
     own_frame: bool,
+    /// The options, saved on every change.
+    settings: Settings,
+    /// Robot jars from `ROBOCODES_ROBOT_JARS`, besides the robot folders.
+    env_jars: Vec<PathBuf>,
+    /// The robot jars per robot folder; `None` for a folder that isn't there.
+    folder_jars: Vec<Option<usize>>,
+    new_folder: String,
+    settings_error: Option<String>,
+}
+
+/// How the app starts: the battle setup, a battle, a replay or another tab.
+pub struct Launch {
+    pub setup: Setup,
+    pub start: bool,
+    pub replay: Option<PathBuf>,
+    pub tab: Option<Tab>,
 }
 
 impl App {
     pub fn new(
         cc: &eframe::CreationContext,
-        env: Environment,
-        setup: Setup,
-        start: bool,
-        replay: Option<PathBuf>,
+        mut env: Environment,
+        settings: Settings,
+        launch: Launch,
         screenshot: Option<Screenshot>,
         own_frame: bool,
     ) -> Self {
+        let env_jars = crate::settings::env_jars();
+        env.jars = settings.robot_jars(&env_jars);
         let mut app = Self {
             sprites: Sprites::new(&cc.egui_ctx),
             backdrop: Backdrop::default(),
             env,
-            setup,
+            setup: launch.setup,
             tab: Tab::Start,
             live: None,
             replay: None,
@@ -118,14 +138,54 @@ impl App {
             listing: None,
             filter: String::new(),
             own_frame,
+            folder_jars: Vec::new(),
+            settings,
+            env_jars,
+            new_folder: String::new(),
+            settings_error: None,
         };
+        app.count_folder_jars();
         app.list_robots(&cc.egui_ctx);
-        if let Some(path) = replay {
+        if let Some(path) = launch.replay {
             app.open_replay(path);
-        } else if start {
+        } else if launch.start {
             app.start(&cc.egui_ctx);
         }
+        if let Some(tab) = launch.tab {
+            app.tab = tab;
+        }
         app
+    }
+
+    /// How the battlefield is drawn, from the options.
+    fn style(&self) -> Style {
+        Style {
+            scan_arcs: self.settings.scan_arcs,
+            colored_bullets: self.settings.colored_bullets,
+        }
+    }
+
+    fn count_folder_jars(&mut self) {
+        self.folder_jars = self
+            .settings
+            .robot_folders
+            .iter()
+            .map(|f| {
+                let one = Settings {
+                    robot_folders: vec![f.clone()],
+                    ..Settings::default()
+                };
+                (f.exists()).then(|| one.robot_jars(&[]).len())
+            })
+            .collect();
+    }
+
+    /// Scans the robot folders again and lists their robots.
+    fn rescan(&mut self, ctx: &egui::Context) {
+        self.env.jars = self.settings.robot_jars(&self.env_jars);
+        self.count_folder_jars();
+        self.available = None;
+        self.list_robots(ctx);
     }
 
     /// Lists the robots in the jars on a background thread (it starts a JVM).
@@ -144,14 +204,18 @@ impl App {
         self.listing = Some(rx);
     }
 
-    /// The available robots: click one to add it to the battle.
-    fn robot_chooser(&mut self, ui: &mut egui::Ui) {
+    /// Takes the robot list once it is there.
+    fn poll_listing(&mut self) {
         if let Some(rx) = &self.listing
             && let Ok(result) = rx.try_recv()
         {
             self.available = Some(result);
             self.listing = None;
         }
+    }
+
+    /// The available robots: click one to add it to the battle.
+    fn robot_chooser(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.label(RichText::new("Available robots").strong());
@@ -359,13 +423,13 @@ impl App {
             ui.add_space(12.0);
             ui.label(
                 RichText::new(format!(
-                    "Robots are looked up in {}.",
-                    app.env
-                        .jars
-                        .iter()
-                        .map(|j| j.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    "Robots come from {} jars in the robot folders (see Options){}.",
+                    app.env.jars.len(),
+                    if app.env_jars.is_empty() {
+                        ""
+                    } else {
+                        " and ROBOCODES_ROBOT_JARS"
+                    }
                 ))
                 .weak(),
             );
@@ -404,13 +468,193 @@ impl App {
         });
     }
 
-    /// The options, behind the gear (#30 fills them in).
+    /// The options, behind the gear: robot folders, how battles are drawn, and the
+    /// defaults for new battles. Every change is saved at once.
     fn options_page(&mut self, root: &mut egui::Ui) {
-        self.page(root, |_, ui| {
+        let ctx = &root.ctx().clone();
+        let before = self.settings.clone();
+        let mut rescan = false;
+        self.page(root, |app, ui| {
             ui.heading("Options");
-            ui.add_space(8.0);
-            ui.label(RichText::new("Nothing to set yet.").weak());
+            ui.add_space(4.0);
+            match Settings::path() {
+                Some(path) => ui.label(
+                    RichText::new(format!("Saved in {}", path.display()))
+                        .small()
+                        .weak(),
+                ),
+                None => ui.label(RichText::new("Not saved: no config directory").small()),
+            };
+
+            section(ui, "Robots");
+            egui::Grid::new("robot-folders")
+                .num_columns(2)
+                .min_col_width(LABELS)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    // One row per folder, the label on the first.
+                    let mut remove = None;
+                    for (i, folder) in app.settings.robot_folders.iter().enumerate() {
+                        ui.label(if i == 0 { "Robot folders" } else { "" });
+                        ui.horizontal(|ui| {
+                            let hint = "Remove this folder";
+                            if icons::button(ui, 20.0, hint, false, |p, c, color| {
+                                icons::cross(p, c, 4.0, color);
+                            })
+                            .clicked()
+                            {
+                                remove = Some(i);
+                            }
+                            ui.label(RichText::new(folder.display().to_string()).monospace());
+                            match app.folder_jars.get(i).copied().flatten() {
+                                Some(1) => ui.label(RichText::new("1 jar").weak()),
+                                Some(n) => ui.label(RichText::new(format!("{n} jars")).weak()),
+                                None => ui.colored_label(Color32::LIGHT_RED, "not found"),
+                            };
+                        });
+                        ui.end_row();
+                    }
+                    if let Some(i) = remove {
+                        app.settings.robot_folders.remove(i);
+                    }
+                    if app.settings.robot_folders.is_empty() {
+                        ui.label("Robot folders");
+                        ui.label(RichText::new("None yet: add a folder with robot jars.").weak());
+                        ui.end_row();
+                    }
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut app.new_folder)
+                                .hint_text("a folder with robot jars, e.g. ~/robocode/robots")
+                                .desired_width(420.0),
+                        );
+                        let enter =
+                            field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let text = app.new_folder.trim();
+                        let add = ui.add_enabled(!text.is_empty(), egui::Button::new("Add"));
+                        if (add.clicked() || enter) && !text.is_empty() {
+                            let folder = expand_home(text);
+                            if !app.settings.robot_folders.contains(&folder) {
+                                app.settings.robot_folders.push(folder);
+                            }
+                            app.new_folder.clear();
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Found");
+                    ui.horizontal(|ui| {
+                        let robots = match &app.available {
+                            None => "listing robots…".to_string(),
+                            Some(Ok(robots)) => format!("{} robots", robots.len()),
+                            Some(Err(_)) => "the robots couldn't be listed".to_string(),
+                        };
+                        ui.label(format!("{} jars, {robots}", app.env.jars.len()));
+                        if app.listing.is_some() {
+                            ui.spinner();
+                        }
+                        if ui
+                            .button("Rescan")
+                            .on_hover_text("Look for new jars in the folders")
+                            .clicked()
+                        {
+                            rescan = true;
+                        }
+                    });
+                    ui.end_row();
+                    if let Some(Err(e)) = &app.available {
+                        ui.label("");
+                        ui.colored_label(Color32::LIGHT_RED, e);
+                        ui.end_row();
+                    }
+                    if !app.env_jars.is_empty() {
+                        ui.label("Also");
+                        ui.label(
+                            RichText::new(format!(
+                                "{} jars from ROBOCODES_ROBOT_JARS",
+                                app.env_jars.len()
+                            ))
+                            .weak(),
+                        );
+                        ui.end_row();
+                    }
+                });
+
+            section(ui, "Battlefield");
+            let s = &mut app.settings;
+            egui::Grid::new("view-options")
+                .num_columns(2)
+                .min_col_width(LABELS)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Scan arcs");
+                    ui.checkbox(&mut s.scan_arcs, "Show each robot's radar sweep");
+                    ui.end_row();
+                    ui.label("Coloured bullets");
+                    ui.checkbox(
+                        &mut s.colored_bullets,
+                        "Bullets in their robot's bullet colour",
+                    );
+                    ui.end_row();
+                });
+
+            section(ui, "New battles");
+            egui::Grid::new("battle-defaults")
+                .num_columns(2)
+                .min_col_width(LABELS)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Mode");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut s.classic, false, "Deterministic");
+                        ui.radio_value(&mut s.classic, true, "Classic timing");
+                    });
+                    ui.end_row();
+                    ui.label("Rounds");
+                    ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
+                    ui.end_row();
+                    ui.label("Battlefield size");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut s.width).range(400..=5000));
+                        ui.label("×");
+                        ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
+                    });
+                    ui.end_row();
+                });
+
+            if let Some(e) = &app.settings_error {
+                ui.add_space(12.0);
+                ui.colored_label(
+                    Color32::LIGHT_RED,
+                    format!("Couldn't save the options: {e}"),
+                );
+            }
         });
+        if self.settings != before {
+            self.settings_changed(ctx, &before);
+        } else if rescan {
+            self.rescan(ctx);
+        }
+    }
+
+    /// Saves the options and applies them: new robot folders are scanned, and new
+    /// defaults go into the battle setup.
+    fn settings_changed(&mut self, ctx: &egui::Context, before: &Settings) {
+        self.settings_error = self.settings.save().err();
+        let (s, setup) = (&self.settings, &mut self.setup);
+        if s.classic != before.classic {
+            setup.classic = s.classic;
+        }
+        if s.rounds != before.rounds {
+            setup.rounds = s.rounds;
+        }
+        if (s.width, s.height) != (before.width, before.height) {
+            (setup.width, setup.height) = (s.width, s.height);
+        }
+        if s.robot_folders != before.robot_folders {
+            self.rescan(ctx);
+        }
     }
 
     /// The Start Battle tab with a battle: controls, robots, console and the battlefield.
@@ -418,6 +662,7 @@ impl App {
     fn live_ui(&mut self, root: &mut egui::Ui) -> bool {
         let ctx = &root.ctx().clone();
         let mut back = false;
+        let style = self.style();
         let Some(live) = &mut self.live else {
             return true;
         };
@@ -496,7 +741,8 @@ impl App {
                     ui,
                     &mut self.sprites,
                     &field,
-                    live.latest.as_ref(),
+                    style,
+                    (live.previous.as_ref(), live.latest.as_ref()),
                     ui.max_rect(),
                 );
             });
@@ -513,6 +759,38 @@ impl App {
             None => {}
         }
         back
+    }
+}
+
+/// The width of the label column on the options page.
+const LABELS: f32 = 150.0;
+
+/// A section heading on a page: a title over a line.
+fn section(ui: &mut egui::Ui, title: &str) {
+    ui.add_space(20.0);
+    ui.label(
+        RichText::new(title.to_uppercase())
+            .size(13.0)
+            .strong()
+            .color(shell::ACCENT),
+    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 9.0), egui::Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        egui::Stroke::new(1.0, shell::LINE),
+    );
+}
+
+/// A typed folder: `~` at the start is the home directory.
+fn expand_home(text: &str) -> PathBuf {
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    match (text.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
+            PathBuf::from(home).join(rest.trim_start_matches(['/', '\\']))
+        }
+        _ => PathBuf::from(text),
     }
 }
 
@@ -614,6 +892,8 @@ impl eframe::App for App {
         let ctx = &root.ctx().clone();
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
         shell::footer(root);
+        self.poll_listing();
+        let style = self.style();
         // A battle keeps running in its tab while another one is open.
         if let Some(live) = &mut self.live {
             live.poll();
@@ -627,7 +907,7 @@ impl eframe::App for App {
             Tab::Start => self.start_page(root),
             Tab::Replay => match &mut self.replay {
                 Some(replay) => {
-                    if replay.ui(root, &mut self.sprites, &mut self.selected) {
+                    if replay.ui(root, &mut self.sprites, style, &mut self.selected) {
                         self.replay = None;
                     }
                 }

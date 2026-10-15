@@ -8,13 +8,16 @@ mod backdrop;
 mod icons;
 mod live;
 mod replay;
+mod settings;
 mod shell;
 mod sprites;
 mod view;
 mod window;
 
-use app::{App, Screenshot, Setup};
+use app::{App, Launch, Screenshot, Setup};
 use robocode_s_runner::local::Environment;
+use settings::Settings;
+use shell::Tab;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -23,11 +26,15 @@ usage: robocode-s-gui [recording]
        robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
 
 Without arguments: the battle setup. With a recording: its replay.
-Paths come from ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR,
-ROBOCODES_DATA and ROBOCODES_ROBOT_JARS, as for `robocode-s battle`.
-ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window frame on or off (default:
-on under WSLg, whose compositor crashes on the system's frame).
+Robots come from the robot folders set in the options (the gear), saved in
+$XDG_CONFIG_HOME/robocode-s/gui.json (~/.config/... by default; another file
+with ROBOCODES_GUI_CONFIG), and from the jars in ROBOCODES_ROBOT_JARS (a path list). The other paths come from
+ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
+for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
+frame on or off (default: on under WSLg, whose compositor crashes on the
+system's frame).
 
+  --tab NAME         open a tab at start: start, replay or options
   --size WxH         the window's size in points (default 1200x860)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round, otherwise after --after frames (default 120)
@@ -41,8 +48,10 @@ fn parse_size(text: &str) -> Option<[f32; 2]> {
 }
 
 fn main() -> ExitCode {
-    let mut setup = Setup::default();
+    let settings = Settings::load();
+    let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);
+    let mut tab = None;
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -59,6 +68,14 @@ fn main() -> ExitCode {
             "--record" => setup.record = value(),
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
+            "--tab" => {
+                let name = value();
+                let Some(t) = Tab::parse(&name) else {
+                    eprint!("--tab wants start, replay or options, not {name:?}\n\n{USAGE}");
+                    return ExitCode::from(2);
+                };
+                tab = Some(t);
+            }
             "--size" => {
                 let text = value();
                 let Some(s) = parse_size(&text) else {
@@ -92,12 +109,17 @@ fn main() -> ExitCode {
         "robocode-s",
         options,
         Box::new(move |cc| {
-            Ok(Box::new(App::new(
-                cc,
-                Environment::from_env(),
+            let launch = Launch {
                 setup,
                 start,
                 replay,
+                tab,
+            };
+            Ok(Box::new(App::new(
+                cc,
+                Environment::from_env(),
+                settings,
+                launch,
                 screenshot,
                 own_frame,
             )))

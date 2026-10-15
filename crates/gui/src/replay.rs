@@ -5,7 +5,7 @@
 //! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many.
 
 use crate::sprites::Sprites;
-use crate::view::{self, Field};
+use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
 use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
@@ -35,6 +35,8 @@ pub struct ReplayView {
     position: usize,
     cursor: Replay,
     current: Option<v1::TurnSnapshot>,
+    /// The turn before the shown one, for the scan arcs.
+    previous: Option<v1::TurnSnapshot>,
     playing: bool,
     turns_per_second: f64,
     last_tick: Option<Instant>,
@@ -96,6 +98,7 @@ impl ReplayView {
             results,
             position: 0,
             current: None,
+            previous: None,
             playing: true,
             turns_per_second: 30.0,
             last_tick: None,
@@ -110,12 +113,20 @@ impl ReplayView {
             return;
         }
         let index = index.min(self.turns - 1);
-        let resume_here = self.current.is_some() && index == self.position + 1;
-        if !resume_here {
-            self.cursor = self.keyframes[index / KEYFRAME].clone();
-            for _ in 0..index % KEYFRAME {
+        if self.current.is_some() && index == self.position + 1 {
+            self.previous = self.current.take();
+        } else {
+            // From the keyframe before the turn before, so that turn is known as well.
+            let before = index.saturating_sub(1);
+            self.cursor = self.keyframes[before / KEYFRAME].clone();
+            for _ in 0..before % KEYFRAME {
                 next_snapshot(&mut self.cursor);
             }
+            self.previous = if index > 0 {
+                next_snapshot(&mut self.cursor).map(|(s, _)| s)
+            } else {
+                None
+            };
         }
         self.current = next_snapshot(&mut self.cursor).map(|(s, _)| s);
         self.position = index;
@@ -156,7 +167,13 @@ impl ReplayView {
     }
 
     /// Draws the replay; true when the user closes it.
-    pub fn ui(&mut self, root: &mut egui::Ui, sprites: &mut Sprites, selected: &mut usize) -> bool {
+    pub fn ui(
+        &mut self,
+        root: &mut egui::Ui,
+        sprites: &mut Sprites,
+        style: Style,
+        selected: &mut usize,
+    ) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
         let mut back = false;
@@ -279,7 +296,8 @@ impl ReplayView {
                     height: self.height,
                     robots: &self.robots,
                 };
-                view::draw(ui, sprites, &field, shown.as_ref(), ui.max_rect());
+                let turns = (self.previous.as_ref(), shown.as_ref());
+                view::draw(ui, sprites, &field, style, turns, ui.max_rect());
             });
         if self.position + 1 >= self.turns {
             egui::Window::new("Results")

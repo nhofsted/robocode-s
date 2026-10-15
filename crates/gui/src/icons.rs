@@ -31,6 +31,14 @@ pub fn gear(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) 
     }
 }
 
+/// A cross (remove, close): two strokes, `radius` from the centre to each end.
+pub fn cross(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new((radius * 0.35).max(1.5), color);
+    let (a, b) = (vec2(radius, radius), vec2(radius, -radius));
+    painter.line_segment([center - a, center + a], stroke);
+    painter.line_segment([center - b, center + b], stroke);
+}
+
 /// A square, borderless button showing an icon; brighter when hovered.
 pub fn button(
     ui: &mut egui::Ui,
