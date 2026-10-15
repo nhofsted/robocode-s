@@ -208,7 +208,8 @@ pub fn round_result(battle: &Battle) -> v1::RoundResult {
         results: battle
             .robots
             .iter()
-            .map(|r| convert::results(&r.setup.name, &r.stats.final_results()))
+            .zip(battle.results())
+            .map(|(r, results)| convert::results(&r.setup.name, &results))
             .collect(),
     }
 }

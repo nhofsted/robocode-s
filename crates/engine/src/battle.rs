@@ -6,7 +6,7 @@
 //! Every random draw happens in classic's order (engine-spec §3).
 
 use crate::commands::{Commands, TeamMessage};
-use crate::events::{BulletInfo, Event};
+use crate::events::{BulletInfo, Event, Results};
 use crate::java;
 use crate::rules::*;
 use crate::stats::Statistics;
@@ -698,6 +698,8 @@ pub struct Battle {
     active_sentries: i32,
     death_robots: Vec<usize>,
     pub aborted: bool,
+    /// The results when the battle was aborted (see [`Battle::results`]).
+    results_at_abort: Option<Vec<Results>>,
     /// Members of each team, in robot index order (the first is the leader).
     teams: Vec<Vec<usize>>,
     contestants: Vec<Contestant>,
@@ -740,6 +742,7 @@ impl Battle {
             active_sentries: 0,
             death_robots: Vec::new(),
             aborted: false,
+            results_at_abort: None,
             teams,
             contestants,
             next_key: 0,
@@ -871,6 +874,19 @@ impl Battle {
         self.end_timer > 5 * TURNS_DISPLAYED_AFTER_ENDING
     }
 
+    /// Each robot's results so far: the completed rounds, or for an aborted battle the
+    /// results at the abort, ranked.
+    pub fn results(&self) -> Vec<Results> {
+        match &self.results_at_abort {
+            Some(results) => results.clone(),
+            None => self
+                .robots
+                .iter()
+                .map(|r| r.stats.final_results())
+                .collect(),
+        }
+    }
+
     pub fn is_last_round(&self) -> bool {
         self.round + 1 == self.rules.num_rounds
     }
@@ -946,6 +962,13 @@ impl Battle {
     /// The robot's thread ended: it no longer executes, its last commands stay in effect.
     pub fn stop(&mut self, i: usize) {
         self.robots[i].running = false;
+    }
+
+    /// The battle is stopped (classic's `AbortCommand`): from the next turn every robot
+    /// loses 5 energy a turn and its thread stops, the round runs out, and robots get a
+    /// `BattleEndedEvent` with `aborted` set.
+    pub fn abort(&mut self) {
+        self.aborted = true;
     }
 
     /// Takes the events generated for a robot since the last call.
@@ -1840,6 +1863,18 @@ impl Battle {
                     let aborted = self.aborted;
                     self.robots[i].add_event(Event::BattleEnded { aborted, results });
                 }
+            }
+            if self.aborted {
+                // Not in classic, which reports no results for an aborted battle: the
+                // results so far, with the aborted round up to here, so they match the
+                // ranks just given (`compare` counted the round's scores too). Robots that
+                // die of the abort's energy loss later don't change them.
+                for r in &mut self.robots {
+                    let sentry = r.setup.sentry;
+                    r.stats.generate_totals(sentry);
+                }
+                let results = self.robots.iter().map(|r| r.stats.final_results());
+                self.results_at_abort = Some(results.collect());
             }
         }
         if self.end_timer > 4 * TURNS_DISPLAYED_AFTER_ENDING {

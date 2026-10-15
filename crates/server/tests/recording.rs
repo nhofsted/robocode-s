@@ -6,8 +6,9 @@ use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::recording::{Frame, Recording};
-use robocode_s_server::{RobotEntry, ServerConfig, run_battle};
+use robocode_s_server::{BattleOutcome, RobotEntry, ServerConfig, run_battle};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::thread;
 
 fn entry(name: &str, token: &str) -> RobotEntry {
@@ -117,11 +118,11 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
     })
 }
 
-#[test]
-fn a_recorded_battle_replays_exactly() {
-    let dir = std::env::temp_dir().join(format!("robocodes-recording-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("battle.rsr");
+/// Fights a recorded battle of three rounds between two scripted robots, with robot a's
+/// debug paint on; an observer stops it at `stop` (round, turn) if given. Returns the
+/// outcome and what the observer saw.
+fn fight(path: &Path, stop: Option<(i32, i64)>) -> (BattleOutcome, Vec<Frame>) {
+    let path = path.to_path_buf();
     let config = ServerConfig {
         rules: BattleRules {
             num_rounds: 3,
@@ -131,7 +132,7 @@ fn a_recorded_battle_replays_exactly() {
         },
         seed: 7,
         deterministic: true,
-        record: Some(path.clone()),
+        record: Some(path),
         ..Default::default()
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -154,10 +155,20 @@ fn a_recorded_battle_replays_exactly() {
         let mut frames = Vec::new();
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {
             match message.msg {
-                Some(server_message::Msg::TurnSnapshot(snapshot)) => frames.push(Frame::Snapshot {
-                    snapshot,
-                    verified: true,
-                }),
+                Some(server_message::Msg::TurnSnapshot(snapshot)) => {
+                    if stop == Some((snapshot.round, snapshot.turn)) {
+                        let abort = v1::ClientMessage {
+                            msg: Some(client_message::Msg::ObserverControl(v1::ObserverControl {
+                                control: Some(v1::observer_control::Control::Abort(true)),
+                            })),
+                        };
+                        write_message(&mut observer, &abort).unwrap();
+                    }
+                    frames.push(Frame::Snapshot {
+                        snapshot,
+                        verified: true,
+                    });
+                }
                 Some(server_message::Msg::RoundResult(r)) => frames.push(Frame::RoundOver(r)),
                 _ => {}
             }
@@ -170,13 +181,40 @@ fn a_recorded_battle_replays_exactly() {
     let seen = watcher.join().unwrap();
     a.join().unwrap();
     b.join().unwrap();
+    (outcome, seen)
+}
 
-    let recording = Recording::read(&path).unwrap();
+/// Replays the recording at `path`: it must give exactly the frames `seen`, and end with
+/// the battle's results.
+fn check_replay(path: &Path, outcome: &BattleOutcome, seen: &[Frame]) {
+    let recording = Recording::read(path).unwrap();
     assert_eq!(recording.header.seed, 7);
     assert_eq!(recording.header.robots.len(), 2);
     let mut replay = recording.replay();
     let replayed: Vec<Frame> = replay.by_ref().collect();
     assert!(replay.is_done());
+    assert_eq!(replayed.len(), seen.len());
+    for (i, (r, s)) in replayed.iter().zip(seen).enumerate() {
+        assert_eq!(r, s, "frame {i} differs");
+    }
+    let final_results = robocode_s_server::recording::round_result(replay.battle()).results;
+    assert_eq!(final_results, outcome.results);
+}
+
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("robocodes-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn a_recorded_battle_replays_exactly() {
+    let dir = temp_dir("recording");
+    let path = dir.join("battle.rsr");
+    let (outcome, seen) = fight(&path, None);
+    check_replay(&path, &outcome, &seen);
+    assert!(!outcome.aborted);
+    assert_eq!(outcome.rounds, 3);
     assert!(seen.len() > 100, "{} frames seen", seen.len());
     assert!(
         seen.iter()
@@ -190,11 +228,39 @@ fn a_recorded_battle_replays_exactly() {
         !seen.iter().any(|f| painted(f, 1)),
         "robot b painted unasked"
     );
-    assert_eq!(replayed.len(), seen.len());
-    for (i, (r, s)) in replayed.iter().zip(&seen).enumerate() {
-        assert_eq!(r, s, "frame {i} differs");
-    }
-    let final_results = robocode_s_server::recording::round_result(replay.battle()).results;
-    assert_eq!(final_results, outcome.results);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stopped_battle_replays_exactly_with_the_results_so_far() {
+    let dir = temp_dir("stopped");
+    let path = dir.join("battle.rsr");
+    let (outcome, seen) = fight(&path, Some((1, 400)));
+    check_replay(&path, &outcome, &seen);
+    assert!(outcome.aborted);
+    assert_eq!(outcome.rounds, 2);
+    let last = seen.iter().rev().find_map(|f| match f {
+        Frame::Snapshot { snapshot, .. } => Some((snapshot.round, snapshot.turn)),
+        Frame::RoundOver(_) => None,
+    });
+    assert!(matches!(last, Some((1, turn)) if turn > 400), "{last:?}");
+    // Ranked, and the stopped round counts: the scores are more than the first round's.
+    let first_round = seen.iter().find_map(|f| match f {
+        Frame::RoundOver(r) => Some(r.results.clone()),
+        Frame::Snapshot { .. } => None,
+    });
+    let first_round = first_round.unwrap();
+    let mut ranks: Vec<i32> = outcome.results.iter().map(|r| r.rank).collect();
+    ranks.sort();
+    assert_eq!(ranks, [1, 2]);
+    let score = |r: &v1::Results| r.score.unwrap_or_default();
+    let total = |rs: &[v1::Results]| rs.iter().map(score).sum::<f64>();
+    assert!(
+        total(&outcome.results) > total(&first_round),
+        "{:?} {first_round:?}",
+        outcome.results
+    );
+    let best = outcome.results.iter().find(|r| r.rank == 1).unwrap();
+    assert!(outcome.results.iter().all(|r| score(r) <= score(best)));
     let _ = std::fs::remove_dir_all(&dir);
 }

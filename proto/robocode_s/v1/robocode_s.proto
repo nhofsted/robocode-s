@@ -596,6 +596,10 @@ message ObserverControl {
     bool step = 2;   // one turn while paused
     uint32 turns_per_second = 3;  // 0: as fast as possible
     PaintToggle paint = 4;
+    // Stop the battle (classic's stop): the engine aborts, the round runs out without
+    // pauses or pacing, no further rounds start, and the battle ends with the results so
+    // far (the aborted round counts up to the abort).
+    bool abort = 5;
   }
 }
 
@@ -628,6 +632,8 @@ message RecordingEntry {
     int32 disable = 8;
     int32 stop = 9;
     RecordedSnapshot snapshot = 10;
+    // An observer stopped the battle (ObserverControl.abort), before the next step.
+    bool abort = 11;
   }
 }
 

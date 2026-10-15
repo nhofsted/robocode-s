@@ -77,7 +77,10 @@ pub struct RobotEntry {
 pub struct BattleOutcome {
     /// Final results per robot, by robot index.
     pub results: Vec<v1::Results>,
+    /// Rounds fought: all of them, or up to the one an observer stopped.
     pub rounds: i32,
+    /// An observer stopped the battle (`ObserverControl.abort`).
+    pub aborted: bool,
 }
 
 /// Something the battle loop must handle.
@@ -262,6 +265,8 @@ struct BattleLoop<'a> {
     paused: bool,
     steps: u32,
     turns_per_second: u32,
+    /// An observer stopped the battle; the engine aborts before its next step.
+    abort: bool,
 }
 
 impl<'a> BattleLoop<'a> {
@@ -302,19 +307,24 @@ impl<'a> BattleLoop<'a> {
             paused: false,
             steps: 0,
             turns_per_second: 0,
+            abort: false,
         })
     }
 
     fn run(mut self) -> io::Result<BattleOutcome> {
         self.await_robots();
-        for _ in 0..self.config.rules.num_rounds {
+        let mut rounds = 0;
+        // As classic: no round starts after a stop.
+        while rounds < self.config.rules.num_rounds && !self.abort {
             self.run_round();
             self.engine.input(Entry::FinishRound(true));
+            rounds += 1;
         }
+        let aborted = self.abort;
         for i in 0..self.links.len() {
             self.send(
                 i,
-                server_message::Msg::BattleOver(v1::BattleOver { aborted: false }),
+                server_message::Msg::BattleOver(v1::BattleOver { aborted }),
             );
         }
         let results = recording::round_result(self.battle()).results;
@@ -331,14 +341,15 @@ impl<'a> BattleLoop<'a> {
         self.engine.finish()?;
         Ok(BattleOutcome {
             results,
-            rounds: self.config.rules.num_rounds,
+            rounds,
+            aborted,
         })
     }
 
     /// Waits until every robot connected, or the connect timeout passed.
     fn await_robots(&mut self) {
         let deadline = Instant::now() + self.config.connect_timeout;
-        while self.links.iter().any(|l| l.stream.is_none()) {
+        while self.links.iter().any(|l| l.stream.is_none()) && !self.abort {
             let Some(left) = deadline.checked_duration_since(Instant::now()) else {
                 return;
             };
@@ -388,6 +399,9 @@ impl<'a> BattleLoop<'a> {
         self.collect_executes();
         self.snapshot_with(false);
         loop {
+            if self.abort && !self.battle().aborted {
+                self.engine.input(Entry::Abort(true));
+            }
             self.engine.input(Entry::Step(true));
             self.deliver();
             // As classic (`runTurn` ends with `wakeupRobots`, then `finalizeTurn` publishes):
@@ -421,24 +435,32 @@ impl<'a> BattleLoop<'a> {
 
     /// Waits for the `Execute`s of this turn (engine-spec §11.3).
     fn collect_executes(&mut self) {
-        let timeout = if self.config.deterministic {
+        let timeout = if self.abort {
+            // Stopped: robots that are slow to answer skip the turn, in either mode.
+            self.config.turn_timeout.min(self.config.hard_limit)
+        } else if self.config.deterministic {
             self.config.hard_limit
         } else if self.battle().time == 0 {
             self.config.start_timeout
         } else {
             self.config.turn_timeout
         };
-        let deadline = Instant::now() + timeout;
+        let mut deadline = Instant::now() + timeout;
         while (0..self.links.len()).any(|i| self.expecting(i)) {
             let Some(left) = deadline.checked_duration_since(Instant::now()) else {
                 break;
             };
             match self.rx.recv_timeout(left) {
-                Ok(incoming) => self.handle(incoming),
+                Ok(incoming) => {
+                    self.handle(incoming);
+                    if self.abort {
+                        deadline = deadline.min(Instant::now() + self.config.turn_timeout);
+                    }
+                }
                 Err(_) => break,
             }
         }
-        if self.config.deterministic {
+        if self.config.deterministic && !self.abort {
             // Too slow for the hard limit: disabled.
             for i in 0..self.links.len() {
                 if self.expecting(i) {
@@ -552,6 +574,7 @@ impl<'a> BattleLoop<'a> {
             Some(v1::observer_control::Control::Pause(pause)) => self.paused = pause,
             Some(v1::observer_control::Control::Step(true)) => self.steps += 1,
             Some(v1::observer_control::Control::TurnsPerSecond(tps)) => self.turns_per_second = tps,
+            Some(v1::observer_control::Control::Abort(true)) => self.abort = true,
             Some(v1::observer_control::Control::Paint(toggle)) => {
                 if let Some(link) = usize::try_from(toggle.robot_index)
                     .ok()
@@ -675,9 +698,13 @@ impl<'a> BattleLoop<'a> {
         self.broadcast(server_message::Msg::TurnSnapshot(snapshot));
     }
 
-    /// Observer pacing: pause, single steps and a turn rate.
+    /// Observer pacing: pause, single steps and a turn rate. A stopped battle runs out its
+    /// round at full speed (classic neither pauses nor delays an aborted battle).
     fn pace(&mut self) {
-        while self.paused && self.steps == 0 && !self.observers.is_empty() {
+        if self.abort {
+            return;
+        }
+        while self.paused && self.steps == 0 && !self.observers.is_empty() && !self.abort {
             match self.rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(incoming) => self.handle(incoming),
                 Err(RecvTimeoutError::Timeout) => {}

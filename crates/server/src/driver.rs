@@ -85,6 +85,7 @@ impl Driver {
                     self.battle.stop(i);
                 }
             }
+            Entry::Abort(_) => self.battle.abort(),
             Entry::Header(_) | Entry::Snapshot(_) => {}
         }
     }
