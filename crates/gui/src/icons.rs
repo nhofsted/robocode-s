@@ -137,6 +137,26 @@ pub fn pencil(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32
     ));
 }
 
+/// Browse: a folder with its tab on the top left.
+pub fn folder(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let (w, h) = (radius * 1.1, radius * 0.75);
+    let (l, r, t, b) = (center.x - w, center.x + w, center.y - h * 0.7, center.y + h);
+    let tab = radius * 0.35;
+    let stroke = Stroke::new(1.5, color);
+    painter.add(Shape::closed_line(
+        vec![
+            egui::pos2(l, t - tab),
+            egui::pos2(l + w * 0.7, t - tab),
+            egui::pos2(l + w * 0.7 + tab, t),
+            egui::pos2(r, t),
+            egui::pos2(r, b),
+            egui::pos2(l, b),
+        ],
+        stroke,
+    ));
+    painter.line_segment([egui::pos2(l, t + tab), egui::pos2(r, t + tab)], stroke);
+}
+
 /// A square, borderless button showing an icon; brighter when hovered, dimmed when the
 /// `ui` is disabled.
 pub fn button(
