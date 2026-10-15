@@ -11,7 +11,6 @@ use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
 use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
-use robocode_s_server::results::contestants;
 use std::borrow::Cow;
 use std::path::Path;
 use std::time::Instant;
@@ -47,6 +46,8 @@ pub struct ReplayView {
     turns_per_second: u32,
     last_tick: Option<Instant>,
     paint_visible: Vec<bool>,
+    /// The results window was closed at the last turn; it shows again there after a seek.
+    results_closed: bool,
 }
 
 /// The next snapshot of a replay, skipping round ends.
@@ -108,6 +109,7 @@ impl ReplayView {
             playing: true,
             turns_per_second: 30,
             last_tick: None,
+            results_closed: false,
         };
         view.seek(0);
         Ok(view)
@@ -318,21 +320,36 @@ impl ReplayView {
                 let turns = (self.previous.as_ref(), shown.as_ref());
                 view::draw(ui, sprites, &field, style, turns, ui.max_rect());
             });
-        if self.position + 1 >= self.turns {
-            egui::Window::new("Results")
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    egui::Grid::new("replay-results")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for c in contestants(&self.robots, &self.results) {
-                                ui.label(c.rank.to_string());
-                                ui.label(&c.name);
-                                ui.label(format!("{:.0}", c.score));
-                                ui.end_row();
-                            }
-                        });
-                });
+        let at_end = self.turns > 0 && self.position + 1 >= self.turns;
+        if !at_end {
+            self.results_closed = false;
+        } else if !self.results_closed {
+            let shown = screen::Outcome {
+                title: "Results",
+                robots: &self.robots,
+                results: &self.results,
+                snapshot: self.current.as_ref(),
+                stopped: false,
+            };
+            let id = egui::Id::new(("replay-results", &self.title));
+            let mut again = false;
+            screen::results_window(ctx, sprites, id, &shown, |ui| {
+                if ui.button("Close").clicked() {
+                    self.results_closed = true;
+                }
+                let button = egui::Button::new(RichText::new("Watch Again").strong());
+                if ui
+                    .add(button)
+                    .on_hover_text("The replay from its first turn.")
+                    .clicked()
+                {
+                    again = true;
+                }
+            });
+            if again {
+                self.seek(0);
+                self.playing = true;
+            }
         }
         back
     }

@@ -9,9 +9,11 @@
 
 use crate::icons;
 use crate::shell;
+use crate::sprites::{Part, Sprites, default_colors};
 use crate::view;
 use eframe::egui::{self, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use robocode_s_protocol::v1;
+use robocode_s_server::results::{COLUMNS, Contestant, cells, contestants, round};
 use std::borrow::Cow;
 
 /// The size of a control's icon button.
@@ -462,6 +464,176 @@ pub fn speed_slider(ui: &mut egui::Ui, turns_per_second: &mut u32) -> bool {
 pub fn info(ui: &mut egui::Ui, label: &str, value: impl Into<String>) {
     ui.label(RichText::new(value.into()).strong());
     ui.label(RichText::new(label).weak());
+}
+
+/// The results at the end of a battle, live or replayed: what the results window shows.
+pub struct Outcome<'a> {
+    /// The window's title.
+    pub title: &'a str,
+    pub robots: &'a [v1::RobotStatics],
+    pub results: &'a [v1::Results],
+    /// The last turn, for the robots' own colours.
+    pub snapshot: Option<&'a v1::TurnSnapshot>,
+    /// Stopped before its end: the first is leading rather than the winner.
+    pub stopped: bool,
+}
+
+/// The results window, centred when it opens (once per `id`): the winner on the left (its
+/// tank in its colours, its name), classic's results table on the right, and `buttons`
+/// below, right-aligned (add them right to left).
+pub fn results_window(
+    ctx: &egui::Context,
+    sprites: &mut Sprites,
+    id: egui::Id,
+    outcome: &Outcome,
+    buttons: impl FnOnce(&mut egui::Ui),
+) {
+    let rows = contestants(outcome.robots, outcome.results);
+    let screen = ctx.content_rect();
+    egui::Window::new(outcome.title)
+        .id(id)
+        .collapsible(false)
+        .resizable(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(screen.center())
+        .max_width(screen.width() - 40.0)
+        .show(ctx, |ui| {
+            ui.horizontal_top(|ui| {
+                let left = winner(ui, sprites, outcome, &rows);
+                ui.add_space(GAP);
+                // The table as wide as it was last time; narrow windows scroll it.
+                let measured = id.with("table-width");
+                let wanted = ui.data(|d| d.get_temp::<f32>(measured)).unwrap_or(600.0);
+                let room = ui.ctx().content_rect().width() - 80.0 - WINNER - GAP;
+                let shown = egui::ScrollArea::horizontal()
+                    .min_scrolled_width(wanted.min(room).max(120.0))
+                    .show(ui, |ui| table(ui, &rows));
+                ui.data_mut(|d| d.insert_temp(measured, shown.content_size.x));
+                let bottom = shown.inner_rect.top() + shown.content_size.y;
+                let x = left.right() + GAP / 2.0;
+                let y = left.top()..=left.bottom().max(bottom);
+                ui.painter().vline(x, y, Stroke::new(1.0, shell::LINE));
+            });
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(2.0);
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 28.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+                    buttons(ui);
+                },
+            );
+        });
+}
+
+/// The width of the winner's column in the results window.
+const WINNER: f32 = 150.0;
+/// The space between the winner and the table, with a line in its middle.
+const GAP: f32 = 24.0;
+
+/// The results window's left side: the winner, the contestants tied for first, the one
+/// leading a stopped battle, or nobody when no one scored.
+fn winner(
+    ui: &mut egui::Ui,
+    sprites: &mut Sprites,
+    outcome: &Outcome,
+    rows: &[Contestant],
+) -> Rect {
+    let best = rows.first().map_or(0, |c| round(c.score));
+    let first: Vec<&Contestant> = rows
+        .iter()
+        .take_while(|c| best > 0 && round(c.score) == best)
+        .collect();
+    let heading = match (first.len(), outcome.stopped) {
+        (0, _) => "No winner",
+        (1, false) => "Winner",
+        (1, true) => "Leading",
+        (_, false) => "Tied for first",
+        (_, true) => "Tied in the lead",
+    };
+    ui.vertical(|ui| {
+        ui.set_width(WINNER);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new(heading.to_uppercase())
+                    .size(13.0)
+                    .strong()
+                    .color(shell::ACCENT),
+            );
+            if first.is_empty() {
+                ui.add_space(8.0);
+                ui.label(RichText::new("Nobody scored.").weak());
+            }
+            for c in first.iter().take(3) {
+                tank(ui, sprites, outcome, &c.name);
+                ui.add(egui::Label::new(RichText::new(&c.name).strong().size(15.0)).truncate());
+                ui.label(RichText::new(format!("{} points", round(c.score))).weak());
+                ui.add_space(4.0);
+            }
+            if first.len() > 3 {
+                ui.label(RichText::new(format!("and {} more", first.len() - 3)).weak());
+            }
+        });
+    })
+    .response
+    .rect
+}
+
+/// A contestant's tank in its colours as of the last turn (a team: its first member's).
+fn tank(ui: &mut egui::Ui, sprites: &mut Sprites, outcome: &Outcome, name: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(72.0, 72.0), Sense::hover());
+    let index = outcome
+        .robots
+        .iter()
+        .position(|r| r.team_name.as_deref().unwrap_or(&r.name) == name);
+    let colors = match index {
+        Some(i) => {
+            let statics = &outcome.robots[i];
+            match outcome.snapshot.and_then(|s| s.robots.get(i)) {
+                Some(snapshot) => view::colors(statics, snapshot).0,
+                None => default_colors(&statics.full_class_name),
+            }
+        }
+        None => default_colors(name),
+    };
+    let ctx = ui.ctx().clone();
+    for (part, color) in [Part::Body, Part::Gun, Part::Radar].into_iter().zip(colors) {
+        let (texture, size) = sprites.tank(&ctx, part, color);
+        let shape = view::sprite(texture, rect.center(), size * 1.7, 0.0, Color32::WHITE);
+        ui.painter().add(shape);
+    }
+}
+
+/// Classic's results table: names left-aligned, numbers right-aligned.
+fn table(ui: &mut egui::Ui, rows: &[Contestant]) {
+    egui::Grid::new("results-table")
+        .striped(true)
+        .spacing(vec2(14.0, 6.0))
+        .show(ui, |ui| {
+            for (col, h) in COLUMNS.iter().enumerate() {
+                cell(ui, col, RichText::new(*h).strong());
+            }
+            ui.end_row();
+            for row in cells(rows) {
+                for (col, text) in row.into_iter().enumerate() {
+                    cell(ui, col, RichText::new(text));
+                }
+                ui.end_row();
+            }
+        });
+}
+
+/// A cell of the results table: the robot's name left-aligned, the rest right-aligned.
+fn cell(ui: &mut egui::Ui, col: usize, text: RichText) {
+    if col == 1 {
+        ui.label(text);
+    } else {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(text)
+        });
+    }
 }
 
 #[cfg(test)]

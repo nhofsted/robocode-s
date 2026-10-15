@@ -2,65 +2,16 @@
 
 //! The results table, as classic shows it, and as JSON.
 
+#[cfg(test)]
+use robocode_s_server::results::ordinal;
+use robocode_s_server::results::{COLUMNS, cells};
 pub use robocode_s_server::results::{Contestant, contestants};
-
-/// Classic's ordinal: 1st, 2nd, 3rd, 4th, ..., 11th, 12th, 13th, 21st.
-fn ordinal(n: usize) -> String {
-    let suffix = match (n % 10, n % 100) {
-        (_, 11..=13) => "th",
-        (1, _) => "st",
-        (2, _) => "nd",
-        (3, _) => "rd",
-        _ => "th",
-    };
-    format!("{n}{suffix}")
-}
-
-/// Classic rounds results for display: `(int) (value + 0.5)`.
-fn round(v: f64) -> i64 {
-    (v + 0.5) as i64
-}
 
 /// The results table with classic's columns.
 pub fn table(rows: &[Contestant]) -> String {
-    let total: f64 = rows.iter().map(|c| c.score).sum();
-    let header = [
-        "Rank",
-        "Robot Name",
-        "Total Score",
-        "Survival",
-        "Surv Bonus",
-        "Bullet Dmg",
-        "Bullet Bonus",
-        "Ram Dmg * 2",
-        "Ram Bonus",
-        "1sts",
-        "2nds",
-        "3rds",
-    ];
-    let mut lines: Vec<Vec<String>> = vec![header.iter().map(|h| h.to_string()).collect()];
-    for c in rows {
-        let percent = if total > 0.0 {
-            round(100.0 * c.score / total)
-        } else {
-            0
-        };
-        lines.push(vec![
-            ordinal(c.rank),
-            c.name.clone(),
-            format!("{} ({percent}%)", round(c.score)),
-            round(c.survival).to_string(),
-            round(c.last_survivor_bonus).to_string(),
-            round(c.bullet_damage).to_string(),
-            round(c.bullet_damage_bonus).to_string(),
-            round(c.ram_damage).to_string(),
-            round(c.ram_damage_bonus).to_string(),
-            c.firsts.to_string(),
-            c.seconds.to_string(),
-            c.thirds.to_string(),
-        ]);
-    }
-    let widths: Vec<usize> = (0..header.len())
+    let mut lines: Vec<Vec<String>> = vec![COLUMNS.iter().map(|h| h.to_string()).collect()];
+    lines.extend(cells(rows).into_iter().map(Vec::from));
+    let widths: Vec<usize> = (0..COLUMNS.len())
         .map(|col| {
             lines
                 .iter()

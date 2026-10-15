@@ -14,12 +14,10 @@ use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_engine::BattleRules;
-use robocode_s_protocol::v1;
 use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{
     Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
 };
-use robocode_s_server::results::contestants;
 use robocode_s_server::{BattleOutcome, ServerConfig};
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -94,6 +92,8 @@ pub struct Screenshot {
     pub loading: bool,
     requested: bool,
     frames: i64,
+    /// Frames since the battle ended, for its results window to be laid out.
+    ended: i64,
 }
 
 impl Screenshot {
@@ -104,6 +104,7 @@ impl Screenshot {
             loading,
             requested: false,
             frames: 0,
+            ended: 0,
         }
     }
 }
@@ -142,6 +143,19 @@ pub struct App {
     folder_jars: Vec<Option<usize>>,
     new_folder: String,
     settings_error: Option<String>,
+    /// The battles started, so each one's results window opens centred.
+    battles: u64,
+}
+
+/// What the user wants from the battle screen.
+enum Next {
+    /// The battle stays.
+    Stay,
+    /// Back to the setup, with the battle's selection.
+    Setup,
+    /// The same battle again: with its seed (so that it repeats exactly in deterministic
+    /// mode) or with a new one.
+    Restart { new_seed: bool },
 }
 
 /// How the app starts: the battle setup, a battle, a replay or another tab.
@@ -188,6 +202,7 @@ impl App {
             env_jars,
             new_folder: String::new(),
             settings_error: None,
+            battles: 0,
         };
         app.count_folder_jars();
         app.list_robots(&cc.egui_ctx);
@@ -393,12 +408,11 @@ impl App {
     /// Starts the battle in the setup: the loading screen while the robots are described
     /// (on a background thread) and their JVMs start.
     fn start(&mut self, ctx: &egui::Context) {
-        let s = &self.setup;
-        if s.robots.is_empty() {
+        if self.setup.robots.is_empty() {
             self.error = Some("Add some robots to the battle first.".into());
             return;
         }
-        let seed = match s.seed.trim() {
+        let seed = match self.setup.seed.trim() {
             "" => random_seed(),
             text => match text.parse() {
                 Ok(seed) => seed,
@@ -408,6 +422,12 @@ impl App {
                 }
             },
         };
+        self.launch(ctx, seed);
+    }
+
+    /// Starts the battle in the setup with `seed` (see [`App::start`]).
+    fn launch(&mut self, ctx: &egui::Context, seed: i64) {
+        let s = &self.setup;
         let config = ServerConfig {
             rules: BattleRules {
                 width: s.width,
@@ -439,6 +459,7 @@ impl App {
         });
         self.error = None;
         self.live = None;
+        self.battles += 1;
         self.tab = Tab::Start;
     }
 
@@ -903,14 +924,14 @@ impl App {
     }
 
     /// The Start Battle tab with a battle (see [`screen`]): the battlefield, the controls
-    /// below it, the robots' output in tabs, and the robots on the right. True when the
-    /// user goes back to the setup.
-    fn live_ui(&mut self, root: &mut egui::Ui) -> bool {
+    /// below it, the robots' output in tabs, and the robots on the right; at its end the
+    /// results.
+    fn live_ui(&mut self, root: &mut egui::Ui) -> Next {
         let ctx = &root.ctx().clone();
-        let mut back = false;
+        let mut next = Next::Stay;
         let style = self.style();
         let Some(live) = &mut self.live else {
-            return true;
+            return Next::Setup;
         };
         let latest = live.latest.as_ref();
         screen::robots_panel(root, "robots", &live.robots, latest, &mut self.selected);
@@ -962,7 +983,7 @@ impl App {
                         let button = egui::Button::new(RichText::new("New battle").strong())
                             .min_size(egui::vec2(0.0, 26.0));
                         if ui.add(button).clicked() {
-                            back = true;
+                            next = Next::Setup;
                         }
                         ui.add_space(8.0);
                     } else if live.stopping {
@@ -998,18 +1019,60 @@ impl App {
                 );
             });
         match &live.outcome {
-            Some(Ok(outcome)) => results_window(ctx, &live.robots, outcome),
+            Some(Ok(outcome)) => {
+                let title = results_title(outcome);
+                let shown = screen::Outcome {
+                    title: &title,
+                    robots: &live.robots,
+                    results: &outcome.results,
+                    snapshot: live.latest.as_ref(),
+                    stopped: outcome.aborted,
+                };
+                let id = egui::Id::new(("results", self.battles));
+                screen::results_window(ctx, &mut self.sprites, id, &shown, |ui| {
+                    let replays = if self.setup.classic {
+                        "Classic mode: the robots' timing differs, so it may go differently."
+                    } else {
+                        "Deterministic mode: the battle repeats exactly."
+                    };
+                    let restart = egui::Button::new(RichText::new("Restart Battle").strong());
+                    if ui
+                        .add(restart)
+                        .on_hover_text(format!(
+                            "The same robots and settings, with seed {}. {replays}",
+                            live.seed
+                        ))
+                        .clicked()
+                    {
+                        next = Next::Restart { new_seed: false };
+                    }
+                    if ui
+                        .button("Restart, new seed")
+                        .on_hover_text("The same robots and settings with another seed.")
+                        .clicked()
+                    {
+                        next = Next::Restart { new_seed: true };
+                    }
+                    if ui
+                        .button("New Battle")
+                        .on_hover_text("Back to the setup, with these robots.")
+                        .clicked()
+                    {
+                        next = Next::Setup;
+                    }
+                });
+            }
             Some(Err(e)) => {
                 egui::Window::new("Battle failed").show(ctx, |ui| {
                     ui.colored_label(Color32::LIGHT_RED, e);
                     if ui.button("Back").clicked() {
-                        back = true;
+                        next = Next::Setup;
                     }
                 });
             }
             None => {}
         }
-        back
+        next
     }
 }
 
@@ -1205,52 +1268,16 @@ fn contestants_row(ui: &mut egui::Ui, sprites: &mut Sprites, names: &[String], t
     ui.ctx().request_repaint();
 }
 
-fn results_window(ctx: &egui::Context, robots: &[v1::RobotStatics], outcome: &BattleOutcome) {
-    let title = if outcome.aborted {
+/// The results window's title: a stopped battle says in which round.
+fn results_title(outcome: &BattleOutcome) -> String {
+    if outcome.aborted {
         match outcome.rounds {
             1 => "Results: stopped in the first round".to_string(),
             n => format!("Results: stopped in round {n}"),
         }
     } else {
         "Results".to_string()
-    };
-    egui::Window::new(title)
-        .id(egui::Id::new("results"))
-        .collapsible(false)
-        .resizable(false)
-        .show(ctx, |ui| {
-            let rows = contestants(robots, &outcome.results);
-            let total: f64 = rows.iter().map(|c| c.score).sum();
-            egui::Grid::new("results").striped(true).show(ui, |ui| {
-                for h in [
-                    "Rank",
-                    "Robot",
-                    "Score",
-                    "Survival",
-                    "Bullet dmg",
-                    "Ram dmg",
-                    "1sts",
-                ] {
-                    ui.label(RichText::new(h).strong());
-                }
-                ui.end_row();
-                for c in &rows {
-                    ui.label(c.rank.to_string());
-                    ui.label(&c.name);
-                    let pct = if total > 0.0 {
-                        100.0 * c.score / total
-                    } else {
-                        0.0
-                    };
-                    ui.label(format!("{:.0} ({pct:.0}%)", c.score));
-                    ui.label(format!("{:.0}", c.survival));
-                    ui.label(format!("{:.0}", c.bullet_damage));
-                    ui.label(format!("{:.0}", c.ram_damage));
-                    ui.label(c.firsts.to_string());
-                    ui.end_row();
-                }
-            });
-        });
+    }
 }
 
 impl eframe::App for App {
@@ -1267,11 +1294,17 @@ impl eframe::App for App {
         }
         match self.tab {
             Tab::Start if self.starting.is_some() => self.loading_page(root),
-            Tab::Start if self.live.is_some() => {
-                if self.live_ui(root) {
-                    self.live = None;
+            Tab::Start if self.live.is_some() => match self.live_ui(root) {
+                Next::Stay => {}
+                Next::Setup => self.live = None,
+                Next::Restart { new_seed } => {
+                    let seed = match &self.live {
+                        Some(live) if !new_seed => live.seed,
+                        _ => random_seed(),
+                    };
+                    self.launch(ctx, seed);
                 }
-            }
+            },
             Tab::Start => self.start_page(root),
             Tab::Replay => match &mut self.replay {
                 Some(replay) => {
@@ -1324,13 +1357,15 @@ impl App {
             // A battle that couldn't start: its error, once laid out.
             (Some(starting), _, Tab::Start) if starting.error.is_some() => shot.frames >= 3,
             (Some(_), _, Tab::Start) => shot.loading && shot.frames >= shot.after,
-            (None, Some(live), Tab::Start) => {
-                live.outcome.is_some()
-                    || live
-                        .latest
-                        .as_ref()
-                        .is_some_and(|s| s.turn >= shot.after || s.round > 0)
+            // An ended battle: its results, once laid out.
+            (None, Some(live), Tab::Start) if live.outcome.is_some() => {
+                shot.ended += 1;
+                shot.ended >= 30
             }
+            (None, Some(live), Tab::Start) => live
+                .latest
+                .as_ref()
+                .is_some_and(|s| s.turn >= shot.after || s.round > 0),
             _ => shot.frames >= shot.after,
         };
         if ready {

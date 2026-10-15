@@ -22,6 +22,68 @@ pub struct Contestant {
     pub thirds: i32,
 }
 
+/// The results table's columns, as classic names them.
+pub const COLUMNS: [&str; 12] = [
+    "Rank",
+    "Robot Name",
+    "Total Score",
+    "Survival",
+    "Surv Bonus",
+    "Bullet Dmg",
+    "Bullet Bonus",
+    "Ram Dmg * 2",
+    "Ram Bonus",
+    "1sts",
+    "2nds",
+    "3rds",
+];
+
+/// Classic's ordinal: 1st, 2nd, 3rd, 4th, ..., 11th, 12th, 13th, 21st.
+pub fn ordinal(n: usize) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
+}
+
+/// Classic rounds results for display: `(int) (value + 0.5)`.
+pub fn round(v: f64) -> i64 {
+    (v + 0.5) as i64
+}
+
+/// The cells of the results table, one row per contestant under [`COLUMNS`], formatted as
+/// classic shows them: the total score with its share of all scores, e.g. `750 (75%)`.
+pub fn cells(rows: &[Contestant]) -> Vec<[String; 12]> {
+    let total: f64 = rows.iter().map(|c| c.score).sum();
+    rows.iter()
+        .map(|c| {
+            let percent = if total > 0.0 {
+                round(100.0 * c.score / total)
+            } else {
+                0
+            };
+            [
+                ordinal(c.rank),
+                c.name.clone(),
+                format!("{} ({percent}%)", round(c.score)),
+                round(c.survival).to_string(),
+                round(c.last_survivor_bonus).to_string(),
+                round(c.bullet_damage).to_string(),
+                round(c.bullet_damage_bonus).to_string(),
+                round(c.ram_damage).to_string(),
+                round(c.ram_damage_bonus).to_string(),
+                c.firsts.to_string(),
+                c.seconds.to_string(),
+                c.thirds.to_string(),
+            ]
+        })
+        .collect()
+}
+
 /// Groups per-robot `results` (by robot index) into contestants in battle order, then
 /// ranks them by total score; equal scores keep the robots' own ranking.
 pub fn contestants(statics: &[v1::RobotStatics], results: &[v1::Results]) -> Vec<Contestant> {

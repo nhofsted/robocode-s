@@ -38,7 +38,8 @@ system's frame).
   --tab NAME         open a tab at start: start, replay or options
   --size WxH         the window's size in points (default 1200x860)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
-                     of the first round, otherwise after --after frames (default 120)
+                     of the first round (or its results, when it ends before),
+                     otherwise after --after frames (default 120)
   --loading          with --battle and --screenshot: shoot the loading screen
                      after --after frames instead
 ";
