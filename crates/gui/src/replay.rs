@@ -4,6 +4,7 @@
 //! Opening a recording runs it once and keeps a keyframe (a clone of the replay) every
 //! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many.
 
+use crate::graphs::History;
 use crate::icons;
 use crate::screen;
 use crate::sprites::Sprites;
@@ -30,6 +31,8 @@ pub struct ReplayView {
     keyframes: Vec<Replay>,
     /// Index of the first turn of each round.
     round_starts: Vec<usize>,
+    /// Every turn, for the graphs and scores.
+    history: History,
     /// Console output: (turn index, robot, text).
     output: Vec<(usize, usize, String)>,
     turns: usize,
@@ -63,6 +66,7 @@ impl ReplayView {
         let recording = Recording::read(path).map_err(|e| e.to_string())?;
         let mut replay = recording.replay();
         let (mut keyframes, mut round_starts, mut output) = (Vec::new(), Vec::new(), Vec::new());
+        let mut history = History::new(recording.header.robots.len());
         let (mut turns, mut unverified, mut round) = (0usize, 0usize, -1);
         loop {
             if turns % KEYFRAME == 0 {
@@ -80,6 +84,7 @@ impl ReplayView {
                     output.push((turns, i, r.output.clone()));
                 }
             }
+            history.push(&snapshot);
             unverified += usize::from(!verified);
             turns += 1;
         }
@@ -99,6 +104,7 @@ impl ReplayView {
             cursor: keyframes[0].clone(),
             keyframes,
             round_starts,
+            history,
             output,
             turns,
             unverified,
@@ -193,6 +199,8 @@ impl ReplayView {
             "replay-robots",
             &self.robots,
             current.as_ref(),
+            &self.history,
+            self.position + 1,
             selected,
         );
         let output = &self.output;

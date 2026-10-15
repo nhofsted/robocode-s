@@ -3,6 +3,7 @@
 //! A battle running locally: the server and robot processes on a background thread
 //! (`runner::local`), observed by the GUI.
 
+use crate::graphs::History;
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
@@ -30,6 +31,8 @@ pub struct Live {
     pub latest: Option<v1::TurnSnapshot>,
     /// The snapshot before `latest`, for the scan arcs.
     pub previous: Option<v1::TurnSnapshot>,
+    /// Every turn so far, for the graphs and scores.
+    pub history: History,
     /// Console output per robot.
     pub output: Vec<String>,
     pub paint: Vec<bool>,
@@ -75,6 +78,7 @@ impl Live {
             seed: 0,
             latest: None,
             previous: None,
+            history: History::new(n),
             output: vec![String::new(); n],
             paint: vec![false; n],
             paused: false,
@@ -113,6 +117,7 @@ impl Live {
                             }
                         }
                     }
+                    self.history.push(&s);
                     self.previous = self.latest.replace(s);
                 }
                 Ok(_) => {}

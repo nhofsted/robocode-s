@@ -2,11 +2,12 @@
 
 //! The battle screen, shared by a live battle and a replay: the battlefield fills the tab,
 //! with the controls below it, the robots' output in tabs below those, and the robots on
-//! the right, running the full height (room for their graphs later, #33).
+//! the right, running the full height, with their graphs below them (#33).
 //!
 //! Add the panels in this order: [`robots_panel`], [`output_panel`], [`controls_panel`],
 //! then the field in the central panel.
 
+use crate::graphs::{self, History};
 use crate::icons;
 use crate::shell;
 use crate::sprites::{Part, Sprites, default_colors};
@@ -25,13 +26,15 @@ const ENERGY: Color32 = Color32::from_rgb(0x3f, 0x8a, 0x4f);
 const ENERGY_LOW: Color32 = Color32::from_rgb(0xc9, 0x8a, 0x1c);
 const ENERGY_CRITICAL: Color32 = Color32::from_rgb(0xc0, 0x3a, 0x3a);
 
-/// The right side: per robot its colour, name, score and energy. A click on a robot opens
-/// its output tab.
+/// The right side: per robot its colour, name, score and energy, and below them the
+/// graphs of the first `shown` turns of `history`. A click on a robot opens its output tab.
 pub fn robots_panel(
     root: &mut egui::Ui,
     id: &str,
     robots: &[v1::RobotStatics],
     snapshot: Option<&v1::TurnSnapshot>,
+    history: &History,
+    shown: usize,
     selected: &mut usize,
 ) {
     // A narrow window keeps most of its width for the field.
@@ -52,17 +55,27 @@ pub fn robots_panel(
                     .color(shell::ACCENT),
             );
             ui.add_space(4.0);
+            // The graphs take the bottom, the robots scroll above them.
+            let graphs = (ui.available_height() * 0.42).clamp(150.0, 340.0);
+            let round = snapshot.map_or(0, |s| s.round);
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
+                .max_height(
+                    (ui.available_height() - graphs - 12.0 - 3.0 * ui.spacing().item_spacing.y)
+                        .max(48.0),
+                )
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (i, statics) in robots.iter().enumerate() {
                         let robot = snapshot.and_then(|s| s.robots.get(i));
-                        if robot_row(ui, statics, robot, *selected == i).clicked() {
+                        let score = robot.map_or(0.0, |r| history.score(round, i, r));
+                        if robot_row(ui, statics, robot, score, *selected == i).clicked() {
                             *selected = i;
                         }
                     }
                 });
+            ui.add_space(12.0);
+            graphs::graphs(ui, robots, snapshot, history, shown, graphs);
         });
 }
 
@@ -71,6 +84,7 @@ fn robot_row(
     ui: &mut egui::Ui,
     statics: &v1::RobotStatics,
     robot: Option<&v1::RobotSnapshot>,
+    score: f64,
     selected: bool,
 ) -> egui::Response {
     const HEIGHT: f32 = 44.0;
@@ -90,9 +104,6 @@ fn robot_row(
     let inner = rect.shrink2(vec2(6.0, 5.0));
     let dead = robot.is_none_or(|r| r.state == v1::RobotState::Dead as i32);
     let energy = robot.and_then(|r| r.energy).unwrap_or_default();
-    let score = robot.map_or(0.0, |r| {
-        r.total_score.unwrap_or_default() + r.score.unwrap_or_default()
-    });
     // The first line: colour, name and score.
     let line = inner.top() + 8.0;
     swatch(&painter, pos2(inner.left() + 5.0, line), statics, robot);
@@ -498,7 +509,7 @@ pub fn results_window(
         .default_pos(screen.center())
         .max_width(screen.width() - 40.0)
         .show(ctx, |ui| {
-            ui.horizontal_top(|ui| {
+            let row = ui.horizontal_top(|ui| {
                 let left = winner(ui, sprites, outcome, &rows);
                 ui.add_space(GAP);
                 // The table as wide as it was last time; narrow windows scroll it.
@@ -509,11 +520,12 @@ pub fn results_window(
                     .min_scrolled_width(wanted.min(room).max(120.0))
                     .show(ui, |ui| table(ui, &rows));
                 ui.data_mut(|d| d.insert_temp(measured, shown.content_size.x));
-                let bottom = shown.inner_rect.top() + shown.content_size.y;
-                let x = left.right() + GAP / 2.0;
-                let y = left.top()..=left.bottom().max(bottom);
-                ui.painter().vline(x, y, Stroke::new(1.0, shell::LINE));
+                left.right() + GAP / 2.0
             });
+            // The line between them, as tall as the row (the window's contents).
+            let rect = row.response.rect;
+            ui.painter()
+                .vline(row.inner, rect.y_range(), Stroke::new(1.0, shell::LINE));
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(2.0);

@@ -5,6 +5,7 @@
 
 mod app;
 mod backdrop;
+mod graphs;
 mod icons;
 mod live;
 mod replay;

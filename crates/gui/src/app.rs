@@ -934,7 +934,15 @@ impl App {
             return Next::Setup;
         };
         let latest = live.latest.as_ref();
-        screen::robots_panel(root, "robots", &live.robots, latest, &mut self.selected);
+        screen::robots_panel(
+            root,
+            "robots",
+            &live.robots,
+            latest,
+            &live.history,
+            live.history.len(),
+            &mut self.selected,
+        );
         let output = &live.output;
         let toggled = screen::output_panel(
             root,
