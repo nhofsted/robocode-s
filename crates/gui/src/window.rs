@@ -51,7 +51,7 @@ pub fn show(root: &mut egui::Ui, fill: Color32, content: impl FnOnce(&mut egui::
             // First, so that the widgets on top of it take their own clicks.
             let bar = ui.interact(rect, Id::new("window-title-bar"), Sense::click_and_drag());
             if bar.drag_started_by(PointerButton::Primary) {
-                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                hand_over(&ctx, ViewportCommand::StartDrag);
             }
             if bar.double_clicked() {
                 ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
@@ -81,6 +81,57 @@ pub fn show(root: &mut egui::Ui, fill: Color32, content: impl FnOnce(&mut egui::
         });
 }
 
+/// Where [`hand_over`] notes that the compositor has the pointer.
+fn grab_id() -> Id {
+    Id::new("window-grab")
+}
+
+/// Hands a move or resize to the compositor. From then on the compositor holds the
+/// pointer, so the button's release never reaches us (winit only reports the pointer
+/// leaving, which egui doesn't take as a release): egui would think the button still
+/// down, keep the edge or title bar dragged, with its cursor, until Escape.
+/// [`release_after_grab`] makes up the release.
+fn hand_over(ctx: &egui::Context, command: ViewportCommand) {
+    log(&format!("{command:?}: the compositor takes the pointer"));
+    ctx.data_mut(|d| d.insert_temp(grab_id(), true));
+    ctx.send_viewport_cmd(command);
+}
+
+/// Adds the primary button's release to the input of the frame after a move or resize
+/// was handed to the compositor (see [`hand_over`]); call it from
+/// [`eframe::App::raw_input_hook`].
+pub fn release_after_grab(ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    for event in &raw_input.events {
+        if matches!(
+            event,
+            egui::Event::PointerButton { .. } | egui::Event::PointerGone
+        ) {
+            log(&format!("input: {event:?}"));
+        }
+    }
+    let grabbed = ctx.data_mut(|d| d.remove_temp::<bool>(grab_id()));
+    if grabbed != Some(true) {
+        return;
+    }
+    let pos = ctx
+        .input(|i| i.pointer.latest_pos().or(i.pointer.interact_pos()))
+        .unwrap_or_default();
+    log("made up the primary button's release");
+    raw_input.events.push(egui::Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: ctx.input(|i| i.modifiers),
+    });
+}
+
+/// Logs the hand-overs and pointer buttons to stderr when `ROBOCODES_FRAME_LOG` is set.
+fn log(message: &str) {
+    if std::env::var_os("ROBOCODES_FRAME_LOG").is_some() {
+        eprintln!("[frame] {message}");
+    }
+}
+
 /// Thin panels along the four sides that start a resize when pressed.
 fn edges(root: &mut egui::Ui, fill: Color32) {
     let frame = egui::Frame::NONE.fill(fill);
@@ -107,8 +158,7 @@ fn edges(root: &mut egui::Ui, fill: Color32) {
                 let response = response.on_hover_cursor(cursor(direction));
                 let pressed = ui.input(|i| i.pointer.primary_pressed());
                 if pressed && response.is_pointer_button_down_on() {
-                    ui.ctx()
-                        .send_viewport_cmd(ViewportCommand::BeginResize(direction));
+                    hand_over(ui.ctx(), ViewportCommand::BeginResize(direction));
                 }
             });
     }

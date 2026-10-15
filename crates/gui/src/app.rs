@@ -1289,6 +1289,12 @@ fn results_title(outcome: &BattleOutcome) -> String {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.own_frame {
+            crate::window::release_after_grab(ctx, raw_input);
+        }
+    }
+
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
