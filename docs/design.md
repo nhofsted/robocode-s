@@ -167,6 +167,7 @@ server -> robot : RoundOver / BattleOver
 ### 5.4 Observer stream
 
 - Full snapshot on subscribe, then per-turn deltas: robot states, bullets, explosions, scores and debug paint.
+- Each `RobotSnapshot` carries the CPU time the robot reported for that turn (`cpu_nanos`, from its `Execute`s since the last snapshot, so a robot that skipped turns shows them all at once) and the turn budget (`budget_nanos`, 0 in deterministic mode, which has no wall-clock budget). The GUI graphs them per robot, with each robot's energy (#33). Deterministic mode's work count (#15) stays inside the robot host and isn't reported.
 - Debug paint is only requested from a robot while an observer has it enabled. This saves bandwidth and robot CPU time, as in classic.
 
 ## 6. Robot hosting (runners)
@@ -263,7 +264,7 @@ Native APIs for new robots, all generated from the same `.proto`:
 ## 11. Recording and replay
 
 - **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, engine version, seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, the drained, disabled and stopped robots, and an observer's abort. The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
-- A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output and debug paint) and a 64-bit hash of the snapshot, so every replayed turn is verified.
+- A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output, debug paint, and each robot's CPU time and the turn budget) and a 64-bit hash of the snapshot, so every replayed turn is verified. CPU times are timing, not battle state: the hash leaves them out (as output and paint), and a replay shows them in its CPU graph. Recordings from before they were recorded replay with CPU times of 0.
 - Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
 - `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
 - Rumble replays in the browser use a different, lossy format (§12.7, ADR 0017).

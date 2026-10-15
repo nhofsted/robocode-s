@@ -559,6 +559,12 @@ message RobotSnapshot {
   string output = 13;
   // Debug paint this turn, if enabled for this robot.
   repeated PaintOp paint = 14;
+  // CPU time the robot reported for this turn (Execute.cpu_nanos; the sum when a robot
+  // that skipped turns answers several at once). Timing, not battle state: not part of
+  // a recording's snapshot hash.
+  uint64 cpu_nanos = 15;
+  // The turn's CPU budget (Tick.budget_nanos); 0 in deterministic mode, which has none.
+  uint64 budget_nanos = 16;
 }
 
 enum BulletState {
@@ -657,8 +663,13 @@ message RecordedSnapshot {
   repeated string output = 1;
   // Debug paint, for robots that painted.
   repeated RobotPaint paint = 2;
-  // FNV-1a hash of the snapshot without output and paint, to verify a replay.
+  // FNV-1a hash of the snapshot without output, paint and CPU times, to verify a replay.
   fixed64 check = 3;
+  // Per robot, by index: CPU time in this snapshot (RobotSnapshot.cpu_nanos). Empty in
+  // recordings made before it was recorded.
+  repeated uint64 cpu_nanos = 4;
+  // The turn budget (RobotSnapshot.budget_nanos).
+  uint64 budget_nanos = 5;
 }
 
 message RobotPaint {

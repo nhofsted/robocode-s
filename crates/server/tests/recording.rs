@@ -108,6 +108,8 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
                     } else {
                         Vec::new()
                     },
+                    // CPU time: timing, recorded for replays but not hashed.
+                    cpu_nanos: 1_000 + turn as u64,
                     ..Default::default()
                 })),
             };
@@ -224,6 +226,12 @@ fn a_recorded_battle_replays_exactly() {
     );
     let painted = |f: &Frame, i: usize| matches!(f, Frame::Snapshot { snapshot, .. } if !snapshot.robots[i].paint.is_empty());
     assert!(seen.iter().any(|f| painted(f, 0)), "robot a never painted");
+    assert!(
+        seen.iter()
+            .any(|f| matches!(f, Frame::Snapshot { snapshot, .. }
+            if snapshot.robots.iter().all(|r| r.cpu_nanos > 1_000))),
+        "no CPU times in the battle"
+    );
     assert!(
         !seen.iter().any(|f| painted(f, 1)),
         "robot b painted unasked"

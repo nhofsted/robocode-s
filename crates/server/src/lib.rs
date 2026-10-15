@@ -120,6 +120,8 @@ struct Link {
     paint: Vec<v1::PaintOp>,
     /// An observer turned this robot's debug painting on (`PaintToggle`).
     paint_enabled: bool,
+    /// CPU time of the `Execute`s since the last snapshot, for the next one.
+    cpu_nanos: u64,
     io_robot: bool,
     events: Vec<Event>,
     bullet_updates: Vec<v1::BulletStatus>,
@@ -527,6 +529,7 @@ impl<'a> BattleLoop<'a> {
         link.final_execute = false;
         link.output.push_str(&execute.output);
         link.paint = execute.paint;
+        link.cpu_nanos = link.cpu_nanos.saturating_add(execute.cpu_nanos);
         let robot = i as i32;
         if let Some(c) = execute.commands {
             link.io_robot |= c.io_robot;
@@ -592,8 +595,7 @@ impl<'a> BattleLoop<'a> {
     fn deliver(&mut self) {
         let turn = self.battle().time;
         let round_over = self.battle().is_round_over();
-        let deterministic = self.config.deterministic;
-        let budget = self.config.turn_timeout.as_nanos() as u64;
+        let budget = self.budget_nanos();
         for i in 0..self.links.len() {
             let driver = &mut self.engine.driver;
             let battle = &mut driver.battle;
@@ -636,7 +638,7 @@ impl<'a> BattleLoop<'a> {
                 halt: !running,
                 should_wait,
                 paint_enabled: link.paint_enabled,
-                budget_nanos: if deterministic { 0 } else { budget },
+                budget_nanos: budget,
             };
             if running {
                 link.awaiting = Some(turn);
@@ -659,6 +661,15 @@ impl<'a> BattleLoop<'a> {
         self.snapshot_with(true);
     }
 
+    /// A robot's CPU budget per turn; 0 in deterministic mode, which has none.
+    fn budget_nanos(&self) -> u64 {
+        if self.config.deterministic {
+            0
+        } else {
+            self.config.turn_timeout.as_nanos() as u64
+        }
+    }
+
     /// Broadcasts the current turn; `with_output` takes the robots' console output so far.
     fn snapshot_with(&mut self, with_output: bool) {
         if self.observers.is_empty() && !self.engine.is_recording() {
@@ -673,10 +684,13 @@ impl<'a> BattleLoop<'a> {
             }
         });
         let check = recording::check(&snapshot);
-        if with_output {
-            for (r, link) in snapshot.robots.iter_mut().zip(&mut self.links) {
+        let budget = self.budget_nanos();
+        for (r, link) in snapshot.robots.iter_mut().zip(&mut self.links) {
+            if with_output {
                 r.paint = std::mem::take(&mut link.paint);
+                r.cpu_nanos = std::mem::take(&mut link.cpu_nanos);
             }
+            r.budget_nanos = budget;
         }
         if self.engine.is_recording() {
             let marker = v1::RecordedSnapshot {
@@ -692,6 +706,8 @@ impl<'a> BattleLoop<'a> {
                     })
                     .collect(),
                 check,
+                cpu_nanos: snapshot.robots.iter().map(|r| r.cpu_nanos).collect(),
+                budget_nanos: budget,
             };
             self.engine.record(&Entry::Snapshot(marker));
         }
