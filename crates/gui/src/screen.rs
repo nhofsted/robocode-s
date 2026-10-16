@@ -430,10 +430,57 @@ pub fn divider(ui: &mut egui::Ui) {
     ui.add_space(6.0);
 }
 
+/// The speed slider's widest, and its narrowest with the seed still shown and at all.
+const SLIDER: f32 = 130.0;
+const SLIDER_NARROW: f32 = 80.0;
+const SLIDER_MIN: f32 = 40.0;
+/// The speed slider's icon and its value's label.
+const SPEED_ICON: f32 = 22.0;
+const SPEED_LABEL: f32 = 44.0;
+
+/// The controls row after its buttons: the speed slider, then the readouts at the right
+/// end, added right to left: `end` (rightmost), the seed, `rest`, and `fill`, which may
+/// take the room that is left (a truncated label). The slider gets the room the readouts
+/// left last frame, up to [`SLIDER`]; when that leaves it narrower than [`SLIDER_NARROW`],
+/// the seed goes. True when the speed changed.
+pub fn speed_and_readouts(
+    ui: &mut egui::Ui,
+    turns_per_second: &mut u32,
+    seed: &str,
+    end: impl FnOnce(&mut egui::Ui),
+    rest: impl FnOnce(&mut egui::Ui),
+    fill: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let id = ui.id().with("readouts");
+    // The readouts' width without the seed, and the seed's with its gap, last measured.
+    let (others, seed_width) = ui
+        .data(|d| d.get_temp::<(f32, f32)>(id))
+        .unwrap_or((160.0, 170.0));
+    let spacing = ui.spacing().item_spacing.x;
+    let room = ui.available_width() - SPEED_ICON - SPEED_LABEL - 3.0 * spacing - others;
+    let show_seed = room - seed_width >= SLIDER_NARROW;
+    let width = if show_seed { room - seed_width } else { room };
+    let changed = speed_slider(ui, turns_per_second, width.clamp(SLIDER_MIN, SLIDER));
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let end = ui.scope(end).response.rect.width();
+        let mut seed_width = seed_width;
+        if show_seed {
+            let shown = ui.scope(|ui| info(ui, "Seed", seed)).response.rect.width();
+            ui.add_space(10.0);
+            seed_width = shown + 10.0 + 2.0 * spacing;
+        }
+        let rest = ui.scope(rest).response.rect.width();
+        fill(ui);
+        let others = end + rest + 2.0 * spacing;
+        ui.data_mut(|d| d.insert_temp(id, (others, seed_width)));
+    });
+    changed
+}
+
 /// The speed: a turn rate from 1 to [`MAX_TPS`] a second, or as fast as possible (0) at
-/// the slider's right end. True when it changed.
-pub fn speed_slider(ui: &mut egui::Ui, turns_per_second: &mut u32) -> bool {
-    let (rect, _) = ui.allocate_exact_size(vec2(22.0, CONTROL), Sense::hover());
+/// the slider's right end, the slider `width` wide. True when it changed.
+fn speed_slider(ui: &mut egui::Ui, turns_per_second: &mut u32, width: f32) -> bool {
+    let (rect, _) = ui.allocate_exact_size(vec2(SPEED_ICON, CONTROL), Sense::hover());
     icons::speed(
         ui.painter(),
         rect.center(),
@@ -444,7 +491,7 @@ pub fn speed_slider(ui: &mut egui::Ui, turns_per_second: &mut u32) -> bool {
         0 => MAX_TPS + 1,
         tps => tps.min(MAX_TPS),
     };
-    ui.spacing_mut().slider_width = 130.0;
+    ui.spacing_mut().slider_width = width;
     let slider = ui
         .add(
             egui::Slider::new(&mut position, 1..=MAX_TPS + 1)
@@ -456,7 +503,7 @@ pub fn speed_slider(ui: &mut egui::Ui, turns_per_second: &mut u32) -> bool {
         p if p > MAX_TPS => "max".to_string(),
         p => format!("{p}/s"),
     };
-    let (rect, _) = ui.allocate_exact_size(vec2(44.0, CONTROL), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(SPEED_LABEL, CONTROL), Sense::hover());
     ui.painter().text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,

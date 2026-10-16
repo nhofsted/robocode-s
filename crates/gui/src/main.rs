@@ -39,13 +39,18 @@ system's frame).
   --tab NAME         open a tab at start: start, replay or options
   --browse FIELD     open the file dialog of a field at start: record, replay or
                      folder (the options' robot folder), on its tab
-  --size WxH         the window's size in points (default 1200x860)
+  --size WxH         the window's size in points (default 1200x860, at least 720x480
+                     except with --screenshot)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round (or its results, when it ends before),
                      otherwise after --after frames (default 120)
   --loading          with --battle and --screenshot: shoot the loading screen
                      after --after frames instead
 ";
+
+/// The smallest window, in points, at which no page clips its controls: the title bar's
+/// tabs and gear set the width; below the height the battlefield gets too small.
+const MIN_SIZE: [f32; 2] = [720.0, 480.0];
 
 /// `--size`: `WxH` in points.
 fn parse_size(text: &str) -> Option<[f32; 2]> {
@@ -119,13 +124,18 @@ fn main() -> ExitCode {
             path => replay = Some(PathBuf::from(path)),
         }
     }
+    // A screenshot may go below the minimum, to see where the layout clips.
+    let min_size = match shot {
+        Some(_) => [size[0].min(MIN_SIZE[0]), size[1].min(MIN_SIZE[1])],
+        None => MIN_SIZE,
+    };
     let screenshot = shot.map(|path| Screenshot::new(path, after, loading));
     let own_frame = window::wanted();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("robocode-s")
             .with_inner_size(size)
-            .with_min_inner_size([size[0].min(760.0), size[1].min(540.0)])
+            .with_min_inner_size(min_size)
             .with_decorations(!own_frame),
         ..Default::default()
     };
