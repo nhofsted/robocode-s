@@ -8,7 +8,7 @@ use crate::icons;
 use crate::live::Live;
 use crate::replay::ReplayView;
 use crate::screen;
-use crate::settings::Settings;
+use crate::settings::{Rules, Settings};
 use crate::shell::{self, Tab};
 use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
@@ -19,7 +19,7 @@ use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{
     Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
 };
-use robocode_s_server::{BattleOutcome, ServerConfig};
+use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -38,6 +38,7 @@ pub struct Setup {
     pub record: String,
     pub paint: bool,
     pub turns_per_second: u32,
+    pub rules: Rules,
 }
 
 impl Setup {
@@ -53,7 +54,89 @@ impl Setup {
             record: String::new(),
             paint: false,
             turns_per_second: 30,
+            rules: settings.rules,
         }
+    }
+
+    /// The setup's rules, as the engine takes them.
+    pub fn battle_rules(&self) -> BattleRules {
+        BattleRules {
+            width: self.width,
+            height: self.height,
+            num_rounds: self.rounds.max(1),
+            gun_cooling_rate: self.rules.gun_cooling_rate,
+            inactivity_time: self.rules.inactivity_time,
+            hide_enemy_names: self.rules.hide_enemy_names,
+            sentry_border_size: self.rules.sentry_border,
+        }
+    }
+
+    /// Takes the rules of a `.battle` file, and its robots if it names any.
+    pub fn open(&mut self, file: battle_file::BattleFile) {
+        let r = file.rules;
+        (self.width, self.height, self.rounds) = (r.width, r.height, r.num_rounds.max(1));
+        self.rules = Rules {
+            gun_cooling_rate: r.gun_cooling_rate,
+            inactivity_time: r.inactivity_time,
+            hide_enemy_names: r.hide_enemy_names,
+            sentry_border: r.sentry_border_size,
+        };
+        if !file.robots.is_empty() {
+            self.robots = file.robots;
+        }
+    }
+}
+
+/// A game type (Tank Royale's): its name, a hint, and the rounds, battlefield size and
+/// rules it sets.
+pub struct GameType {
+    pub name: &'static str,
+    pub hint: &'static str,
+    pub rounds: i32,
+    pub size: (i32, i32),
+}
+
+/// The game types: classic's defaults, and the rumbles' 1v1, melee and team settings.
+/// Each sets the default rules.
+pub const GAME_TYPES: [GameType; 4] = [
+    GameType {
+        name: "Classic",
+        hint: "Classic Robocode's defaults: 10 rounds on 800 × 600",
+        rounds: 10,
+        size: (800, 600),
+    },
+    GameType {
+        name: "1v1",
+        hint: "Two robots, as the RoboRumble: 35 rounds on 800 × 600",
+        rounds: 35,
+        size: (800, 600),
+    },
+    GameType {
+        name: "Melee",
+        hint: "Many robots, as the MeleeRumble: 35 rounds on 1000 × 1000",
+        rounds: 35,
+        size: (1000, 1000),
+    },
+    GameType {
+        name: "Teams",
+        hint: "Teams, as the TeamRumble: 10 rounds on 1200 × 1200",
+        rounds: 10,
+        size: (1200, 1200),
+    },
+];
+
+impl GameType {
+    /// Whether `setup` has this game type's settings.
+    pub fn matches(&self, setup: &Setup) -> bool {
+        setup.rounds == self.rounds
+            && (setup.width, setup.height) == self.size
+            && setup.rules == Rules::default()
+    }
+
+    pub fn apply(&self, setup: &mut Setup) {
+        setup.rounds = self.rounds;
+        (setup.width, setup.height) = self.size;
+        setup.rules = Rules::default();
     }
 }
 
@@ -130,6 +213,8 @@ pub struct App {
     /// The robots in the jars, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
+    /// The robot whose details show below the robot lists: the last one clicked.
+    details: Option<String>,
     filter: String,
     /// The highlighted robot in the available list (by name) and in the battle (by index).
     picked: Option<String>,
@@ -150,6 +235,9 @@ pub struct App {
     /// native one), and the field it is open for. It opens where the last pick was.
     files: FileDialog,
     browsing: Option<Browse>,
+    /// The text [`Browse::Save`] saves, and why the last save failed.
+    saving: Option<screen::SaveRequest>,
+    save_error: Option<String>,
 }
 
 /// The field a file dialog is open for.
@@ -161,6 +249,10 @@ pub enum Browse {
     Replay,
     /// A robot folder for the options.
     Folder,
+    /// A file to save [`App::saving`] to.
+    Save,
+    /// A classic `.battle` file to open into the battle setup.
+    OpenBattle,
 }
 
 /// What the user wants from the battle screen.
@@ -211,6 +303,7 @@ impl App {
             open_path: String::new(),
             available: None,
             listing: None,
+            details: None,
             filter: String::new(),
             picked: None,
             picked_selected: None,
@@ -225,6 +318,8 @@ impl App {
                 .id("file-dialog")
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]),
             browsing: None,
+            saving: None,
+            save_error: None,
         };
         app.count_folder_jars();
         app.list_robots(&cc.egui_ctx);
@@ -247,6 +342,12 @@ impl App {
         Style {
             scan_arcs: self.settings.scan_arcs,
             colored_bullets: self.settings.colored_bullets,
+            robot_names: self.settings.robot_names,
+            robot_energy: self.settings.robot_energy,
+            explosions: self.settings.explosions,
+            ground: self.settings.ground,
+            sentry_border: self.settings.sentry_border,
+            rates: self.settings.rates,
         }
     }
 
@@ -358,6 +459,7 @@ impl App {
                             let row = robot_row(ui, &r.name, r.team, picked, Action::Add);
                             if row.clicked {
                                 self.picked = Some(r.name.clone());
+                                self.details = Some(r.name.clone());
                             }
                             if row.act {
                                 add = Some(r.name.clone());
@@ -413,6 +515,7 @@ impl App {
                         let row = robot_row(ui, name, team, picked, Action::Remove);
                         if row.clicked {
                             self.picked_selected = Some(i);
+                            self.details = Some(name.clone());
                         }
                         if row.act {
                             remove = Some(i);
@@ -428,6 +531,38 @@ impl App {
         if let Some(name) = add {
             self.setup.robots.push(name);
         }
+        self.robot_details(ui);
+    }
+
+    /// The details of the robot clicked last, from its `.properties`: its name and
+    /// version, author, description and web page.
+    fn robot_details(&self, ui: &mut egui::Ui) {
+        let Some(Ok(available)) = &self.available else {
+            return;
+        };
+        let Some(robot) = self
+            .details
+            .as_ref()
+            .and_then(|name| available.iter().find(|r| &r.name == name))
+        else {
+            return;
+        };
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(&robot.name).strong());
+            if !robot.author.is_empty() {
+                ui.label(RichText::new(format!("by {}", robot.author)).weak());
+            }
+            if !robot.webpage.is_empty() {
+                ui.hyperlink_to(&robot.webpage, &robot.webpage);
+            }
+        });
+        let description = if robot.description.is_empty() {
+            RichText::new("No description.").weak().italics()
+        } else {
+            RichText::new(&robot.description).weak()
+        };
+        ui.add(egui::Label::new(description).wrap());
     }
 
     /// Starts the battle in the setup: the loading screen while the robots are described
@@ -454,12 +589,7 @@ impl App {
     fn launch(&mut self, ctx: &egui::Context, seed: i64) {
         let s = &self.setup;
         let config = ServerConfig {
-            rules: BattleRules {
-                width: s.width,
-                height: s.height,
-                num_rounds: s.rounds.max(1),
-                ..Default::default()
-            },
+            rules: s.battle_rules(),
             seed,
             deterministic: !s.classic,
             record: (!s.record.trim().is_empty()).then(|| PathBuf::from(s.record.trim())),
@@ -563,12 +693,31 @@ impl App {
 
             section(ui, "Battle");
             let mut browse = None;
+            let mut save_battle = false;
             let s = &mut app.setup;
             egui::Grid::new("setup")
                 .num_columns(2)
                 .min_col_width(LABELS)
                 .spacing([12.0, 8.0])
                 .show(ui, |ui| {
+                    ui.label("Game type");
+                    ui.horizontal(|ui| {
+                        let mut custom = true;
+                        for game in &GAME_TYPES {
+                            let on = game.matches(s);
+                            custom &= !on;
+                            if ui
+                                .selectable_label(on, game.name)
+                                .on_hover_text(game.hint)
+                                .clicked()
+                            {
+                                game.apply(s);
+                            }
+                        }
+                        ui.add_enabled(false, egui::Button::selectable(custom, "Custom"))
+                            .on_disabled_hover_text("Rules of your own: change any below");
+                    });
+                    ui.end_row();
                     ui.label("Rounds");
                     ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
                     ui.end_row();
@@ -579,6 +728,7 @@ impl App {
                         ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
                     });
                     ui.end_row();
+                    rules_rows(ui, &mut s.rules);
                     ui.label("Seed");
                     ui.add(
                         egui::TextEdit::singleline(&mut s.seed)
@@ -607,9 +757,27 @@ impl App {
                     ui.label("Debug paint");
                     ui.checkbox(&mut s.paint, "On for every robot");
                     ui.end_row();
+                    ui.label("Battle file");
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Open…")
+                            .on_hover_text("The robots and rules from a classic .battle file")
+                            .clicked()
+                        {
+                            browse = Some(Browse::OpenBattle);
+                        }
+                        save_battle = ui
+                            .button("Save…")
+                            .on_hover_text("The robots and rules as a classic .battle file")
+                            .clicked();
+                    });
+                    ui.end_row();
                 });
             if let Some(field) = browse {
                 app.browse(field);
+            }
+            if save_battle {
+                app.save_battle();
             }
 
             ui.add_space(20.0);
@@ -743,6 +911,7 @@ impl App {
             Browse::Record => &self.setup.record,
             Browse::Replay => &self.open_path,
             Browse::Folder => &self.new_folder,
+            Browse::Save | Browse::OpenBattle => "",
         };
         let path = expand_home(text.trim());
         let dir = match field {
@@ -757,9 +926,11 @@ impl App {
             }
             None => OpeningMode::LastPickedDir,
         };
+        let saving = self.saving.as_ref();
         config.default_file_name = match (field, path.file_name()) {
             (Browse::Record, Some(name)) => name.to_string_lossy().into_owned(),
             (Browse::Record, None) => "battle.rec".to_string(),
+            (Browse::Save, _) => saving.map_or_else(String::new, |s| s.name.clone()),
             _ => String::new(),
         };
         config.title = Some(
@@ -767,12 +938,14 @@ impl App {
                 Browse::Record => "Record to",
                 Browse::Replay => "Open a recording",
                 Browse::Folder => "Add a robot folder",
+                Browse::Save => saving.map_or("Save", |s| s.title),
+                Browse::OpenBattle => "Open a battle file",
             }
             .to_string(),
         );
         match field {
-            Browse::Record => self.files.save_file(),
-            Browse::Replay => self.files.pick_file(),
+            Browse::Record | Browse::Save => self.files.save_file(),
+            Browse::Replay | Browse::OpenBattle => self.files.pick_file(),
             Browse::Folder => self.files.pick_directory(),
         }
         self.browsing = Some(field);
@@ -800,9 +973,72 @@ impl App {
                         self.settings_changed(ctx, &before);
                     }
                 }
+                Browse::OpenBattle => self.open_battle(&path),
+                Browse::Save => {
+                    if let Some(saving) = self.saving.take()
+                        && let Err(e) = std::fs::write(&path, saving.text_for(&path))
+                    {
+                        self.save_error = Some(format!("{}: {e}", path.display()));
+                    }
+                }
             }
         } else if *self.files.state() != DialogState::Open {
             self.browsing = None;
+            self.saving = None;
+        }
+    }
+
+    /// Opens a classic `.battle` file into the battle setup: its robots and rules.
+    fn open_battle(&mut self, path: &std::path::Path) {
+        let file = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| battle_file::parse(&text, self.setup.battle_rules()));
+        match file {
+            Ok(file) => {
+                self.setup.open(file);
+                self.picked_selected = None;
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("{}: {e}", path.display())),
+        }
+    }
+
+    /// Asks where to save the battle setup as a classic `.battle` file, and saves it.
+    fn save_battle(&mut self) {
+        let file = battle_file::BattleFile {
+            rules: self.setup.battle_rules(),
+            robots: self.setup.robots.clone(),
+        };
+        self.save(screen::SaveRequest {
+            title: "Save the battle",
+            name: "battle.battle".to_string(),
+            text: battle_file::write(&file),
+            by_extension: Vec::new(),
+        });
+    }
+
+    /// Asks where to save `request`'s text, and saves it there.
+    fn save(&mut self, request: screen::SaveRequest) {
+        self.saving = Some(request);
+        self.browse(Browse::Save);
+    }
+
+    /// Why the last save failed, in a window until it is closed.
+    fn save_error_window(&mut self, ctx: &egui::Context) {
+        let Some(error) = &self.save_error else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new("Could not save")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(error.as_str());
+                close = ui.button("OK").clicked();
+            });
+        if close {
+            self.save_error = None;
         }
     }
 
@@ -980,6 +1216,24 @@ impl App {
                         "Bullets in their robot's bullet colour",
                     );
                     ui.end_row();
+                    ui.label("Robots");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut s.robot_names, "Names");
+                        ui.checkbox(&mut s.robot_energy, "Energy");
+                    });
+                    ui.end_row();
+                    ui.label("Explosions");
+                    ui.checkbox(&mut s.explosions, "Show hits and deaths exploding");
+                    ui.end_row();
+                    ui.label("Ground");
+                    ui.checkbox(&mut s.ground, "Draw the floor tiles");
+                    ui.end_row();
+                    ui.label("Sentry border");
+                    ui.checkbox(&mut s.sentry_border, "Show it when a sentry robot fights");
+                    ui.end_row();
+                    ui.label("Speed");
+                    ui.checkbox(&mut s.rates, "Show the turns and frames per second");
+                    ui.end_row();
                 });
 
             section(ui, "New battles");
@@ -1004,6 +1258,7 @@ impl App {
                         ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
                     });
                     ui.end_row();
+                    rules_rows(ui, &mut s.rules);
                 });
 
             if let Some(e) = &app.settings_error {
@@ -1035,6 +1290,9 @@ impl App {
         if (s.width, s.height) != (before.width, before.height) {
             (setup.width, setup.height) = (s.width, s.height);
         }
+        if s.rules != before.rules {
+            setup.rules = s.rules;
+        }
         if s.robot_folders != before.robot_folders {
             self.rescan(ctx);
         }
@@ -1062,7 +1320,7 @@ impl App {
             true,
         );
         let output = &live.output;
-        let toggled = screen::output_panel(
+        let event = screen::output_panel(
             root,
             "output",
             &live.robots,
@@ -1071,9 +1329,21 @@ impl App {
             &live.paint,
             |i| Cow::Borrowed(output.get(i).map_or("", String::as_str)),
         );
-        if let Some(i) = toggled {
-            let on = !live.paint[i];
-            live.set_paint(i, on);
+        let mut save = None;
+        match event {
+            Some(screen::OutputEvent::TogglePaint(i)) => {
+                let on = !live.paint[i];
+                live.set_paint(i, on);
+            }
+            Some(screen::OutputEvent::Save(i, text)) => {
+                save = Some(screen::output_save(&live.robots[i], text));
+            }
+            Some(screen::OutputEvent::Clear(i)) => {
+                if let Some(out) = live.output.get_mut(i) {
+                    out.clear();
+                }
+            }
+            None => {}
         }
         screen::controls_panel(root, "controls", |ui| {
             ui.horizontal(|ui| {
@@ -1141,6 +1411,7 @@ impl App {
                     width: live.width,
                     height: live.height,
                     robots: &live.robots,
+                    sentry_border: live.sentry_border,
                 };
                 view::draw(
                     ui,
@@ -1162,7 +1433,8 @@ impl App {
                     stopped: outcome.aborted,
                 };
                 let id = egui::Id::new(("results", self.battles));
-                screen::results_window(ctx, &mut self.sprites, id, &shown, |ui| {
+                let sprites = &mut self.sprites;
+                let request = screen::results_window(ctx, sprites, id, &shown, |ui| {
                     let replays = if self.setup.classic {
                         "Classic mode: the robots' timing differs, so it may go differently."
                     } else {
@@ -1194,6 +1466,9 @@ impl App {
                         next = Next::Setup;
                     }
                 });
+                if request.is_some() {
+                    save = request;
+                }
             }
             Some(Err(e)) => {
                 egui::Window::new("Battle failed").show(ctx, |ui| {
@@ -1204,6 +1479,9 @@ impl App {
                 });
             }
             None => {}
+        }
+        if let Some(save) = save {
+            self.save(save);
         }
         next
     }
@@ -1220,6 +1498,35 @@ fn browse_button(ui: &mut egui::Ui, hint: &str) -> bool {
         icons::folder(p, c, 7.0, color);
     })
     .clicked()
+}
+
+/// The rules' rows in a two-column grid: gun cooling rate, inactivity time, sentry border
+/// and hiding enemy names.
+fn rules_rows(ui: &mut egui::Ui, rules: &mut Rules) {
+    ui.label("Gun cooling rate");
+    ui.add(
+        egui::DragValue::new(&mut rules.gun_cooling_rate)
+            .range(0.01..=1.0)
+            .speed(0.01)
+            .fixed_decimals(2),
+    )
+    .on_hover_text("Gun heat lost per turn (classic's default 0.1)");
+    ui.end_row();
+    ui.label("Inactivity time");
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut rules.inactivity_time).range(0..=1_000_000));
+        ui.label("turns");
+    })
+    .response
+    .on_hover_text("Turns without damage before the robots start losing energy");
+    ui.end_row();
+    ui.label("Sentry border");
+    ui.add(egui::DragValue::new(&mut rules.sentry_border).range(50..=1000))
+        .on_hover_text("How far into the battlefield a sentry robot's border reaches");
+    ui.end_row();
+    ui.label("Enemy names");
+    ui.checkbox(&mut rules.hide_enemy_names, "Hide them from the robots");
+    ui.end_row();
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {
@@ -1455,8 +1762,13 @@ impl eframe::App for App {
             Tab::Start => self.start_page(root),
             Tab::Replay => match &mut self.replay {
                 Some(replay) => {
-                    if replay.ui(root, &mut self.sprites, style, &mut self.selected) {
+                    let mut save = None;
+                    let sprites = &mut self.sprites;
+                    if replay.ui(root, sprites, style, &mut self.selected, &mut save) {
                         self.replay = None;
+                    }
+                    if let Some(save) = save {
+                        self.save(save);
                     }
                 }
                 None => self.replay_page(root),
@@ -1465,6 +1777,7 @@ impl eframe::App for App {
             Tab::Options => self.options_page(root),
         }
         self.file_dialog(ctx);
+        self.save_error_window(ctx);
         // A file dropped on the window opens as a replay.
         let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
         if let Some(path) = dropped {
@@ -1532,7 +1845,38 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_robots;
+    use super::{GAME_TYPES, Setup, battle_file, parse_robots};
+    use crate::settings::Settings;
+
+    #[test]
+    fn a_game_type_sets_its_rules_and_is_recognised() {
+        let mut setup = Setup::new(&Settings::default());
+        let matching = |s: &Setup| GAME_TYPES.iter().filter(|g| g.matches(s)).count();
+        assert!(GAME_TYPES[0].matches(&setup), "the defaults are classic's");
+        setup.rules.inactivity_time = 900;
+        assert_eq!(matching(&setup), 0, "custom");
+        GAME_TYPES[2].apply(&mut setup);
+        assert!(GAME_TYPES[2].matches(&setup));
+        assert_eq!(matching(&setup), 1);
+        assert_eq!((setup.width, setup.height, setup.rounds), (1000, 1000, 35));
+    }
+
+    #[test]
+    fn a_battle_file_round_trips_through_the_setup() {
+        let mut setup = Setup::new(&Settings::default());
+        setup.robots = vec!["sample.Fire".into(), "sample.Fire".into()];
+        setup.rules.hide_enemy_names = true;
+        setup.rounds = 7;
+        let file = battle_file::BattleFile {
+            rules: setup.battle_rules(),
+            robots: setup.robots.clone(),
+        };
+        let text = battle_file::write(&file);
+        let mut opened = Setup::new(&Settings::default());
+        opened.open(battle_file::parse(&text, opened.battle_rules()).unwrap());
+        assert_eq!(opened.robots, setup.robots);
+        assert_eq!(opened.battle_rules(), setup.battle_rules());
+    }
 
     #[test]
     fn robots_from_the_command_line() {

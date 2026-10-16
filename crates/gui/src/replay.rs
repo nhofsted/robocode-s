@@ -29,6 +29,7 @@ pub struct ReplayView {
     robots: Vec<v1::RobotStatics>,
     width: f64,
     height: f64,
+    sentry_border: f64,
     rounds: i32,
     /// Where the turns come from.
     source: Source,
@@ -51,6 +52,8 @@ pub struct ReplayView {
     turns_per_second: u32,
     last_tick: Option<Instant>,
     paint_visible: Vec<bool>,
+    /// Per robot, the turn index its output was cleared at: output up to it is not shown.
+    cleared: Vec<Option<usize>>,
     /// The results window was closed at the last turn; it shows again there after a seek.
     results_closed: bool,
 }
@@ -118,9 +121,11 @@ impl ReplayView {
         let mut view = Self {
             title: title(path),
             paint_visible: vec![true; robots.len()],
+            cleared: vec![None; robots.len()],
             robots,
             width: f64::from(rules.battlefield_width),
             height: f64::from(rules.battlefield_height),
+            sentry_border: f64::from(rules.sentry_border_size),
             rounds: rules.num_rounds,
             source: Source::Recording {
                 seed: recording.header.seed,
@@ -153,8 +158,10 @@ impl ReplayView {
         let mut view = Self {
             title: title(path),
             paint_visible: vec![true; decoded.robots.len()],
+            cleared: vec![None; decoded.robots.len()],
             robots: decoded.robots,
             width: decoded.width,
+            sentry_border: 0.0,
             height: decoded.height,
             rounds: 1,
             turns: decoded.snapshots.len(),
@@ -253,12 +260,14 @@ impl ReplayView {
     }
 
     /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
+    /// A robot's output to save goes in `save`.
     pub fn ui(
         &mut self,
         root: &mut egui::Ui,
         sprites: &mut Sprites,
         style: Style,
         selected: &mut usize,
+        save: &mut Option<screen::SaveRequest>,
     ) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
@@ -279,7 +288,8 @@ impl ReplayView {
         if full {
             let output = &self.output;
             let position = self.position;
-            let toggled = screen::output_panel(
+            let cleared = &self.cleared;
+            let event = screen::output_panel(
                 root,
                 "replay-output",
                 &self.robots,
@@ -287,17 +297,31 @@ impl ReplayView {
                 selected,
                 &self.paint_visible,
                 |i| {
+                    let from = cleared.get(i).copied().flatten();
                     let text: String = output
                         .iter()
                         .take_while(|(turn, _, _)| *turn <= position)
-                        .filter(|(_, robot, _)| *robot == i)
+                        .filter(|(turn, robot, _)| {
+                            *robot == i && from.is_none_or(|from| *turn > from)
+                        })
                         .map(|(_, _, t)| t.as_str())
                         .collect();
                     Cow::Owned(text)
                 },
             );
-            if let Some(i) = toggled {
-                self.paint_visible[i] = !self.paint_visible[i];
+            match event {
+                Some(screen::OutputEvent::TogglePaint(i)) => {
+                    self.paint_visible[i] = !self.paint_visible[i];
+                }
+                Some(screen::OutputEvent::Save(i, text)) => {
+                    *save = Some(screen::output_save(&self.robots[i], text));
+                }
+                Some(screen::OutputEvent::Clear(i)) => {
+                    if let Some(c) = self.cleared.get_mut(i) {
+                        *c = Some(position);
+                    }
+                }
+                None => {}
             }
         }
         screen::controls_panel(root, "replay-controls", |ui| {
@@ -414,6 +438,7 @@ impl ReplayView {
                     width: self.width,
                     height: self.height,
                     robots: &self.robots,
+                    sentry_border: self.sentry_border,
                 };
                 let turns = (self.previous.as_ref(), shown.as_ref());
                 view::draw(ui, sprites, &field, style, turns, ui.max_rect());
@@ -432,7 +457,7 @@ impl ReplayView {
             };
             let id = egui::Id::new(("replay-results", &self.title));
             let mut again = false;
-            screen::results_window(ctx, sprites, id, &shown, |ui| {
+            let request = screen::results_window(ctx, sprites, id, &shown, |ui| {
                 if ui.button("Close").clicked() {
                     self.results_closed = true;
                 }
@@ -445,6 +470,9 @@ impl ReplayView {
                     again = true;
                 }
             });
+            if request.is_some() {
+                *save = request;
+            }
             if again {
                 self.seek(0);
                 self.playing = true;

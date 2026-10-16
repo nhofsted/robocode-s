@@ -12,6 +12,8 @@ pub struct Field<'a> {
     pub width: f64,
     pub height: f64,
     pub robots: &'a [v1::RobotStatics],
+    /// How far a sentry robot's border reaches into the field (0: none known).
+    pub sentry_border: f64,
 }
 
 /// How the battle is drawn (the options).
@@ -21,6 +23,17 @@ pub struct Style {
     pub scan_arcs: bool,
     /// Bullets in the robots' bullet colours; otherwise all in [`BULLET`].
     pub colored_bullets: bool,
+    /// Each robot's name below it and its energy above it.
+    pub robot_names: bool,
+    pub robot_energy: bool,
+    /// Explosions of bullet hits and of robots' deaths.
+    pub explosions: bool,
+    /// The floor's tiles; otherwise black.
+    pub ground: bool,
+    /// The sentry border, in a battle with a sentry robot.
+    pub sentry_border: bool,
+    /// The turns and frames per second, in the field's top left corner.
+    pub rates: bool,
 }
 
 /// Classic's bullet colour when a robot sets none.
@@ -215,10 +228,27 @@ pub fn draw(
     if t.scale == 0.0 {
         return rect;
     }
-    ground(&painter, sprites, t, field);
+    if style.ground {
+        ground(&painter, sprites, t, field);
+    } else {
+        // Told apart from the black around it.
+        painter.rect_filled(rect, 0.0, Color32::from_gray(18));
+    }
+    if style.rates {
+        rates(ui, &painter, rect, snapshot);
+    }
     let Some(snapshot) = snapshot else {
         return rect;
     };
+    if style.sentry_border
+        && field.sentry_border > 0.0
+        && field
+            .robots
+            .iter()
+            .any(|r| r.r#type.is_some_and(|t| t.sentry))
+    {
+        sentry_border(&painter, t, field);
+    }
     let ctx = ui.ctx().clone();
 
     if style.scan_arcs
@@ -255,25 +285,95 @@ pub fn draw(
         }
         let font = egui::FontId::proportional((11.0 * t.scale).clamp(8.0, 14.0));
         let half = t.len(24.0);
-        painter.text(
-            center - vec2(0.0, half),
-            egui::Align2::CENTER_BOTTOM,
-            format!("{:.1}", robot.energy.unwrap_or_default()),
-            font.clone(),
-            Color32::WHITE,
-        );
-        painter.text(
-            center + vec2(0.0, half),
-            egui::Align2::CENTER_TOP,
-            &statics.name,
-            font,
-            Color32::WHITE,
-        );
+        if style.robot_energy {
+            painter.text(
+                center - vec2(0.0, half),
+                egui::Align2::CENTER_BOTTOM,
+                format!("{:.1}", robot.energy.unwrap_or_default()),
+                font.clone(),
+                Color32::WHITE,
+            );
+        }
+        if style.robot_names {
+            painter.text(
+                center + vec2(0.0, half),
+                egui::Align2::CENTER_TOP,
+                &statics.name,
+                font,
+                Color32::WHITE,
+            );
+        }
     }
     for b in &snapshot.bullets {
         bullet(&painter, sprites, t, field, style, snapshot, b);
     }
     rect
+}
+
+/// The sentry border: a translucent red band along the walls, as wide as the border
+/// reaches into the field.
+fn sentry_border(painter: &egui::Painter, t: Transform, field: &Field) {
+    let (w, h) = (field.width, field.height);
+    let b = field.sentry_border.min(w / 2.0).min(h / 2.0);
+    let color = Color32::from_rgba_unmultiplied(255, 0, 0, 32);
+    let band = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        painter.rect_filled(
+            Rect::from_two_pos(t.point(x0, y0), t.point(x1, y1)),
+            0.0,
+            color,
+        );
+    };
+    band(0.0, 0.0, w, b);
+    band(0.0, h - b, w, h);
+    band(0.0, b, b, h - b);
+    band(w - b, b, w, h - b);
+}
+
+/// The turns and frames per second over the last second, measured here (once a frame),
+/// in the top left corner of `rect`.
+fn rates(ui: &egui::Ui, painter: &egui::Painter, rect: Rect, snapshot: Option<&v1::TurnSnapshot>) {
+    /// Since the last update: when it started, the frames and turns since, the last turn
+    /// seen; and the rates shown.
+    #[derive(Clone, Copy, Default)]
+    struct Rates {
+        since: f64,
+        frames: u32,
+        turns: u32,
+        last: Option<(i32, i64)>,
+        shown: (f64, f64),
+    }
+    let id = egui::Id::new("view-rates");
+    let now = ui.input(|i| i.time);
+    let mut r: Rates = ui.data(|d| d.get_temp(id)).unwrap_or(Rates {
+        since: now,
+        ..Default::default()
+    });
+    r.frames += 1;
+    let turn = snapshot.map(|s| (s.round, s.turn));
+    if turn.is_some() && turn != r.last {
+        r.turns += 1;
+        r.last = turn;
+    }
+    let elapsed = now - r.since;
+    if elapsed >= 1.0 {
+        r.shown = (f64::from(r.turns) / elapsed, f64::from(r.frames) / elapsed);
+        (r.since, r.frames, r.turns) = (now, 0, 0);
+    }
+    ui.data_mut(|d| d.insert_temp(id, r));
+    let text = format!("TPS {:.0}  FPS {:.0}", r.shown.0, r.shown.1);
+    let font = egui::FontId::monospace(11.0);
+    let at = rect.left_top() + vec2(6.0, 4.0);
+    painter.text(
+        at + vec2(1.0, 1.0),
+        egui::Align2::LEFT_TOP,
+        &text,
+        font.clone(),
+        Color32::BLACK,
+    );
+    painter.text(at, egui::Align2::LEFT_TOP, text, font, Color32::WHITE);
+    // Keep measuring while nothing else repaints.
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(250));
 }
 
 fn ground(painter: &egui::Painter, sprites: &Sprites, t: Transform, field: &Field) {
@@ -328,6 +428,9 @@ fn bullet(
         | v1::BulletState::HitBullet
         | v1::BulletState::HitWall
         | v1::BulletState::Exploded => {
+            if !style.explosions {
+                return;
+            }
             let frames = sprites.explosion.len();
             // Classic scales a hit by its power (√(1000·power)/128 of the 128-px frames). A
             // robot's death is classic's larger explosion, drawn here with the same frames,

@@ -14,7 +14,7 @@ use crate::sprites::{Part, Sprites, default_colors};
 use crate::view;
 use eframe::egui::{self, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use robocode_s_protocol::v1;
-use robocode_s_server::results::{COLUMNS, Contestant, cells, contestants, round};
+use robocode_s_server::results::{self as results, COLUMNS, Contestant, cells, contestants, round};
 use std::borrow::Cow;
 
 /// The size of a control's icon button.
@@ -228,8 +228,66 @@ pub fn energy_bar(painter: &egui::Painter, rect: Rect, energy: f64) {
     );
 }
 
+/// Text to save to a file the user picks: the dialog's title, the file name to suggest,
+/// and the text, or another text for a file with one of `by_extension`'s extensions.
+pub struct SaveRequest {
+    pub title: &'static str,
+    pub name: String,
+    pub text: String,
+    pub by_extension: Vec<(&'static str, String)>,
+}
+
+impl SaveRequest {
+    /// The text to save to `path`.
+    pub fn text_for(self, path: &std::path::Path) -> String {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        self.by_extension
+            .into_iter()
+            .find(|(e, _)| e.eq_ignore_ascii_case(extension))
+            .map_or(self.text, |(_, text)| text)
+    }
+}
+
+/// Saving a robot's output: suggested as the robot's name with `.txt`.
+pub fn output_save(robot: &v1::RobotStatics, text: String) -> SaveRequest {
+    let name: String = robot
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    SaveRequest {
+        title: "Save the output",
+        name: format!("{name}.txt"),
+        text,
+        by_extension: Vec::new(),
+    }
+}
+
+/// What the user did in the output panel, besides opening a tab (see [`output_panel`]).
+pub enum OutputEvent {
+    /// A robot's debug-paint marker was clicked.
+    TogglePaint(usize),
+    /// Save a robot's output (the text shown) to a file.
+    Save(usize, String),
+    /// Clear a robot's output.
+    Clear(usize),
+}
+
+/// An icon drawing function, as in [`icons`].
+type Icon = fn(&egui::Painter, egui::Pos2, f32, Color32);
+
+/// The width of the output's buttons (copy, save, clear) right of the tabs.
+const OUTPUT_BUTTON: f32 = 26.0;
+
 /// The robots' output: a tab per robot, with its debug-paint marker in the tab, over the
-/// selected robot's output (`text`). Returns the robot whose marker was clicked.
+/// selected robot's output (`text`), with buttons to copy, save and clear it right of the
+/// tabs. Copying is done here; the rest is returned.
 pub fn output_panel<'a>(
     root: &mut egui::Ui,
     id: &str,
@@ -238,8 +296,11 @@ pub fn output_panel<'a>(
     selected: &mut usize,
     paint: &[bool],
     text: impl FnOnce(usize) -> Cow<'a, str>,
-) -> Option<usize> {
-    let mut toggled = None;
+) -> Option<OutputEvent> {
+    let mut event = None;
+    let mut copy = false;
+    let mut save = false;
+    let mut clear = false;
     // A low window keeps most of its height for the field.
     let height = (root.available_height() * 0.22).clamp(90.0, 200.0);
     egui::Panel::bottom(id.to_string())
@@ -259,30 +320,58 @@ pub fn output_panel<'a>(
                 })
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    egui::ScrollArea::horizontal()
-                        .id_salt("output-tabs")
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 2.0;
-                                // Names share the width (truncated), down to a minimum.
-                                let share = ui.available_width() / robots.len().max(1) as f32;
-                                let names = (share - TAB_EXTRA - 2.0).clamp(56.0, 180.0);
-                                for (i, statics) in robots.iter().enumerate() {
-                                    let robot = snapshot.and_then(|s| s.robots.get(i));
-                                    let on = paint.get(i).copied().unwrap_or(false);
-                                    let open = *selected == i;
-                                    let tab = output_tab(ui, statics, robot, open, on, names);
-                                    if tab.toggle {
-                                        toggled = Some(i);
-                                    } else if tab.clicked {
-                                        *selected = i;
+                    ui.horizontal_top(|ui| {
+                        let buttons = 3.0 * (OUTPUT_BUTTON + ui.spacing().item_spacing.x);
+                        let tabs = (ui.available_width() - buttons).max(0.0);
+                        egui::ScrollArea::horizontal()
+                            .id_salt("output-tabs")
+                            .max_width(tabs)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    // Names share the width (truncated), down to a
+                                    // minimum.
+                                    let share = ui.available_width() / robots.len().max(1) as f32;
+                                    let names = (share - TAB_EXTRA - 2.0).clamp(56.0, 180.0);
+                                    for (i, statics) in robots.iter().enumerate() {
+                                        let robot = snapshot.and_then(|s| s.robots.get(i));
+                                        let on = paint.get(i).copied().unwrap_or(false);
+                                        let open = *selected == i;
+                                        let tab = output_tab(ui, statics, robot, open, on, names);
+                                        if tab.toggle {
+                                            event = Some(OutputEvent::TogglePaint(i));
+                                        } else if tab.clicked {
+                                            *selected = i;
+                                        }
                                     }
-                                }
+                                });
                             });
+                        let layout = egui::Layout::right_to_left(egui::Align::Center);
+                        let size = vec2(ui.available_width(), 28.0);
+                        ui.allocate_ui_with_layout(size, layout, |ui| {
+                            let button = |ui: &mut egui::Ui, hint: &str, draw: Icon| {
+                                icons::button(ui, OUTPUT_BUTTON, hint, false, |p, c, color| {
+                                    draw(p, c, 7.0, color)
+                                })
+                                .clicked()
+                            };
+                            clear = button(ui, "Clear the output", icons::clear);
+                            save = button(ui, "Save the output to a file", icons::save);
+                            copy = button(ui, "Copy the output", icons::copy);
                         });
+                    });
                 });
             let i = (*selected).min(robots.len().saturating_sub(1));
             let text = text(i);
+            if copy {
+                ui.ctx().copy_text(text.to_string());
+            }
+            if save {
+                event = Some(OutputEvent::Save(i, text.to_string()));
+            }
+            if clear {
+                event = Some(OutputEvent::Clear(i));
+            }
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
@@ -302,7 +391,7 @@ pub fn output_panel<'a>(
                         });
                 });
         });
-    toggled
+    event
 }
 
 /// What happened to an output tab: clicked (open it), or its paint marker clicked.
@@ -552,15 +641,18 @@ pub struct Outcome<'a> {
 
 /// The results window, centred when it opens (once per `id`): the winner on the left (its
 /// tank in its colours, its name), classic's results table on the right, and `buttons`
-/// below, right-aligned (add them right to left).
+/// below, right-aligned (add them right to left), left of them buttons to copy the table
+/// (done here) and to save it, which returns what to save: CSV, or the table as text in
+/// a `.txt` file.
 pub fn results_window(
     ctx: &egui::Context,
     sprites: &mut Sprites,
     id: egui::Id,
     outcome: &Outcome,
     buttons: impl FnOnce(&mut egui::Ui),
-) {
+) -> Option<SaveRequest> {
     let rows = contestants(outcome.robots, outcome.results);
+    let mut save = None;
     let screen = ctx.content_rect();
     egui::Window::new(outcome.title)
         .id(id)
@@ -596,9 +688,32 @@ pub fn results_window(
                 |ui| {
                     ui.spacing_mut().button_padding = vec2(10.0, 4.0);
                     buttons(ui);
+                    ui.add_space(8.0);
+                    let hint = "Save the results: CSV, or the table as text in a .txt file";
+                    if icons::button(ui, OUTPUT_BUTTON, hint, false, |p, c, color| {
+                        icons::save(p, c, 7.0, color)
+                    })
+                    .clicked()
+                    {
+                        save = Some(SaveRequest {
+                            title: "Save the results",
+                            name: "results.csv".to_string(),
+                            text: results::csv(&rows),
+                            by_extension: vec![("txt", results::table(&rows))],
+                        });
+                    }
+                    let hint = "Copy the results table";
+                    if icons::button(ui, OUTPUT_BUTTON, hint, false, |p, c, color| {
+                        icons::copy(p, c, 7.0, color)
+                    })
+                    .clicked()
+                    {
+                        ui.ctx().copy_text(results::table(&rows));
+                    }
                 },
             );
         });
+    save
 }
 
 /// The width of the winner's column in the results window.

@@ -44,30 +44,46 @@ pub fn describe(
     parse_description(&run_describe(host, jars, robots, home)?)
 }
 
-/// A robot or team found in the jars.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A robot or team found in the jars, with the details from its `.properties` (empty
+/// when it has none).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Listed {
     /// The name to select it by, with version (`jk.mega.DrussGT 3.1.16`).
     pub name: String,
     pub team: bool,
+    pub author: String,
+    pub version: String,
+    pub description: String,
+    pub webpage: String,
 }
 
 /// Every robot and team in `jars`, as classic's repository finds them.
 pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec<Listed>, String> {
-    let text = run_describe(host, jars, &[], home)?;
-    let mut robots: Vec<Listed> = text
-        .lines()
-        .filter_map(|l| l.strip_prefix("list\t"))
-        .filter_map(|l| {
-            let (name, team) = l.rsplit_once('\t')?;
-            Some(Listed {
-                name: name.to_string(),
-                team: team == "1",
-            })
-        })
-        .collect();
+    let mut robots = parse_list(&run_describe(host, jars, &[], home)?);
     robots.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(robots)
+}
+
+/// Parses the robot host's `--describe` list: per robot its name, whether it is a team,
+/// then its author, version, description and web page.
+fn parse_list(text: &str) -> Vec<Listed> {
+    text.lines()
+        .filter_map(|l| l.strip_prefix("list\t"))
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let name = f.next()?.to_string();
+            let team = f.next()? == "1";
+            let mut next = || f.next().unwrap_or("").to_string();
+            Some(Listed {
+                name,
+                team,
+                author: next(),
+                version: next(),
+                description: next(),
+                webpage: next(),
+            })
+        })
+        .collect()
 }
 
 /// Runs the robot host's `--describe` and returns its output.
@@ -488,6 +504,19 @@ pub fn lookup_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_the_list_with_details() {
+        let text = "noise\nlist\tsample.Fire\t0\tMathew Nelson\t1.0\tShoots\thttp://x\n\
+                    list\tsampleteam.MyFirstTeam\t1\nlist\told.Robot\t0\t\t\t\t\n";
+        let list = parse_list(text);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].author, "Mathew Nelson");
+        assert_eq!(list[0].description, "Shoots");
+        assert_eq!(list[0].webpage, "http://x");
+        assert!(list[1].team && list[1].author.is_empty());
+        assert_eq!(list[2].name, "old.Robot");
+    }
 
     fn robot(name: &str, team: Option<&str>) -> Described {
         Described {

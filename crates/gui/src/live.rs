@@ -26,6 +26,8 @@ pub struct Live {
     pub robots: Vec<v1::RobotStatics>,
     pub width: f64,
     pub height: f64,
+    /// How far the sentry border reaches into the field.
+    pub sentry_border: f64,
     pub rounds: i32,
     pub seed: i64,
     pub latest: Option<v1::TurnSnapshot>,
@@ -56,6 +58,7 @@ impl Live {
             f64::from(rules.height),
             rules.num_rounds,
         );
+        let sentry_border = f64::from(rules.sentry_border_size);
         let ctx = ctx.clone();
         thread::spawn(move || {
             let tx = updates_tx.clone();
@@ -74,6 +77,7 @@ impl Live {
             robots,
             width,
             height,
+            sentry_border,
             rounds,
             seed: 0,
             latest: None,

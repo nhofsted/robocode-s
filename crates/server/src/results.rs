@@ -84,6 +84,84 @@ pub fn cells(rows: &[Contestant]) -> Vec<[String; 12]> {
         .collect()
 }
 
+/// The results table with classic's columns.
+pub fn table(rows: &[Contestant]) -> String {
+    let mut lines: Vec<Vec<String>> = vec![COLUMNS.iter().map(|h| h.to_string()).collect()];
+    lines.extend(cells(rows).into_iter().map(Vec::from));
+    let widths: Vec<usize> = (0..COLUMNS.len())
+        .map(|col| {
+            lines
+                .iter()
+                .map(|l| l[col].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut out = String::new();
+    for line in &lines {
+        let cells: Vec<String> = line
+            .iter()
+            .enumerate()
+            .map(|(col, cell)| {
+                // Names left-aligned, numbers right-aligned.
+                if col == 1 {
+                    format!("{cell:<w$}", w = widths[col])
+                } else {
+                    format!("{cell:>w$}", w = widths[col])
+                }
+            })
+            .collect();
+        out.push_str(cells.join("  ").trim_end());
+        out.push('\n');
+    }
+    out
+}
+
+/// The results as CSV: a header with classic's columns (the total score's share in a
+/// column of its own), then a row per contestant with the values rounded as classic shows
+/// them.
+pub fn csv(rows: &[Contestant]) -> String {
+    let total: f64 = rows.iter().map(|c| c.score).sum();
+    let mut header: Vec<&str> = COLUMNS.to_vec();
+    header.insert(3, "Score %");
+    let mut out = header.join(",");
+    out.push('\n');
+    for c in rows {
+        let percent = if total > 0.0 {
+            round(100.0 * c.score / total)
+        } else {
+            0
+        };
+        let line = [
+            c.rank.to_string(),
+            csv_field(&c.name),
+            round(c.score).to_string(),
+            percent.to_string(),
+            round(c.survival).to_string(),
+            round(c.last_survivor_bonus).to_string(),
+            round(c.bullet_damage).to_string(),
+            round(c.bullet_damage_bonus).to_string(),
+            round(c.ram_damage).to_string(),
+            round(c.ram_damage_bonus).to_string(),
+            c.firsts.to_string(),
+            c.seconds.to_string(),
+            c.thirds.to_string(),
+        ];
+        out.push_str(&line.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// A CSV field: quoted when it holds a comma, a quote or a line break.
+fn csv_field(text: &str) -> String {
+    if text.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text.to_string()
+    }
+}
+
 /// Groups per-robot `results` (by robot index) into contestants in battle order, then
 /// ranks them by total score; equal scores keep the robots' own ranking.
 pub fn contestants(statics: &[v1::RobotStatics], results: &[v1::Results]) -> Vec<Contestant> {
@@ -207,5 +285,39 @@ mod tests {
         let statics = [robot("a", None), robot("b", None)];
         let rows = contestants(&statics, &[result(2, 0.0, 0), result(1, 0.0, 0)]);
         assert_eq!(rows[0].name, "b");
+    }
+
+    #[test]
+    fn table_has_classic_columns_and_percentages() {
+        let statics = [robot("sample.Fire", None), robot("sample.Walls", None)];
+        let rows = contestants(&statics, &[result(2, 250.0, 1), result(1, 750.0, 9)]);
+        let t = table(&rows);
+        let lines: Vec<&str> = t.lines().collect();
+        assert!(lines[0].starts_with("Rank  Robot Name"));
+        assert!(lines[0].ends_with("1sts  2nds  3rds"));
+        assert!(lines[1].starts_with(" 1st  sample.Walls"));
+        assert!(lines[1].contains("750 (75%)"));
+        assert!(lines[2].contains("250 (25%)"));
+        assert_eq!(ordinal(11), "11th");
+        assert_eq!(ordinal(22), "22nd");
+    }
+
+    #[test]
+    fn csv_has_a_header_and_a_row_per_contestant() {
+        let statics = [robot("sample.Fire", None), robot("odd, \"name\"", None)];
+        let rows = contestants(&statics, &[result(2, 250.4, 1), result(1, 749.6, 9)]);
+        let csv = csv(&rows);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(
+            lines[0],
+            "Rank,Robot Name,Total Score,Score %,Survival,Surv Bonus,Bullet Dmg,\
+             Bullet Bonus,Ram Dmg * 2,Ram Bonus,1sts,2nds,3rds"
+        );
+        assert_eq!(
+            lines[1],
+            "1,\"odd, \"\"name\"\"\",750,75,375,0,0,0,0,0,9,0,0"
+        );
+        assert_eq!(lines[2], "2,sample.Fire,250,25,125,0,0,0,0,0,1,0,0");
+        assert_eq!(lines.len(), 3);
     }
 }
