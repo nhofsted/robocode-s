@@ -19,6 +19,8 @@ Robots are class names as in classic Robocode, optionally with version
 (sample.Fire, jk.mega.DrussGT 3.1.16); a team expands into its members.
 
 Battle:
+  --battle FILE          classic .battle file: its robots and rules (options
+                         after it override its rules)
   --rounds N             rounds (default 10)
   --seed N               battle seed (default: random, printed)
   --width N, --height N  battlefield size (default 800x600)
@@ -94,6 +96,15 @@ impl Options {
                     .map_err(|_| format!("{name}: not a valid number: {v}"))
             }
             match arg.as_str() {
+                "--battle" => {
+                    let path = value(arg)?;
+                    let text =
+                        std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+                    let file = robocode_s_server::battle_file::parse(&text, o.rules.clone())
+                        .map_err(|e| format!("{path}: {e}"))?;
+                    o.rules = file.rules;
+                    o.robots.extend(file.robots);
+                }
                 "--rounds" => o.rules.num_rounds = number(arg, value(arg)?)?,
                 "--seed" => o.seed = Some(number(arg, value(arg)?)?),
                 "--width" => o.rules.width = number(arg, value(arg)?)?,
@@ -254,6 +265,24 @@ mod tests {
         assert_eq!(o.rules.height, 600);
         assert!(o.rules.hide_enemy_names && o.json && !o.classic);
         assert_eq!(o.seed, Some(-7));
+    }
+
+    #[test]
+    fn reads_a_battle_file() {
+        let path =
+            std::env::temp_dir().join(format!("robocode-s-cli-{}.battle", std::process::id()));
+        std::fs::write(
+            &path,
+            "robocode.battle.numRounds=35\nrobocode.battleField.width=1000\n\
+             robocode.battle.selectedRobots=sample.Fire,sample.Walls\n",
+        )
+        .unwrap();
+        let line = format!("--battle {} --rounds 3 sample.Crazy", path.display());
+        let o = Options::parse(&args(&line)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(o.robots, ["sample.Fire", "sample.Walls", "sample.Crazy"]);
+        assert_eq!((o.rules.num_rounds, o.rules.width), (3, 1000));
+        assert!(Options::parse(&args("--battle /no/such.battle")).is_err());
     }
 
     #[test]

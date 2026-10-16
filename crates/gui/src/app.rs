@@ -19,7 +19,7 @@ use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{
     Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
 };
-use robocode_s_server::{BattleOutcome, ServerConfig};
+use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -55,6 +55,34 @@ impl Setup {
             paint: false,
             turns_per_second: 30,
             rules: settings.rules,
+        }
+    }
+
+    /// The setup's rules, as the engine takes them.
+    pub fn battle_rules(&self) -> BattleRules {
+        BattleRules {
+            width: self.width,
+            height: self.height,
+            num_rounds: self.rounds.max(1),
+            gun_cooling_rate: self.rules.gun_cooling_rate,
+            inactivity_time: self.rules.inactivity_time,
+            hide_enemy_names: self.rules.hide_enemy_names,
+            sentry_border_size: self.rules.sentry_border,
+        }
+    }
+
+    /// Takes the rules of a `.battle` file, and its robots if it names any.
+    pub fn open(&mut self, file: battle_file::BattleFile) {
+        let r = file.rules;
+        (self.width, self.height, self.rounds) = (r.width, r.height, r.num_rounds.max(1));
+        self.rules = Rules {
+            gun_cooling_rate: r.gun_cooling_rate,
+            inactivity_time: r.inactivity_time,
+            hide_enemy_names: r.hide_enemy_names,
+            sentry_border: r.sentry_border_size,
+        };
+        if !file.robots.is_empty() {
+            self.robots = file.robots;
         }
     }
 }
@@ -223,6 +251,8 @@ pub enum Browse {
     Folder,
     /// A file to save [`App::saving`] to.
     Save,
+    /// A classic `.battle` file to open into the battle setup.
+    OpenBattle,
 }
 
 /// What the user wants from the battle screen.
@@ -559,15 +589,7 @@ impl App {
     fn launch(&mut self, ctx: &egui::Context, seed: i64) {
         let s = &self.setup;
         let config = ServerConfig {
-            rules: BattleRules {
-                width: s.width,
-                height: s.height,
-                num_rounds: s.rounds.max(1),
-                gun_cooling_rate: s.rules.gun_cooling_rate,
-                inactivity_time: s.rules.inactivity_time,
-                hide_enemy_names: s.rules.hide_enemy_names,
-                sentry_border_size: s.rules.sentry_border,
-            },
+            rules: s.battle_rules(),
             seed,
             deterministic: !s.classic,
             record: (!s.record.trim().is_empty()).then(|| PathBuf::from(s.record.trim())),
@@ -671,6 +693,7 @@ impl App {
 
             section(ui, "Battle");
             let mut browse = None;
+            let mut save_battle = false;
             let s = &mut app.setup;
             egui::Grid::new("setup")
                 .num_columns(2)
@@ -734,9 +757,27 @@ impl App {
                     ui.label("Debug paint");
                     ui.checkbox(&mut s.paint, "On for every robot");
                     ui.end_row();
+                    ui.label("Battle file");
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Open…")
+                            .on_hover_text("The robots and rules from a classic .battle file")
+                            .clicked()
+                        {
+                            browse = Some(Browse::OpenBattle);
+                        }
+                        save_battle = ui
+                            .button("Save…")
+                            .on_hover_text("The robots and rules as a classic .battle file")
+                            .clicked();
+                    });
+                    ui.end_row();
                 });
             if let Some(field) = browse {
                 app.browse(field);
+            }
+            if save_battle {
+                app.save_battle();
             }
 
             ui.add_space(20.0);
@@ -870,7 +911,7 @@ impl App {
             Browse::Record => &self.setup.record,
             Browse::Replay => &self.open_path,
             Browse::Folder => &self.new_folder,
-            Browse::Save => "",
+            Browse::Save | Browse::OpenBattle => "",
         };
         let path = expand_home(text.trim());
         let dir = match field {
@@ -898,12 +939,13 @@ impl App {
                 Browse::Replay => "Open a recording",
                 Browse::Folder => "Add a robot folder",
                 Browse::Save => saving.map_or("Save", |s| s.title),
+                Browse::OpenBattle => "Open a battle file",
             }
             .to_string(),
         );
         match field {
             Browse::Record | Browse::Save => self.files.save_file(),
-            Browse::Replay => self.files.pick_file(),
+            Browse::Replay | Browse::OpenBattle => self.files.pick_file(),
             Browse::Folder => self.files.pick_directory(),
         }
         self.browsing = Some(field);
@@ -931,6 +973,7 @@ impl App {
                         self.settings_changed(ctx, &before);
                     }
                 }
+                Browse::OpenBattle => self.open_battle(&path),
                 Browse::Save => {
                     if let Some(saving) = self.saving.take()
                         && let Err(e) = std::fs::write(&path, saving.text_for(&path))
@@ -943,6 +986,35 @@ impl App {
             self.browsing = None;
             self.saving = None;
         }
+    }
+
+    /// Opens a classic `.battle` file into the battle setup: its robots and rules.
+    fn open_battle(&mut self, path: &std::path::Path) {
+        let file = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| battle_file::parse(&text, self.setup.battle_rules()));
+        match file {
+            Ok(file) => {
+                self.setup.open(file);
+                self.picked_selected = None;
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("{}: {e}", path.display())),
+        }
+    }
+
+    /// Asks where to save the battle setup as a classic `.battle` file, and saves it.
+    fn save_battle(&mut self) {
+        let file = battle_file::BattleFile {
+            rules: self.setup.battle_rules(),
+            robots: self.setup.robots.clone(),
+        };
+        self.save(screen::SaveRequest {
+            title: "Save the battle",
+            name: "battle.battle".to_string(),
+            text: battle_file::write(&file),
+            by_extension: Vec::new(),
+        });
     }
 
     /// Asks where to save `request`'s text, and saves it there.
@@ -1773,7 +1845,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{GAME_TYPES, Setup, parse_robots};
+    use super::{GAME_TYPES, Setup, battle_file, parse_robots};
     use crate::settings::Settings;
 
     #[test]
@@ -1787,6 +1859,23 @@ mod tests {
         assert!(GAME_TYPES[2].matches(&setup));
         assert_eq!(matching(&setup), 1);
         assert_eq!((setup.width, setup.height, setup.rounds), (1000, 1000, 35));
+    }
+
+    #[test]
+    fn a_battle_file_round_trips_through_the_setup() {
+        let mut setup = Setup::new(&Settings::default());
+        setup.robots = vec!["sample.Fire".into(), "sample.Fire".into()];
+        setup.rules.hide_enemy_names = true;
+        setup.rounds = 7;
+        let file = battle_file::BattleFile {
+            rules: setup.battle_rules(),
+            robots: setup.robots.clone(),
+        };
+        let text = battle_file::write(&file);
+        let mut opened = Setup::new(&Settings::default());
+        opened.open(battle_file::parse(&text, opened.battle_rules()).unwrap());
+        assert_eq!(opened.robots, setup.robots);
+        assert_eq!(opened.battle_rules(), setup.battle_rules());
     }
 
     #[test]

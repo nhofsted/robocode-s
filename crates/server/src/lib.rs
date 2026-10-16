@@ -6,6 +6,7 @@
 //! Threads and blocking TCP: every connection has a reader thread that forwards its
 //! messages to the battle loop, which owns the engine and does all writing.
 
+pub mod battle_file;
 pub mod convert;
 pub mod driver;
 pub mod recording;

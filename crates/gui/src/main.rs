@@ -39,8 +39,9 @@ frame on or off (default: on under WSLg, whose compositor crashes on the
 system's frame).
 
   --tab NAME         open a tab at start: start, replay or options
-  --browse FIELD     open the file dialog of a field at start: record, replay or
-                     folder (the options' robot folder), on its tab
+  --browse FIELD     open the file dialog of a field at start: record, replay,
+                     folder (the options' robot folder) or battle (a .battle file
+                     to open), on its tab
   --size WxH         the window's size in points (default 1200x860, at least 720x480
                      except with --screenshot)
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
@@ -99,8 +100,11 @@ fn main() -> ExitCode {
                     "record" => (Browse::Record, Tab::Start),
                     "replay" => (Browse::Replay, Tab::Replay),
                     "folder" => (Browse::Folder, Tab::Options),
+                    "battle" => (Browse::OpenBattle, Tab::Start),
                     _ => {
-                        eprint!("--browse wants record, replay or folder, not {name:?}\n\n{USAGE}");
+                        eprint!(
+                            "--browse wants record, replay, folder or battle, not {name:?}\n\n{USAGE}"
+                        );
                         return ExitCode::from(2);
                     }
                 };
