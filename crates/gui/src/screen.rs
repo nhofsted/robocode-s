@@ -14,7 +14,7 @@ use crate::sprites::{Part, Sprites, default_colors};
 use crate::view;
 use eframe::egui::{self, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use robocode_s_protocol::v1;
-use robocode_s_server::results::{COLUMNS, Contestant, cells, contestants, round};
+use robocode_s_server::results::{self as results, COLUMNS, Contestant, cells, contestants, round};
 use std::borrow::Cow;
 
 /// The size of a control's icon button.
@@ -229,11 +229,23 @@ pub fn energy_bar(painter: &egui::Painter, rect: Rect, energy: f64) {
 }
 
 /// Text to save to a file the user picks: the dialog's title, the file name to suggest,
-/// and the text.
+/// and the text, or another text for a file with one of `by_extension`'s extensions.
 pub struct SaveRequest {
     pub title: &'static str,
     pub name: String,
     pub text: String,
+    pub by_extension: Vec<(&'static str, String)>,
+}
+
+impl SaveRequest {
+    /// The text to save to `path`.
+    pub fn text_for(self, path: &std::path::Path) -> String {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        self.by_extension
+            .into_iter()
+            .find(|(e, _)| e.eq_ignore_ascii_case(extension))
+            .map_or(self.text, |(_, text)| text)
+    }
 }
 
 /// Saving a robot's output: suggested as the robot's name with `.txt`.
@@ -253,6 +265,7 @@ pub fn output_save(robot: &v1::RobotStatics, text: String) -> SaveRequest {
         title: "Save the output",
         name: format!("{name}.txt"),
         text,
+        by_extension: Vec::new(),
     }
 }
 
@@ -628,15 +641,18 @@ pub struct Outcome<'a> {
 
 /// The results window, centred when it opens (once per `id`): the winner on the left (its
 /// tank in its colours, its name), classic's results table on the right, and `buttons`
-/// below, right-aligned (add them right to left).
+/// below, right-aligned (add them right to left), left of them buttons to copy the table
+/// (done here) and to save it, which returns what to save: CSV, or the table as text in
+/// a `.txt` file.
 pub fn results_window(
     ctx: &egui::Context,
     sprites: &mut Sprites,
     id: egui::Id,
     outcome: &Outcome,
     buttons: impl FnOnce(&mut egui::Ui),
-) {
+) -> Option<SaveRequest> {
     let rows = contestants(outcome.robots, outcome.results);
+    let mut save = None;
     let screen = ctx.content_rect();
     egui::Window::new(outcome.title)
         .id(id)
@@ -672,9 +688,32 @@ pub fn results_window(
                 |ui| {
                     ui.spacing_mut().button_padding = vec2(10.0, 4.0);
                     buttons(ui);
+                    ui.add_space(8.0);
+                    let hint = "Save the results: CSV, or the table as text in a .txt file";
+                    if icons::button(ui, OUTPUT_BUTTON, hint, false, |p, c, color| {
+                        icons::save(p, c, 7.0, color)
+                    })
+                    .clicked()
+                    {
+                        save = Some(SaveRequest {
+                            title: "Save the results",
+                            name: "results.csv".to_string(),
+                            text: results::csv(&rows),
+                            by_extension: vec![("txt", results::table(&rows))],
+                        });
+                    }
+                    let hint = "Copy the results table";
+                    if icons::button(ui, OUTPUT_BUTTON, hint, false, |p, c, color| {
+                        icons::copy(p, c, 7.0, color)
+                    })
+                    .clicked()
+                    {
+                        ui.ctx().copy_text(results::table(&rows));
+                    }
                 },
             );
         });
+    save
 }
 
 /// The width of the winner's column in the results window.

@@ -453,7 +453,7 @@ impl ReplayView {
             };
             let id = egui::Id::new(("replay-results", &self.title));
             let mut again = false;
-            screen::results_window(ctx, sprites, id, &shown, |ui| {
+            let request = screen::results_window(ctx, sprites, id, &shown, |ui| {
                 if ui.button("Close").clicked() {
                     self.results_closed = true;
                 }
@@ -466,6 +466,9 @@ impl ReplayView {
                     again = true;
                 }
             });
+            if request.is_some() {
+                *save = request;
+            }
             if again {
                 self.seek(0);
                 self.playing = true;

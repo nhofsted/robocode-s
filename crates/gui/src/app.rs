@@ -813,7 +813,7 @@ impl App {
                 }
                 Browse::Save => {
                     if let Some(saving) = self.saving.take()
-                        && let Err(e) = std::fs::write(&path, saving.text)
+                        && let Err(e) = std::fs::write(&path, saving.text_for(&path))
                     {
                         self.save_error = Some(format!("{}: {e}", path.display()));
                     }
@@ -1218,7 +1218,8 @@ impl App {
                     stopped: outcome.aborted,
                 };
                 let id = egui::Id::new(("results", self.battles));
-                screen::results_window(ctx, &mut self.sprites, id, &shown, |ui| {
+                let sprites = &mut self.sprites;
+                let request = screen::results_window(ctx, sprites, id, &shown, |ui| {
                     let replays = if self.setup.classic {
                         "Classic mode: the robots' timing differs, so it may go differently."
                     } else {
@@ -1250,6 +1251,9 @@ impl App {
                         next = Next::Setup;
                     }
                 });
+                if request.is_some() {
+                    save = request;
+                }
             }
             Some(Err(e)) => {
                 egui::Window::new("Battle failed").show(ctx, |ui| {
