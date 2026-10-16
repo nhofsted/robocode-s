@@ -256,6 +256,12 @@ impl App {
         Style {
             scan_arcs: self.settings.scan_arcs,
             colored_bullets: self.settings.colored_bullets,
+            robot_names: self.settings.robot_names,
+            robot_energy: self.settings.robot_energy,
+            explosions: self.settings.explosions,
+            ground: self.settings.ground,
+            sentry_border: self.settings.sentry_border,
+            rates: self.settings.rates,
         }
     }
 
@@ -1030,6 +1036,24 @@ impl App {
                         "Bullets in their robot's bullet colour",
                     );
                     ui.end_row();
+                    ui.label("Robots");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut s.robot_names, "Names");
+                        ui.checkbox(&mut s.robot_energy, "Energy");
+                    });
+                    ui.end_row();
+                    ui.label("Explosions");
+                    ui.checkbox(&mut s.explosions, "Show hits and deaths exploding");
+                    ui.end_row();
+                    ui.label("Ground");
+                    ui.checkbox(&mut s.ground, "Draw the floor tiles");
+                    ui.end_row();
+                    ui.label("Sentry border");
+                    ui.checkbox(&mut s.sentry_border, "Show it when a sentry robot fights");
+                    ui.end_row();
+                    ui.label("Speed");
+                    ui.checkbox(&mut s.rates, "Show the turns and frames per second");
+                    ui.end_row();
                 });
 
             section(ui, "New battles");
@@ -1207,6 +1231,7 @@ impl App {
                     width: live.width,
                     height: live.height,
                     robots: &live.robots,
+                    sentry_border: live.sentry_border,
                 };
                 view::draw(
                     ui,

@@ -29,6 +29,7 @@ pub struct ReplayView {
     robots: Vec<v1::RobotStatics>,
     width: f64,
     height: f64,
+    sentry_border: f64,
     rounds: i32,
     /// Where the turns come from.
     source: Source,
@@ -124,6 +125,7 @@ impl ReplayView {
             robots,
             width: f64::from(rules.battlefield_width),
             height: f64::from(rules.battlefield_height),
+            sentry_border: f64::from(rules.sentry_border_size),
             rounds: rules.num_rounds,
             source: Source::Recording {
                 seed: recording.header.seed,
@@ -159,6 +161,7 @@ impl ReplayView {
             cleared: vec![None; decoded.robots.len()],
             robots: decoded.robots,
             width: decoded.width,
+            sentry_border: 0.0,
             height: decoded.height,
             rounds: 1,
             turns: decoded.snapshots.len(),
@@ -435,6 +438,7 @@ impl ReplayView {
                     width: self.width,
                     height: self.height,
                     robots: &self.robots,
+                    sentry_border: self.sentry_border,
                 };
                 let turns = (self.previous.as_ref(), shown.as_ref());
                 view::draw(ui, sprites, &field, style, turns, ui.max_rect());
