@@ -7,7 +7,8 @@
 //! The pointer counts over the battlefield only (a window over it hides it); a drag or
 //! release that began there is followed outside. Keys go to robots while the
 //! battlefield has focus (the pointer is over it, or it was clicked last) and no text
-//! field takes them; egui still sees every event, so no shortcut is lost.
+//! field takes them; egui still sees every event, so no shortcut is lost. Ctrl+wheel and
+//! Ctrl+drag zoom and pan the view (`view::navigate`) and are not passed on.
 
 use crate::view::Transform;
 use eframe::egui::{self, Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect};
@@ -121,7 +122,8 @@ impl Interaction {
                     let slot = (b - 1) as usize;
                     if pressed {
                         self.focused = over(pos);
-                        if !self.focused {
+                        // Ctrl+drag pans the view (`view::navigate`): not the robots'.
+                        if !self.focused || modifiers.command {
                             continue;
                         }
                         self.held[slot] = true;
@@ -147,6 +149,10 @@ impl Interaction {
                     modifiers,
                     ..
                 } => {
+                    // Ctrl+wheel zooms the view (`view::navigate`): not the robots'.
+                    if modifiers.command {
+                        continue;
+                    }
                     let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
                         continue;
                     };

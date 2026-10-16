@@ -25,6 +25,9 @@ pub struct Settings {
     pub ground: bool,
     pub sentry_border: bool,
     pub rates: bool,
+    /// Classic's sound effects (off by default, as in classic), and their volume (0 to 1).
+    pub sound: bool,
+    pub volume: f32,
     /// The defaults for new battles.
     pub classic: bool,
     pub rounds: i32,
@@ -69,6 +72,8 @@ impl Default for Settings {
             ground: true,
             sentry_border: true,
             rates: false,
+            sound: false,
+            volume: 0.7,
             classic: false,
             rounds: 10,
             width: 800,
@@ -261,6 +266,8 @@ mod tests {
             ground: true,
             sentry_border: false,
             rates: true,
+            sound: true,
+            volume: 0.25,
             classic: true,
             rounds: 35,
             width: 1000,

@@ -10,6 +10,7 @@ use crate::replay::ReplayView;
 use crate::screen;
 use crate::settings::{Contents, Rules, Settings};
 use crate::shell::{self, Tab};
+use crate::sound::{self, Sound};
 use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
@@ -213,6 +214,10 @@ pub struct App {
     kill_at: Option<(i64, usize)>,
     /// `--input-at`, by turn, until sent.
     input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
+    /// How battles and replays first show the battlefield (`--zoom`; fitted by default).
+    camera: view::Camera,
+    /// The sound effects' output, opened when sound is first on.
+    sound: Sound,
     open_path: String,
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
@@ -284,6 +289,8 @@ pub struct Launch {
     /// Mouse and keyboard events to send at turns of the first round, as the battlefield
     /// would (`--input-at`, for screenshots and testing).
     pub input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
+    /// How battles and replays first show the battlefield (`--zoom`, for screenshots).
+    pub camera: view::Camera,
 }
 
 impl App {
@@ -312,6 +319,8 @@ impl App {
             screenshot,
             kill_at: launch.kill_at,
             input_at: launch.input_at,
+            camera: launch.camera,
+            sound: Sound::default(),
             open_path: String::new(),
             available: None,
             listing: None,
@@ -654,6 +663,7 @@ impl App {
                         .map(|r| r.statics.name.clone())
                         .collect();
                     let mut live = Live::start(ctx, host, battle);
+                    live.camera = self.camera;
                     live.seed = starting.seed;
                     live.set_speed(starting.turns_per_second);
                     if starting.paint {
@@ -683,9 +693,10 @@ impl App {
     fn open_replay(&mut self, path: PathBuf) {
         self.tab = Tab::Replay;
         match ReplayView::open(&path) {
-            Ok(view) => {
+            Ok(mut view) => {
                 self.selected = 0;
                 self.replay_error = None;
+                view.camera = self.camera;
                 self.replay = Some(Box::new(view));
             }
             Err(e) => self.replay_error = Some(format!("{}: {e}", path.display())),
@@ -1251,6 +1262,28 @@ impl App {
                     ui.label("Speed");
                     ui.checkbox(&mut s.rates, "Show the turns and frames per second");
                     ui.end_row();
+                    ui.label("Sound");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut s.sound, "Gunshots, hits and explosions")
+                            .on_hover_text(format!(
+                                "Classic's sound effects, up to {} turns per second.",
+                                sound::MAX_TPS
+                            ));
+                        ui.add_enabled(
+                            s.sound,
+                            egui::Slider::new(&mut s.volume, 0.0..=1.0)
+                                .show_value(false)
+                                .text("Volume"),
+                        );
+                    });
+                    ui.end_row();
+                    if s.sound
+                        && let Some(e) = app.sound.error()
+                    {
+                        ui.label("");
+                        ui.label(RichText::new(format!("No sound: {e}")).weak());
+                        ui.end_row();
+                    }
                 });
 
             section(ui, "New battles");
@@ -1434,16 +1467,19 @@ impl App {
                     sentry_border: live.sentry_border,
                 };
                 let available = ui.max_rect();
-                view::draw(
+                let size = (live.width, live.height);
+                let navigation = view::Navigation::Modified;
+                view::navigate(ui, &mut live.camera, size, available, navigation);
+                let (t, rect) = view::draw(
                     ui,
                     &mut self.sprites,
                     &field,
                     style,
                     (live.previous.as_ref(), live.latest.as_ref()),
                     available,
+                    &live.camera,
                 );
                 if live.outcome.is_none() && !live.stopping {
-                    let (t, rect) = view::Transform::fit(available, live.width, live.height);
                     let layer = ui.layer_id();
                     for event in live.interaction.events(ui.ctx(), layer, rect, &t) {
                         live.input(event);
@@ -1862,6 +1898,7 @@ impl eframe::App for App {
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
         }
+        self.play_sounds();
         self.file_dialog(ctx);
         self.save_error_window(ctx);
         // A file dropped on the window opens as a replay.
@@ -1875,6 +1912,32 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Plays the sound effects of the battle on screen, when sound is on and it runs at a
+    /// watchable speed; the rest are dropped.
+    fn play_sounds(&mut self) {
+        let live = self.live.as_mut().map(|live| {
+            let tps = live.turns_per_second;
+            (std::mem::take(&mut live.cues), tps)
+        });
+        let replay = self
+            .replay
+            .as_mut()
+            .map(|replay| std::mem::take(&mut replay.cues));
+        if !self.settings.sound {
+            return;
+        }
+        self.sound.prepare();
+        let cues = match self.tab {
+            Tab::Start if self.starting.is_none() => match live {
+                Some((cues, tps)) if (1..=sound::MAX_TPS).contains(&tps) => cues,
+                _ => return,
+            },
+            Tab::Replay => replay.unwrap_or_default(),
+            _ => return,
+        };
+        self.sound.play(&cues, self.settings.volume);
+    }
+
     /// `--screenshot`: once the battle is far enough (or after some frames), saves the
     /// window to a PNG and quits.
     fn screenshot_step(&mut self, ctx: &egui::Context) {

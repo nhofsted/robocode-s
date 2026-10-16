@@ -257,6 +257,30 @@ pub fn crosshairs(painter: &egui::Painter, center: Pos2, radius: f32, color: Col
     painter.circle_filled(center, 1.2, color);
 }
 
+/// Fit (the whole battlefield): four corner brackets, `radius` from the centre to each
+/// corner along both axes.
+pub fn fit(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let arm = radius * 0.45;
+    for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        let corner = center + vec2(sx * radius, sy * radius);
+        painter.add(Shape::line(
+            vec![
+                corner - vec2(0.0, sy * arm),
+                corner,
+                corner - vec2(sx * arm, 0.0),
+            ],
+            stroke,
+        ));
+    }
+    painter.rect_stroke(
+        egui::Rect::from_center_size(center, vec2(radius, radius * 0.75)),
+        1.0,
+        stroke,
+        egui::StrokeKind::Middle,
+    );
+}
+
 /// A square, borderless button showing an icon; brighter when hovered, dimmed when the
 /// `ui` is disabled.
 pub fn button(
