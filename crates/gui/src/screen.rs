@@ -28,6 +28,9 @@ const ENERGY_CRITICAL: Color32 = Color32::from_rgb(0xc0, 0x3a, 0x3a);
 
 /// The right side: per robot its colour, name, score and energy, and below them the
 /// graphs of the first `shown` turns of `history`. A click on a robot opens its output tab.
+/// Without `scores` (a viewer track, which has no scores, CPU times or other rounds), only
+/// names, energy and the energy graph.
+#[allow(clippy::too_many_arguments)]
 pub fn robots_panel(
     root: &mut egui::Ui,
     id: &str,
@@ -36,6 +39,7 @@ pub fn robots_panel(
     history: &History,
     shown: usize,
     selected: &mut usize,
+    scores: bool,
 ) {
     // A narrow window keeps most of its width for the field.
     let width = (root.available_width() * 0.22).clamp(180.0, 260.0);
@@ -68,23 +72,24 @@ pub fn robots_panel(
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (i, statics) in robots.iter().enumerate() {
                         let robot = snapshot.and_then(|s| s.robots.get(i));
-                        let score = robot.map_or(0.0, |r| history.score(round, i, r));
+                        let score =
+                            scores.then(|| robot.map_or(0.0, |r| history.score(round, i, r)));
                         if robot_row(ui, statics, robot, score, *selected == i).clicked() {
                             *selected = i;
                         }
                     }
                 });
             ui.add_space(12.0);
-            graphs::graphs(ui, robots, snapshot, history, shown, graphs);
+            graphs::graphs(ui, robots, snapshot, history, shown, graphs, scores);
         });
 }
 
-/// A robot in the list: its colour, name and score over its energy bar.
+/// A robot in the list: its colour, name and score (if any) over its energy bar.
 fn robot_row(
     ui: &mut egui::Ui,
     statics: &v1::RobotStatics,
     robot: Option<&v1::RobotSnapshot>,
-    score: f64,
+    score: Option<f64>,
     selected: bool,
 ) -> egui::Response {
     const HEIGHT: f32 = 44.0;
@@ -107,13 +112,21 @@ fn robot_row(
     // The first line: colour, name and score.
     let line = inner.top() + 8.0;
     swatch(&painter, pos2(inner.left() + 5.0, line), statics, robot);
-    let score = painter.text(
-        pos2(inner.right(), line),
-        egui::Align2::RIGHT_CENTER,
-        format!("{score:.0}"),
-        FontId::proportional(13.0),
-        visuals.text_color(),
-    );
+    let right = match score {
+        Some(score) => {
+            painter
+                .text(
+                    pos2(inner.right(), line),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{score:.0}"),
+                    FontId::proportional(13.0),
+                    visuals.text_color(),
+                )
+                .left()
+                - 8.0
+        }
+        None => inner.right(),
+    };
     let color = if dead {
         visuals.weak_text_color()
     } else {
@@ -121,7 +134,7 @@ fn robot_row(
     };
     let left = inner.left() + 16.0;
     let font = FontId::proportional(14.0);
-    let name = fitted(ui, &statics.name, font, color, score.left() - 8.0 - left);
+    let name = fitted(ui, &statics.name, font, color, right - left);
     let at = pos2(left, line - name.size().y / 2.0);
     painter.galley(at, name, color);
     // The second: energy.
@@ -442,11 +455,11 @@ const SPEED_LABEL: f32 = 44.0;
 /// end, added right to left: `end` (rightmost), the seed, `rest`, and `fill`, which may
 /// take the room that is left (a truncated label). The slider gets the room the readouts
 /// left last frame, up to [`SLIDER`]; when that leaves it narrower than [`SLIDER_NARROW`],
-/// the seed goes. True when the speed changed.
+/// the seed goes (a viewer track has none). True when the speed changed.
 pub fn speed_and_readouts(
     ui: &mut egui::Ui,
     turns_per_second: &mut u32,
-    seed: &str,
+    seed: Option<&str>,
     end: impl FnOnce(&mut egui::Ui),
     rest: impl FnOnce(&mut egui::Ui),
     fill: impl FnOnce(&mut egui::Ui),
@@ -458,13 +471,14 @@ pub fn speed_and_readouts(
         .unwrap_or((160.0, 170.0));
     let spacing = ui.spacing().item_spacing.x;
     let room = ui.available_width() - SPEED_ICON - SPEED_LABEL - 3.0 * spacing - others;
-    let show_seed = room - seed_width >= SLIDER_NARROW;
+    let seed_width = if seed.is_some() { seed_width } else { 0.0 };
+    let show_seed = seed.is_some() && room - seed_width >= SLIDER_NARROW;
     let width = if show_seed { room - seed_width } else { room };
     let changed = speed_slider(ui, turns_per_second, width.clamp(SLIDER_MIN, SLIDER));
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let end = ui.scope(end).response.rect.width();
         let mut seed_width = seed_width;
-        if show_seed {
+        if let Some(seed) = seed.filter(|_| show_seed) {
             let shown = ui.scope(|ui| info(ui, "Seed", seed)).response.rect.width();
             ui.add_space(10.0);
             seed_width = shown + 10.0 + 2.0 * spacing;

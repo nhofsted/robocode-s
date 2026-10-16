@@ -2405,6 +2405,7 @@ dependencies = [
  "image",
  "robocode-s-engine",
  "robocode-s-protocol",
+ "robocode-s-replay",
  "robocode-s-runner",
  "robocode-s-server",
  "serde",

@@ -27,7 +27,10 @@ pub const BULLET_ANGLE_STEPS: i64 = 65536;
 /// Energy and bullet power: units per point.
 pub const ENERGY_SCALE: i64 = 100;
 
+/// The first byte of every track. The desktop GUI tells tracks from its gzip recordings by
+/// it, so a future version must not be gzip's first byte, `0x1f`.
 const VERSION: u8 = 1;
+const _: () = assert!(VERSION != 0x1f);
 /// Classic allows one bullet per robot per turn; this only bounds corrupt input.
 const MAX_BIRTHS: usize = 8;
 

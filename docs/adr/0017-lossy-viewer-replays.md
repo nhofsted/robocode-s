@@ -40,4 +40,5 @@ Nobody watching a replay can see bit-exactness. Exactness matters for verificati
 - Most of what remains is real decisions: where the gun aims (GF guns re-aim every turn), speed changes and turns. Coarser angles save less than a bit per halving.
 - The browser viewer doesn't need the engine. M5b becomes a canvas player for tracks. Scrubbing decodes the round once and then jumps between its frames.
 - A rumble replay can't be re-simulated or shown with debug paint. To debug, authors reproduce the battle locally from its seed (exact) and record it with the desktop GUI.
+- The desktop GUI's Replay Battle plays tracks too, beside its full recordings: it tells them apart by the first byte (gzip's `1f` for a recording, the version for a track), so a version must never be `0x1f`. No extra magic number is needed.
 - The format is version 1 of a prototype. The quantization and predictors may still change before the rumble stores replays; the version byte allows that.

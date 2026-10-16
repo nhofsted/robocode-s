@@ -3,11 +3,15 @@
 //! Playing a recording back (design §11): the engine re-runs the recorded inputs.
 //! Opening a recording runs it once and keeps a keyframe (a clone of the replay) every
 //! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many.
+//!
+//! It also plays the website's lossy viewer tracks (see [`crate::track`]): one round, every
+//! turn decoded up front, without scores, CPU times, debug paint or console output.
 
 use crate::graphs::History;
 use crate::icons;
 use crate::screen;
 use crate::sprites::Sprites;
+use crate::track;
 use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
@@ -26,9 +30,8 @@ pub struct ReplayView {
     width: f64,
     height: f64,
     rounds: i32,
-    seed: i64,
-    /// Replays positioned so that their next snapshot is turn `KEYFRAME * k`.
-    keyframes: Vec<Replay>,
+    /// Where the turns come from.
+    source: Source,
     /// Index of the first turn of each round.
     round_starts: Vec<usize>,
     /// Every turn, for the graphs and scores.
@@ -38,9 +41,8 @@ pub struct ReplayView {
     turns: usize,
     unverified: usize,
     results: Vec<v1::Results>,
-    /// The shown turn and the replay positioned after it.
+    /// The shown turn.
     position: usize,
-    cursor: Replay,
     current: Option<v1::TurnSnapshot>,
     /// The turn before the shown one, for the scan arcs.
     previous: Option<v1::TurnSnapshot>,
@@ -53,6 +55,19 @@ pub struct ReplayView {
     results_closed: bool,
 }
 
+enum Source {
+    /// A full recording, re-run by the engine.
+    Recording {
+        seed: i64,
+        /// Replays positioned so that their next snapshot is turn `KEYFRAME * k`.
+        keyframes: Vec<Replay>,
+        /// The replay positioned after the shown turn.
+        cursor: Box<Replay>,
+    },
+    /// A viewer track's turns.
+    Track(Vec<v1::TurnSnapshot>),
+}
+
 /// The next snapshot of a replay, skipping round ends.
 fn next_snapshot(replay: &mut Replay) -> Option<(v1::TurnSnapshot, bool)> {
     replay.find_map(|f| match f {
@@ -62,7 +77,16 @@ fn next_snapshot(replay: &mut Replay) -> Option<(v1::TurnSnapshot, bool)> {
 }
 
 impl ReplayView {
+    /// Opens a full recording or a viewer track, told apart by their first bytes.
     pub fn open(path: &Path) -> Result<Self, String> {
+        let mut head = [0u8; 2];
+        let read = std::fs::File::open(path)
+            .and_then(|mut f| std::io::Read::read(&mut f, &mut head))
+            .map_err(|e| e.to_string())?;
+        if track::is_track(&head[..read]) {
+            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            return Ok(Self::track(path, track::decode(&bytes)?));
+        }
         let recording = Recording::read(path).map_err(|e| e.to_string())?;
         let mut replay = recording.replay();
         let (mut keyframes, mut round_starts, mut output) = (Vec::new(), Vec::new(), Vec::new());
@@ -92,17 +116,17 @@ impl ReplayView {
         let rules = recording.header.rules.unwrap_or_default();
         let robots = recording.header.robots.clone();
         let mut view = Self {
-            title: path
-                .file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            title: title(path),
             paint_visible: vec![true; robots.len()],
             robots,
             width: f64::from(rules.battlefield_width),
             height: f64::from(rules.battlefield_height),
             rounds: rules.num_rounds,
-            seed: recording.header.seed,
-            cursor: keyframes[0].clone(),
-            keyframes,
+            source: Source::Recording {
+                seed: recording.header.seed,
+                cursor: Box::new(keyframes[0].clone()),
+                keyframes,
+            },
             round_starts,
             history,
             output,
@@ -121,28 +145,74 @@ impl ReplayView {
         Ok(view)
     }
 
+    fn track(path: &Path, decoded: track::Decoded) -> Self {
+        let mut history = History::new(decoded.robots.len());
+        for snapshot in &decoded.snapshots {
+            history.push(snapshot);
+        }
+        let mut view = Self {
+            title: title(path),
+            paint_visible: vec![true; decoded.robots.len()],
+            robots: decoded.robots,
+            width: decoded.width,
+            height: decoded.height,
+            rounds: 1,
+            turns: decoded.snapshots.len(),
+            source: Source::Track(decoded.snapshots),
+            round_starts: vec![0],
+            history,
+            output: Vec::new(),
+            unverified: 0,
+            results: Vec::new(),
+            position: 0,
+            current: None,
+            previous: None,
+            playing: true,
+            turns_per_second: 30,
+            last_tick: None,
+            results_closed: false,
+        };
+        view.seek(0);
+        view
+    }
+
+    /// A full recording: with scores, CPU times, debug paint and console output.
+    fn full(&self) -> bool {
+        matches!(self.source, Source::Recording { .. })
+    }
+
     /// Shows turn `index` (clamped).
     fn seek(&mut self, index: usize) {
         if self.turns == 0 {
             return;
         }
         let index = index.min(self.turns - 1);
-        if self.current.is_some() && index == self.position + 1 {
-            self.previous = self.current.take();
-        } else {
-            // From the keyframe before the turn before, so that turn is known as well.
-            let before = index.saturating_sub(1);
-            self.cursor = self.keyframes[before / KEYFRAME].clone();
-            for _ in 0..before % KEYFRAME {
-                next_snapshot(&mut self.cursor);
+        match &mut self.source {
+            Source::Track(snapshots) => {
+                self.previous = index.checked_sub(1).map(|i| snapshots[i].clone());
+                self.current = Some(snapshots[index].clone());
             }
-            self.previous = if index > 0 {
-                next_snapshot(&mut self.cursor).map(|(s, _)| s)
-            } else {
-                None
-            };
+            Source::Recording {
+                keyframes, cursor, ..
+            } => {
+                if self.current.is_some() && index == self.position + 1 {
+                    self.previous = self.current.take();
+                } else {
+                    // From the keyframe before the turn before, so that turn is known as well.
+                    let before = index.saturating_sub(1);
+                    **cursor = keyframes[before / KEYFRAME].clone();
+                    for _ in 0..before % KEYFRAME {
+                        next_snapshot(cursor);
+                    }
+                    self.previous = if index > 0 {
+                        next_snapshot(cursor).map(|(s, _)| s)
+                    } else {
+                        None
+                    };
+                }
+                self.current = next_snapshot(cursor).map(|(s, _)| s);
+            }
         }
-        self.current = next_snapshot(&mut self.cursor).map(|(s, _)| s);
         self.position = index;
     }
 
@@ -194,6 +264,7 @@ impl ReplayView {
         self.play(ctx);
         let mut back = false;
         let current = self.current.clone();
+        let full = self.full();
         screen::robots_panel(
             root,
             "replay-robots",
@@ -202,28 +273,32 @@ impl ReplayView {
             &self.history,
             self.position + 1,
             selected,
+            full,
         );
-        let output = &self.output;
-        let position = self.position;
-        let toggled = screen::output_panel(
-            root,
-            "replay-output",
-            &self.robots,
-            current.as_ref(),
-            selected,
-            &self.paint_visible,
-            |i| {
-                let text: String = output
-                    .iter()
-                    .take_while(|(turn, _, _)| *turn <= position)
-                    .filter(|(_, robot, _)| *robot == i)
-                    .map(|(_, _, t)| t.as_str())
-                    .collect();
-                Cow::Owned(text)
-            },
-        );
-        if let Some(i) = toggled {
-            self.paint_visible[i] = !self.paint_visible[i];
+        // A track has no console output or debug paint.
+        if full {
+            let output = &self.output;
+            let position = self.position;
+            let toggled = screen::output_panel(
+                root,
+                "replay-output",
+                &self.robots,
+                current.as_ref(),
+                selected,
+                &self.paint_visible,
+                |i| {
+                    let text: String = output
+                        .iter()
+                        .take_while(|(turn, _, _)| *turn <= position)
+                        .filter(|(_, robot, _)| *robot == i)
+                        .map(|(_, _, t)| t.as_str())
+                        .collect();
+                    Cow::Owned(text)
+                },
+            );
+            if let Some(i) = toggled {
+                self.paint_visible[i] = !self.paint_visible[i];
+            }
         }
         screen::controls_panel(root, "replay-controls", |ui| {
             // The timeline, as wide as the controls.
@@ -274,10 +349,14 @@ impl ReplayView {
                 let turn = self.current.as_ref().map(|s| s.turn);
                 let (rounds, unverified) = (self.rounds, self.unverified);
                 let mut go_to = None;
+                let seed = match &self.source {
+                    Source::Recording { seed, .. } => Some(seed.to_string()),
+                    Source::Track(_) => None,
+                };
                 screen::speed_and_readouts(
                     ui,
                     &mut self.turns_per_second,
-                    &self.seed.to_string(),
+                    seed.as_deref(),
                     |_| {},
                     |ui| {
                         if let Some(turn) = turn {
@@ -339,7 +418,8 @@ impl ReplayView {
                 let turns = (self.previous.as_ref(), shown.as_ref());
                 view::draw(ui, sprites, &field, style, turns, ui.max_rect());
             });
-        let at_end = self.turns > 0 && self.position + 1 >= self.turns;
+        // A track has no scores, so no results.
+        let at_end = full && self.turns > 0 && self.position + 1 >= self.turns;
         if !at_end {
             self.results_closed = false;
         } else if !self.results_closed {
@@ -372,4 +452,10 @@ impl ReplayView {
         }
         back
     }
+}
+
+/// A replay's title: its file name.
+fn title(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
