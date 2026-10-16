@@ -185,6 +185,8 @@ pub struct App {
     /// The robots in the jars, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
+    /// The robot whose details show below the robot lists: the last one clicked.
+    details: Option<String>,
     filter: String,
     /// The highlighted robot in the available list (by name) and in the battle (by index).
     picked: Option<String>,
@@ -271,6 +273,7 @@ impl App {
             open_path: String::new(),
             available: None,
             listing: None,
+            details: None,
             filter: String::new(),
             picked: None,
             picked_selected: None,
@@ -426,6 +429,7 @@ impl App {
                             let row = robot_row(ui, &r.name, r.team, picked, Action::Add);
                             if row.clicked {
                                 self.picked = Some(r.name.clone());
+                                self.details = Some(r.name.clone());
                             }
                             if row.act {
                                 add = Some(r.name.clone());
@@ -481,6 +485,7 @@ impl App {
                         let row = robot_row(ui, name, team, picked, Action::Remove);
                         if row.clicked {
                             self.picked_selected = Some(i);
+                            self.details = Some(name.clone());
                         }
                         if row.act {
                             remove = Some(i);
@@ -496,6 +501,38 @@ impl App {
         if let Some(name) = add {
             self.setup.robots.push(name);
         }
+        self.robot_details(ui);
+    }
+
+    /// The details of the robot clicked last, from its `.properties`: its name and
+    /// version, author, description and web page.
+    fn robot_details(&self, ui: &mut egui::Ui) {
+        let Some(Ok(available)) = &self.available else {
+            return;
+        };
+        let Some(robot) = self
+            .details
+            .as_ref()
+            .and_then(|name| available.iter().find(|r| &r.name == name))
+        else {
+            return;
+        };
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(&robot.name).strong());
+            if !robot.author.is_empty() {
+                ui.label(RichText::new(format!("by {}", robot.author)).weak());
+            }
+            if !robot.webpage.is_empty() {
+                ui.hyperlink_to(&robot.webpage, &robot.webpage);
+            }
+        });
+        let description = if robot.description.is_empty() {
+            RichText::new("No description.").weak().italics()
+        } else {
+            RichText::new(&robot.description).weak()
+        };
+        ui.add(egui::Label::new(description).wrap());
     }
 
     /// Starts the battle in the setup: the loading screen while the robots are described

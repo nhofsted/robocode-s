@@ -137,6 +137,11 @@ public final class RobotHost {
         }
     }
 
+    /** A field of a {@code --describe} line: whitespace runs as one space, "" for none. */
+    static String field(Object value) {
+        return value == null ? "" : value.toString().replaceAll("\\s+", " ").trim();
+    }
+
     static int describe(List<String> robots, List<Path> jars, Path home) throws Exception {
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
@@ -145,8 +150,14 @@ public final class RobotHost {
             StringBuilder out = new StringBuilder();
             for (RobotSpecification spec : engine.getLocalRepository()) {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
+                // Then the details from its .properties, for the robot chooser.
                 out.append("list\t").append(spec.getNameAndVersion())
-                        .append('\t').append(item.isTeam() ? '1' : '0').append('\n');
+                        .append('\t').append(item.isTeam() ? '1' : '0')
+                        .append('\t').append(field(spec.getAuthorName()))
+                        .append('\t').append(field(spec.getVersion()))
+                        .append('\t').append(field(spec.getDescription()))
+                        .append('\t').append(field(spec.getWebpage()))
+                        .append('\n');
             }
             System.out.print(out);
             System.out.flush();
