@@ -123,6 +123,8 @@ struct Link {
     paint_enabled: bool,
     /// CPU time of the `Execute`s since the last snapshot, for the next one.
     cpu_nanos: u64,
+    /// Debug properties the robot set since the last snapshot, in order, for the next one.
+    debug_properties: Vec<v1::DebugProperty>,
     io_robot: bool,
     events: Vec<Event>,
     bullet_updates: Vec<v1::BulletStatus>,
@@ -531,6 +533,10 @@ impl<'a> BattleLoop<'a> {
         link.output.push_str(&execute.output);
         link.paint = execute.paint;
         link.cpu_nanos = link.cpu_nanos.saturating_add(execute.cpu_nanos);
+        // Only for observers and recordings (which take them with the next snapshot).
+        if !self.observers.is_empty() || self.engine.is_recording() {
+            link.debug_properties.extend(execute.debug_properties);
+        }
         let robot = i as i32;
         if let Some(c) = execute.commands {
             link.io_robot |= c.io_robot;
@@ -690,6 +696,7 @@ impl<'a> BattleLoop<'a> {
             if with_output {
                 r.paint = std::mem::take(&mut link.paint);
                 r.cpu_nanos = std::mem::take(&mut link.cpu_nanos);
+                r.debug_properties = std::mem::take(&mut link.debug_properties);
             }
             r.budget_nanos = budget;
         }
@@ -709,6 +716,16 @@ impl<'a> BattleLoop<'a> {
                 check,
                 cpu_nanos: snapshot.robots.iter().map(|r| r.cpu_nanos).collect(),
                 budget_nanos: budget,
+                debug_properties: snapshot
+                    .robots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| !r.debug_properties.is_empty())
+                    .map(|(i, r)| v1::RobotDebugProperties {
+                        robot: i as i32,
+                        properties: r.debug_properties.clone(),
+                    })
+                    .collect(),
             };
             self.engine.record(&Entry::Snapshot(marker));
         }

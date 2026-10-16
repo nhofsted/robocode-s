@@ -49,8 +49,8 @@ impl Recorder {
     }
 }
 
-/// The hash a snapshot is verified by: FNV-1a over its encoding without output, paint and
-/// CPU times (timing, not battle state).
+/// The hash a snapshot is verified by: FNV-1a over its encoding without output, paint, CPU
+/// times (timing) and debug properties: not battle state.
 pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
     let mut s = snapshot.clone();
     for r in &mut s.robots {
@@ -58,6 +58,7 @@ pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
         r.paint.clear();
         r.cpu_nanos = 0;
         r.budget_nanos = 0;
+        r.debug_properties.clear();
     }
     s.encode_to_vec()
         .iter()
@@ -125,8 +126,8 @@ impl Recording {
 /// What a replay produces, in the order observers received it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
-    /// A turn snapshot with the recorded output and paint; `verified` when it matches
-    /// the recorded hash.
+    /// A turn snapshot with the recorded output, paint, CPU times and debug properties;
+    /// `verified` when it matches the recorded hash.
     Snapshot {
         snapshot: v1::TurnSnapshot,
         verified: bool,
@@ -175,6 +176,14 @@ impl Iterator for Replay {
                         // Older recordings have no CPU times: 0.
                         r.cpu_nanos = s.cpu_nanos.get(i).copied().unwrap_or_default();
                         r.budget_nanos = s.budget_nanos;
+                    }
+                    for d in &s.debug_properties {
+                        if let Some(r) = usize::try_from(d.robot)
+                            .ok()
+                            .and_then(|i| snapshot.robots.get_mut(i))
+                        {
+                            r.debug_properties = d.properties.clone();
+                        }
                     }
                     for p in &s.paint {
                         if let Some(r) = usize::try_from(p.robot)

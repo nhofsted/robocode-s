@@ -4,6 +4,7 @@
 package io.github.nhofsted.robocodes.compat;
 
 import io.github.nhofsted.robocodes.protocol.v1.ClientMessage;
+import io.github.nhofsted.robocodes.protocol.v1.DebugProperty;
 import io.github.nhofsted.robocodes.protocol.v1.Execute;
 import io.github.nhofsted.robocodes.protocol.v1.RobotCommands;
 import io.github.nhofsted.robocodes.protocol.v1.Tick;
@@ -93,6 +94,7 @@ final class RemotePeer implements IRobotPeer {
                 .setTurn(lastTurn)
                 .setCommands(Convert.commands(commands))
                 .setOutput(nullToEmpty(commands.getOutputText()))
+                .addAllDebugProperties(debugProperties(commands))
                 .addAllPaint(PaintRecorder.ops(commands.getGraphicsCalls()))
                 .setCpuNanos(cpuSinceReturn());
         if (finished) {
@@ -147,8 +149,13 @@ final class RemotePeer implements IRobotPeer {
             // A dead robot isn't halted: classic stores its commands once more, as they are
             // now, after its handlers ran (a robot that regained energy in the turn it died
             // fires its ghost shot from them, engine-spec §15.3).
+            if (commands == finalCommands) {
+                // The same list of debug properties, maybe with more since.
+                finalExecute.clearDebugProperties();
+            }
             finalExecute.setCommands(Convert.commands(commands))
-                    .setOutput(finalExecute.getOutput() + nullToEmpty(commands.getOutputText()));
+                    .setOutput(finalExecute.getOutput() + nullToEmpty(commands.getOutputText()))
+                    .addAllDebugProperties(debugProperties(commands));
             send(finalExecute);
             finalExecute = null;
             finalCommands = null;
@@ -171,6 +178,7 @@ final class RemotePeer implements IRobotPeer {
                     .setTurn(lastTurn)
                     .setCommands(Convert.commands(commands))
                     .setOutput(nullToEmpty(commands.getOutputText()))
+                    .addAllDebugProperties(debugProperties(commands))
                     .setCpuNanos(cpuSinceReturn())
                     .setDrainEnergy(drained);
             send(stopping ? execute : execute.setStopped(true));
@@ -258,6 +266,22 @@ final class RemotePeer implements IRobotPeer {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** The debug properties set since the last execute; a null value (removed) is empty. */
+    private static List<DebugProperty> debugProperties(ExecCommands commands) {
+        List<DebugProperty> properties = new ArrayList<>();
+        if (commands.getDebugProperties() != null) {
+            for (net.sf.robocode.peer.DebugProperty p : commands.getDebugProperties()) {
+                if (p.getKey() != null) {
+                    properties.add(DebugProperty.newBuilder()
+                            .setKey(p.getKey())
+                            .setValue(nullToEmpty(p.getValue()))
+                            .build());
+                }
+            }
+        }
+        return properties;
     }
 
     private static String nullToEmpty(String s) {

@@ -1324,7 +1324,7 @@ impl App {
             &mut self.selected,
             true,
         );
-        let output = &live.output;
+        let (output, properties) = (&live.output, &live.properties);
         let event = screen::output_panel(
             root,
             "output",
@@ -1333,6 +1333,7 @@ impl App {
             &mut self.selected,
             &live.paint,
             |i| Cow::Borrowed(output.get(i).map_or("", String::as_str)),
+            |i| properties.get(i).map_or_else(Cow::default, Cow::Borrowed),
         );
         let mut save = None;
         match event {

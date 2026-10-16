@@ -4,6 +4,7 @@
 //! (`runner::local`), observed by the GUI.
 
 use crate::graphs::History;
+use crate::screen::{self, DebugProperties};
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
@@ -37,6 +38,8 @@ pub struct Live {
     pub history: History,
     /// Console output per robot.
     pub output: Vec<String>,
+    /// Debug properties per robot, as they are now.
+    pub properties: Vec<DebugProperties>,
     pub paint: Vec<bool>,
     pub paused: bool,
     pub turns_per_second: u32,
@@ -84,6 +87,7 @@ impl Live {
             previous: None,
             history: History::new(n),
             output: vec![String::new(); n],
+            properties: vec![DebugProperties::new(); n],
             paint: vec![false; n],
             paused: false,
             turns_per_second: 30,
@@ -120,6 +124,9 @@ impl Live {
                                 out.drain(..cut);
                             }
                         }
+                    }
+                    for (properties, r) in self.properties.iter_mut().zip(&s.robots) {
+                        screen::apply_debug_properties(properties, &r.debug_properties);
                     }
                     self.history.push(&s);
                     self.previous = self.latest.replace(s);

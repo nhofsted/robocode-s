@@ -16,6 +16,7 @@ use eframe::egui::{self, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, v
 use robocode_s_protocol::v1;
 use robocode_s_server::results::{self as results, COLUMNS, Contestant, cells, contestants, round};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 /// The size of a control's icon button.
 const CONTROL: f32 = 30.0;
@@ -285,9 +286,26 @@ type Icon = fn(&egui::Painter, egui::Pos2, f32, Color32);
 /// The width of the output's buttons (copy, save, clear) right of the tabs.
 const OUTPUT_BUTTON: f32 = 26.0;
 
+/// A robot's debug properties (`setDebugProperty`), by key.
+pub type DebugProperties = BTreeMap<String, String>;
+
+/// Applies a snapshot's debug property changes, as classic's robot console does: an empty
+/// value removes the property.
+pub fn apply_debug_properties(properties: &mut DebugProperties, changes: &[v1::DebugProperty]) {
+    for change in changes {
+        if change.value.is_empty() {
+            properties.remove(&change.key);
+        } else {
+            properties.insert(change.key.clone(), change.value.clone());
+        }
+    }
+}
+
 /// The robots' output: a tab per robot, with its debug-paint marker in the tab, over the
-/// selected robot's output (`text`), with buttons to copy, save and clear it right of the
+/// selected robot's output (`text`) and its debug properties (`properties`, beside the
+/// output when it has any), with buttons to copy, save and clear the output right of the
 /// tabs. Copying is done here; the rest is returned.
+#[allow(clippy::too_many_arguments)]
 pub fn output_panel<'a>(
     root: &mut egui::Ui,
     id: &str,
@@ -296,6 +314,7 @@ pub fn output_panel<'a>(
     selected: &mut usize,
     paint: &[bool],
     text: impl FnOnce(usize) -> Cow<'a, str>,
+    properties: impl FnOnce(usize) -> Cow<'a, DebugProperties>,
 ) -> Option<OutputEvent> {
     let mut event = None;
     let mut copy = false;
@@ -372,26 +391,75 @@ pub fn output_panel<'a>(
             if clear {
                 event = Some(OutputEvent::Clear(i));
             }
+            let properties = properties(i);
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt(("output", i))
-                        .stick_to_bottom(true)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            if text.is_empty() {
-                                ui.label(RichText::new("No output yet.").weak().italics());
-                            } else {
-                                ui.add(
-                                    egui::Label::new(RichText::new(text.as_ref()).monospace())
-                                        .wrap(),
-                                );
-                            }
+                    if properties.is_empty() {
+                        output_text(ui, i, &text);
+                        return;
+                    }
+                    // The properties on the right, as classic's console has them in a tab.
+                    let side = (ui.available_width() * 0.4).clamp(150.0, 340.0);
+                    let height = ui.available_height();
+                    ui.horizontal_top(|ui| {
+                        let gap = 2.0 * ui.spacing().item_spacing.x + 1.0;
+                        let left = (ui.available_width() - side - gap).max(0.0);
+                        ui.allocate_ui(vec2(left, height), |ui| output_text(ui, i, &text));
+                        let (line, _) = ui.allocate_exact_size(vec2(1.0, height), Sense::hover());
+                        ui.painter().rect_filled(line, 0.0, shell::BAR);
+                        let column = egui::Layout::top_down(egui::Align::Min);
+                        ui.allocate_ui_with_layout(vec2(side, height), column, |ui| {
+                            debug_properties(ui, i, &properties);
                         });
+                    });
                 });
         });
     event
+}
+
+/// A robot's console output, scrolled to its end.
+fn output_text(ui: &mut egui::Ui, robot: usize, text: &str) {
+    egui::ScrollArea::vertical()
+        .id_salt(("output", robot))
+        .stick_to_bottom(true)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if text.is_empty() {
+                ui.label(RichText::new("No output yet.").weak().italics());
+            } else {
+                ui.add(egui::Label::new(RichText::new(text).monospace()).wrap());
+            }
+        });
+}
+
+/// A robot's debug properties: a key/value table under a heading.
+fn debug_properties(ui: &mut egui::Ui, robot: usize, properties: &DebugProperties) {
+    ui.label(
+        RichText::new("DEBUG PROPERTIES")
+            .size(11.0)
+            .strong()
+            .color(shell::ACCENT),
+    )
+    .on_hover_text("What the robot set with setDebugProperty");
+    egui::ScrollArea::vertical()
+        .id_salt(("properties", robot))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // Keys in a column of their own (truncated), values wrapped beside them.
+            let keys = (ui.available_width() * 0.45).min(170.0);
+            for (key, value) in properties {
+                ui.horizontal_top(|ui| {
+                    let layout = egui::Layout::left_to_right(egui::Align::Min);
+                    ui.allocate_ui_with_layout(vec2(keys, 0.0), layout, |ui| {
+                        ui.set_width(keys);
+                        ui.add(egui::Label::new(RichText::new(key).monospace().weak()).truncate())
+                            .on_hover_text(key);
+                    });
+                    ui.add(egui::Label::new(RichText::new(value).monospace()).wrap());
+                });
+            }
+        });
 }
 
 /// What happened to an output tab: clicked (open it), or its paint marker clicked.

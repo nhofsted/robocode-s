@@ -42,7 +42,7 @@ fn connect(address: &str, role: v1::Role, token: &str) -> TcpStream {
 }
 
 /// A robot that drives, turns its gun and fires on a fixed pseudo-random script, and
-/// prints something now and then.
+/// prints something and sets and removes debug properties now and then.
 fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut stream = connect(&address, v1::Role::Robot, token);
@@ -83,6 +83,19 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
             } else {
                 String::new()
             };
+            let property = |key: &str, value: String| v1::DebugProperty {
+                key: key.into(),
+                value,
+            };
+            let debug_properties = match turn % 50 {
+                3 | 13 => vec![
+                    property("phase", format!("{token} {turn}")),
+                    property("energy", format!("{}", next())),
+                ],
+                // An empty value removes the property.
+                20 => vec![property("phase", String::new())],
+                _ => Vec::new(),
+            };
             let execute = v1::ClientMessage {
                 msg: Some(client_message::Msg::Execute(v1::Execute {
                     turn,
@@ -110,6 +123,7 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
                     },
                     // CPU time: timing, recorded for replays but not hashed.
                     cpu_nanos: 1_000 + turn as u64,
+                    debug_properties,
                     ..Default::default()
                 })),
             };
@@ -235,6 +249,24 @@ fn a_recorded_battle_replays_exactly() {
     assert!(
         !seen.iter().any(|f| painted(f, 1)),
         "robot b painted unasked"
+    );
+    // Debug properties reach the observer (and replay identically, above), with removals.
+    let properties = |f: &Frame| match f {
+        Frame::Snapshot { snapshot, .. } => snapshot
+            .robots
+            .iter()
+            .flat_map(|r| r.debug_properties.clone())
+            .collect(),
+        Frame::RoundOver(_) => Vec::new(),
+    };
+    let all: Vec<v1::DebugProperty> = seen.iter().flat_map(properties).collect();
+    assert!(
+        all.iter().any(|p| p.key == "phase" && p.value == "a 13"),
+        "no debug properties in the battle"
+    );
+    assert!(
+        all.iter().any(|p| p.key == "phase" && p.value.is_empty()),
+        "no removed debug property"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -305,6 +305,7 @@ pub fn robot_snapshot(
         paint: Vec::new(),
         cpu_nanos: 0,
         budget_nanos: 0,
+        debug_properties: Vec::new(),
     }
 }
 
