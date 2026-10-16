@@ -964,6 +964,13 @@ impl Battle {
         self.robots[i].running = false;
     }
 
+    /// The robot is killed from its console (classic's `KillRobotCommand`): it dies as if
+    /// destroyed, with its energy at 0 and an explosion, and scores as such in the next
+    /// turn.
+    pub fn kill_robot(&mut self, i: usize) {
+        self.kill(i);
+    }
+
     /// The battle is stopped (classic's `AbortCommand`): from the next turn every robot
     /// loses 5 energy a turn and its thread stops, the round runs out, and robots get a
     /// `BattleEndedEvent` with `aborted` set.

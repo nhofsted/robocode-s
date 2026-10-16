@@ -272,6 +272,8 @@ struct BattleLoop<'a> {
     turns_per_second: u32,
     /// An observer stopped the battle; the engine aborts before its next step.
     abort: bool,
+    /// Robots an observer killed; they die before the next step.
+    kills: Vec<usize>,
 }
 
 impl<'a> BattleLoop<'a> {
@@ -313,6 +315,7 @@ impl<'a> BattleLoop<'a> {
             steps: 0,
             turns_per_second: 0,
             abort: false,
+            kills: Vec::new(),
         })
     }
 
@@ -367,6 +370,8 @@ impl<'a> BattleLoop<'a> {
     }
 
     fn run_round(&mut self) {
+        // A kill from the last round's end doesn't reach into this one.
+        self.kills.clear();
         self.engine.input(Entry::StartRound(true));
         let round = self.battle().round;
         for i in 0..self.links.len() {
@@ -406,6 +411,11 @@ impl<'a> BattleLoop<'a> {
         loop {
             if self.abort && !self.battle().aborted {
                 self.engine.input(Entry::Abort(true));
+            }
+            for i in std::mem::take(&mut self.kills) {
+                if self.battle().robots[i].is_alive() {
+                    self.engine.input(Entry::Kill(i as i32));
+                }
             }
             self.engine.input(Entry::Step(true));
             self.deliver();
@@ -585,6 +595,14 @@ impl<'a> BattleLoop<'a> {
             Some(v1::observer_control::Control::Step(true)) => self.steps += 1,
             Some(v1::observer_control::Control::TurnsPerSecond(tps)) => self.turns_per_second = tps,
             Some(v1::observer_control::Control::Abort(true)) => self.abort = true,
+            Some(v1::observer_control::Control::Kill(robot)) => {
+                if let Some(i) = usize::try_from(robot)
+                    .ok()
+                    .filter(|&i| i < self.links.len())
+                {
+                    self.kills.push(i);
+                }
+            }
             Some(v1::observer_control::Control::Paint(toggle)) => {
                 if let Some(link) = usize::try_from(toggle.robot_index)
                     .ok()

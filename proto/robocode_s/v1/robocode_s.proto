@@ -619,6 +619,10 @@ message ObserverControl {
     // pauses or pacing, no further rounds start, and the battle ends with the results so
     // far (the aborted round counts up to the abort).
     bool abort = 5;
+    // Kill a robot (classic's "Kill robot" in its console), by robot index: before the
+    // next step it dies as if destroyed (energy 0, an explosion), as classic's
+    // KillRobotCommand. Ignored for robots already dead.
+    int32 kill = 6;
   }
 }
 
@@ -653,6 +657,8 @@ message RecordingEntry {
     RecordedSnapshot snapshot = 10;
     // An observer stopped the battle (ObserverControl.abort), before the next step.
     bool abort = 11;
+    // An observer killed a robot (ObserverControl.kill), before the next step. Robot index.
+    int32 kill = 12;
   }
 }
 

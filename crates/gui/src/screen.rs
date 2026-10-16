@@ -278,12 +278,17 @@ pub enum OutputEvent {
     Save(usize, String),
     /// Clear a robot's output.
     Clear(usize),
+    /// Kill a robot (confirmed).
+    Kill(usize),
 }
 
 /// An icon drawing function, as in [`icons`].
 type Icon = fn(&egui::Painter, egui::Pos2, f32, Color32);
 
-/// The width of the output's buttons (copy, save, clear) right of the tabs.
+/// How long a first click on kill waits for the second, in seconds.
+const KILL_CONFIRM: f64 = 4.0;
+
+/// The width of the output's buttons (copy, save, clear, kill) right of the tabs.
 const OUTPUT_BUTTON: f32 = 26.0;
 
 /// A robot's debug properties (`setDebugProperty`), by key.
@@ -304,7 +309,8 @@ pub fn apply_debug_properties(properties: &mut DebugProperties, changes: &[v1::D
 /// The robots' output: a tab per robot, with its debug-paint marker in the tab, over the
 /// selected robot's output (`text`) and its debug properties (`properties`, beside the
 /// output when it has any), with buttons to copy, save and clear the output right of the
-/// tabs. Copying is done here; the rest is returned.
+/// tabs, and with `kill` (a live battle) one to kill the robot, which asks to click again
+/// to confirm. Copying is done here; the rest is returned.
 #[allow(clippy::too_many_arguments)]
 pub fn output_panel<'a>(
     root: &mut egui::Ui,
@@ -315,8 +321,20 @@ pub fn output_panel<'a>(
     paint: &[bool],
     text: impl FnOnce(usize) -> Cow<'a, str>,
     properties: impl FnOnce(usize) -> Cow<'a, DebugProperties>,
+    kill: bool,
 ) -> Option<OutputEvent> {
     let mut event = None;
+    let i = (*selected).min(robots.len().saturating_sub(1));
+    let alive = snapshot
+        .and_then(|s| s.robots.get(i))
+        .is_some_and(|r| r.state != v1::RobotState::Dead as i32);
+    // A first click on kill arms it for a few seconds; a second one kills.
+    let armed_id = egui::Id::new((id, "kill-armed"));
+    let now = root.ctx().input(|i| i.time);
+    let armed = root
+        .ctx()
+        .data(|d| d.get_temp::<(usize, f64)>(armed_id))
+        .is_some_and(|(robot, at)| robot == i && now - at < KILL_CONFIRM && alive);
     let mut copy = false;
     let mut save = false;
     let mut clear = false;
@@ -340,7 +358,8 @@ pub fn output_panel<'a>(
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_top(|ui| {
-                        let buttons = 3.0 * (OUTPUT_BUTTON + ui.spacing().item_spacing.x);
+                        let count = if kill { 4.0 } else { 3.0 };
+                        let buttons = count * (OUTPUT_BUTTON + ui.spacing().item_spacing.x);
                         let tabs = (ui.available_width() - buttons).max(0.0);
                         egui::ScrollArea::horizontal()
                             .id_salt("output-tabs")
@@ -374,13 +393,46 @@ pub fn output_panel<'a>(
                                 })
                                 .clicked()
                             };
+                            if kill {
+                                let name = robots.get(i).map_or("", |r| r.name.as_str());
+                                let hint = if armed {
+                                    format!("Click again to kill {name}")
+                                } else {
+                                    format!("Kill {name}")
+                                };
+                                let clicked = ui
+                                    .add_enabled_ui(alive, |ui| {
+                                        icons::button(
+                                            ui,
+                                            OUTPUT_BUTTON,
+                                            &hint,
+                                            armed,
+                                            |p, c, color| {
+                                                let color =
+                                                    if armed { ENERGY_CRITICAL } else { color };
+                                                icons::crosshairs(p, c, 7.0, color)
+                                            },
+                                        )
+                                        .clicked()
+                                    })
+                                    .inner;
+                                if clicked && armed {
+                                    event = Some(OutputEvent::Kill(i));
+                                    ui.ctx().data_mut(|d| d.remove::<(usize, f64)>(armed_id));
+                                } else if clicked {
+                                    ui.ctx().data_mut(|d| d.insert_temp(armed_id, (i, now)));
+                                }
+                                if armed {
+                                    // Disarm when the time is up.
+                                    ui.ctx().request_repaint_after_secs(0.25);
+                                }
+                            }
                             clear = button(ui, "Clear the output", icons::clear);
                             save = button(ui, "Save the output to a file", icons::save);
                             copy = button(ui, "Copy the output", icons::copy);
                         });
                     });
                 });
-            let i = (*selected).min(robots.len().saturating_sub(1));
             let text = text(i);
             if copy {
                 ui.ctx().copy_text(text.to_string());

@@ -52,6 +52,8 @@ system's frame).
                      otherwise after --after frames (default 120)
   --loading          with --battle and --screenshot: shoot the loading screen
                      after --after frames instead
+  --kill-at TURN:N   with --battle: kill robot N (from 0, in --battle's order) at
+                     turn TURN of the first round, as its kill button does
 ";
 
 /// The smallest window, in points, at which no page clips its controls: the title bar's
@@ -72,6 +74,7 @@ fn main() -> ExitCode {
     let mut loading = false;
     let mut tab = None;
     let mut browse = None;
+    let mut kill_at = None;
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -89,6 +92,17 @@ fn main() -> ExitCode {
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
             "--loading" => loading = true,
+            "--kill-at" => {
+                let text = value();
+                let parsed = text
+                    .split_once(':')
+                    .and_then(|(t, r)| Some((t.trim().parse().ok()?, r.trim().parse().ok()?)));
+                let Some(k) = parsed else {
+                    eprint!("--kill-at wants TURN:ROBOT, like 100:0, not {text:?}\n\n{USAGE}");
+                    return ExitCode::from(2);
+                };
+                kill_at = Some(k);
+            }
             "--tab" => {
                 let name = value();
                 let Some(t) = Tab::parse(&name) else {
@@ -158,6 +172,7 @@ fn main() -> ExitCode {
                 replay,
                 tab,
                 browse,
+                kill_at,
             };
             Ok(Box::new(App::new(
                 cc,

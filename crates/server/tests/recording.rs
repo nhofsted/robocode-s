@@ -134,10 +134,18 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
     })
 }
 
+/// What the observer does at a (round, turn).
+#[derive(Clone, Copy)]
+enum Act {
+    Stop(i32, i64),
+    /// Kills a robot (by index).
+    Kill(i32, i64, i32),
+}
+
 /// Fights a recorded battle of three rounds between two scripted robots, with robot a's
-/// debug paint on; an observer stops it at `stop` (round, turn) if given. Returns the
-/// outcome and what the observer saw.
-fn fight(path: &Path, stop: Option<(i32, i64)>) -> (BattleOutcome, Vec<Frame>) {
+/// debug paint on; an observer acts at the given turn, if any. Returns the outcome and
+/// what the observer saw.
+fn fight(path: &Path, act: Option<Act>) -> (BattleOutcome, Vec<Frame>) {
     let path = path.to_path_buf();
     let config = ServerConfig {
         rules: BattleRules {
@@ -172,13 +180,22 @@ fn fight(path: &Path, stop: Option<(i32, i64)>) -> (BattleOutcome, Vec<Frame>) {
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {
             match message.msg {
                 Some(server_message::Msg::TurnSnapshot(snapshot)) => {
-                    if stop == Some((snapshot.round, snapshot.turn)) {
-                        let abort = v1::ClientMessage {
+                    let control = match act {
+                        Some(Act::Stop(round, turn)) if (round, turn) == at(&snapshot) => {
+                            Some(v1::observer_control::Control::Abort(true))
+                        }
+                        Some(Act::Kill(round, turn, robot)) if (round, turn) == at(&snapshot) => {
+                            Some(v1::observer_control::Control::Kill(robot))
+                        }
+                        _ => None,
+                    };
+                    if let Some(control) = control {
+                        let message = v1::ClientMessage {
                             msg: Some(client_message::Msg::ObserverControl(v1::ObserverControl {
-                                control: Some(v1::observer_control::Control::Abort(true)),
+                                control: Some(control),
                             })),
                         };
-                        write_message(&mut observer, &abort).unwrap();
+                        write_message(&mut observer, &message).unwrap();
                     }
                     frames.push(Frame::Snapshot {
                         snapshot,
@@ -198,6 +215,10 @@ fn fight(path: &Path, stop: Option<(i32, i64)>) -> (BattleOutcome, Vec<Frame>) {
     a.join().unwrap();
     b.join().unwrap();
     (outcome, seen)
+}
+
+fn at(snapshot: &v1::TurnSnapshot) -> (i32, i64) {
+    (snapshot.round, snapshot.turn)
 }
 
 /// Replays the recording at `path`: it must give exactly the frames `seen`, and end with
@@ -275,7 +296,7 @@ fn a_recorded_battle_replays_exactly() {
 fn a_stopped_battle_replays_exactly_with_the_results_so_far() {
     let dir = temp_dir("stopped");
     let path = dir.join("battle.rsr");
-    let (outcome, seen) = fight(&path, Some((1, 400)));
+    let (outcome, seen) = fight(&path, Some(Act::Stop(1, 400)));
     check_replay(&path, &outcome, &seen);
     assert!(outcome.aborted);
     assert_eq!(outcome.rounds, 2);
@@ -302,5 +323,49 @@ fn a_stopped_battle_replays_exactly_with_the_results_so_far() {
     );
     let best = outcome.results.iter().find(|r| r.rank == 1).unwrap();
     assert!(outcome.results.iter().all(|r| score(r) <= score(best)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_killed_robot_dies_and_the_battle_replays_exactly() {
+    let dir = temp_dir("killed");
+    let path = dir.join("battle.rsr");
+    let (outcome, seen) = fight(&path, Some(Act::Kill(0, 50, 1)));
+    check_replay(&path, &outcome, &seen);
+    assert!(!outcome.aborted);
+    assert_eq!(outcome.rounds, 3);
+    // Robot b dies after the kill, with an explosion and no energy left.
+    let killed = seen.iter().find_map(|f| match f {
+        Frame::Snapshot { snapshot, .. }
+            if snapshot.round == 0 && snapshot.robots[1].state == v1::RobotState::Dead as i32 =>
+        {
+            Some(snapshot.clone())
+        }
+        _ => None,
+    });
+    let killed = killed.expect("robot b never died in round 1");
+    assert!(killed.turn > 50, "died at turn {}", killed.turn);
+    assert_eq!(killed.robots[1].energy.unwrap_or_default(), 0.0);
+    assert_ne!(killed.robots[0].state, v1::RobotState::Dead as i32);
+    assert!(
+        killed.bullets.iter().any(|b| b.owner == 1 && b.explosion),
+        "no explosion"
+    );
+    // Without the kill, robot b lived on at that turn: the kill killed it.
+    let (_, unkilled) = fight(&dir.join("unkilled.rsr"), None);
+    let same_turn = unkilled.iter().find_map(|f| match f {
+        Frame::Snapshot { snapshot, .. } if at(snapshot) == at(&killed) => Some(snapshot),
+        _ => None,
+    });
+    assert_ne!(
+        same_turn.expect("turn not reached").robots[1].state,
+        v1::RobotState::Dead as i32
+    );
+    // Robot a outlived b in the first round: it won it.
+    let first_round = seen.iter().find_map(|f| match f {
+        Frame::RoundOver(r) => Some(r.results.clone()),
+        Frame::Snapshot { .. } => None,
+    });
+    assert_eq!(first_round.unwrap()[0].firsts, 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

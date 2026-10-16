@@ -169,6 +169,13 @@ impl Live {
         ));
     }
 
+    /// Kills a robot (classic's "Kill robot"): it dies before the next turn.
+    pub fn kill(&self, robot: usize) {
+        if self.outcome.is_none() && !self.stopping {
+            self.control(v1::observer_control::Control::Kill(robot as i32));
+        }
+    }
+
     pub fn set_paint(&mut self, robot: usize, enabled: bool) {
         self.paint[robot] = enabled;
         self.control(v1::observer_control::Control::Paint(v1::PaintToggle {

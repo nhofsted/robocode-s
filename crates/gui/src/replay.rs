@@ -328,6 +328,7 @@ impl ReplayView {
                     }
                     Cow::Owned(shown)
                 },
+                false,
             );
             match event {
                 Some(screen::OutputEvent::TogglePaint(i)) => {
@@ -336,6 +337,8 @@ impl ReplayView {
                 Some(screen::OutputEvent::Save(i, text)) => {
                     *save = Some(screen::output_save(&self.robots[i], text));
                 }
+                // A replay can't change what happened.
+                Some(screen::OutputEvent::Kill(_)) => {}
                 Some(screen::OutputEvent::Clear(i)) => {
                     if let Some(c) = self.cleared.get_mut(i) {
                         *c = Some(position);
