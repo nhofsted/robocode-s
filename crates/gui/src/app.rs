@@ -8,7 +8,7 @@ use crate::icons;
 use crate::live::Live;
 use crate::replay::ReplayView;
 use crate::screen;
-use crate::settings::{Rules, Settings};
+use crate::settings::{Contents, Rules, Settings};
 use crate::shell::{self, Tab};
 use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
@@ -210,7 +210,7 @@ pub struct App {
     replay_error: Option<String>,
     screenshot: Option<Screenshot>,
     open_path: String,
-    /// The robots in the jars, listed in the background.
+    /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
     /// The robot whose details show below the robot lists: the last one clicked.
@@ -223,10 +223,10 @@ pub struct App {
     own_frame: bool,
     /// The options, saved on every change.
     settings: Settings,
-    /// Robot jars from `ROBOCODES_ROBOT_JARS`, besides the robot folders.
+    /// Robot jars and class folders from `ROBOCODES_ROBOT_JARS`, besides the robot folders.
     env_jars: Vec<PathBuf>,
-    /// The robot jars per robot folder; `None` for a folder that isn't there.
-    folder_jars: Vec<Option<usize>>,
+    /// What each robot folder holds; `None` for a folder that isn't there.
+    folder_contents: Vec<Option<Contents>>,
     new_folder: String,
     settings_error: Option<String>,
     /// The battles started, so each one's results window opens centred.
@@ -286,7 +286,7 @@ impl App {
         own_frame: bool,
     ) -> Self {
         let env_jars = crate::settings::env_jars();
-        env.jars = settings.robot_jars(&env_jars);
+        env.jars = settings.robot_paths(&env_jars);
         let mut app = Self {
             sprites: Sprites::new(&cc.egui_ctx),
             backdrop: Backdrop::default(),
@@ -308,7 +308,7 @@ impl App {
             picked: None,
             picked_selected: None,
             own_frame,
-            folder_jars: Vec::new(),
+            folder_contents: Vec::new(),
             settings,
             env_jars,
             new_folder: String::new(),
@@ -321,7 +321,7 @@ impl App {
             saving: None,
             save_error: None,
         };
-        app.count_folder_jars();
+        app.scan_folders();
         app.list_robots(&cc.egui_ctx);
         if let Some(path) = launch.replay {
             app.open_replay(path);
@@ -351,27 +351,33 @@ impl App {
         }
     }
 
-    fn count_folder_jars(&mut self) {
-        self.folder_jars = self
+    /// Looks at what the robot folders hold.
+    fn scan_folders(&mut self) {
+        self.env.jars = self.settings.robot_paths(&self.env_jars);
+        self.folder_contents = self
             .settings
             .robot_folders
             .iter()
-            .map(|f| {
-                let one = Settings {
-                    robot_folders: vec![f.clone()],
-                    ..Settings::default()
-                };
-                (f.exists()).then(|| one.robot_jars(&[]).len())
-            })
+            .map(|f| f.exists().then(|| Contents::of(f)))
             .collect();
     }
 
     /// Scans the robot folders again and lists their robots.
     fn rescan(&mut self, ctx: &egui::Context) {
-        self.env.jars = self.settings.robot_jars(&self.env_jars);
-        self.count_folder_jars();
+        self.scan_folders();
         self.available = None;
         self.list_robots(ctx);
+    }
+
+    /// Lists the robots again when the battle setup shows (new robots compiled into a
+    /// class folder, a jar dropped into a robot folder), keeping the current list until
+    /// the new one is there. A recompiled robot needs no new list: every battle loads its
+    /// robots afresh.
+    fn refresh(&mut self, ctx: &egui::Context) {
+        if self.listing.is_none() {
+            self.scan_folders();
+            self.list_robots(ctx);
+        }
     }
 
     /// Lists the robots in the jars on a background thread (it starts a JVM).
@@ -784,10 +790,7 @@ impl App {
             ui.horizontal(|ui| {
                 let jars = format!(
                     "Robots from {} in the robot folders (see Options){}.",
-                    match app.env.jars.len() {
-                        1 => "1 jar".to_string(),
-                        n => format!("{n} jars"),
-                    },
+                    sources(&app.env.jars),
                     if app.env_jars.is_empty() {
                         ""
                     } else {
@@ -1122,9 +1125,8 @@ impl App {
                                 remove = Some(i);
                             }
                             ui.label(RichText::new(folder.display().to_string()).monospace());
-                            match app.folder_jars.get(i).copied().flatten() {
-                                Some(1) => ui.label(RichText::new("1 jar").weak()),
-                                Some(n) => ui.label(RichText::new(format!("{n} jars")).weak()),
+                            match app.folder_contents.get(i).cloned().flatten() {
+                                Some(c) => ui.label(RichText::new(holds(&c)).weak()),
                                 None => ui.colored_label(Color32::LIGHT_RED, "not found"),
                             };
                         });
@@ -1135,17 +1137,20 @@ impl App {
                     }
                     if app.settings.robot_folders.is_empty() {
                         ui.label("Robot folders");
-                        ui.label(RichText::new("None yet: add a folder with robot jars.").weak());
+                        ui.label(
+                            RichText::new("None yet: add a folder with robot jars or classes.")
+                                .weak(),
+                        );
                         ui.end_row();
                     }
                     ui.label("");
                     ui.horizontal(|ui| {
                         let field = ui.add(
                             egui::TextEdit::singleline(&mut app.new_folder)
-                                .hint_text("a folder with robot jars, e.g. ~/robocode/robots")
+                                .hint_text("robot jars, or an IDE's output (e.g. bin)")
                                 .desired_width((ui.available_width() - 90.0).clamp(120.0, 420.0)),
                         );
-                        if browse_button(ui, "Choose a folder with robot jars") {
+                        if browse_button(ui, "Choose a folder with robot jars or classes") {
                             app.browse(Browse::Folder);
                         }
                         let enter =
@@ -1169,13 +1174,13 @@ impl App {
                             Some(Ok(robots)) => format!("{} robots", robots.len()),
                             Some(Err(_)) => "the robots couldn't be listed".to_string(),
                         };
-                        ui.label(format!("{} jars, {robots}", app.env.jars.len()));
+                        ui.label(format!("{}, {robots}", sources(&app.env.jars)));
                         if app.listing.is_some() {
                             ui.spinner();
                         }
                         if ui
                             .button("Rescan")
-                            .on_hover_text("Look for new jars in the folders")
+                            .on_hover_text("Look for new robots in the folders")
                             .clicked()
                         {
                             rescan = true;
@@ -1191,8 +1196,8 @@ impl App {
                         ui.label("Also");
                         ui.label(
                             RichText::new(format!(
-                                "{} jars from ROBOCODES_ROBOT_JARS",
-                                app.env_jars.len()
+                                "{} from ROBOCODES_ROBOT_JARS",
+                                sources(&app.env_jars)
                             ))
                             .weak(),
                         );
@@ -1716,6 +1721,35 @@ fn contestants_row(ui: &mut egui::Ui, sprites: &mut Sprites, names: &[String], t
     ui.ctx().request_repaint();
 }
 
+/// The robot jars and class folders in `paths`, e.g. `3 jars and 1 class folder`.
+fn sources(paths: &[PathBuf]) -> String {
+    let folders = paths.iter().filter(|p| p.is_dir()).count();
+    let jars = match paths.len() - folders {
+        1 => "1 jar".to_string(),
+        n => format!("{n} jars"),
+    };
+    match folders {
+        0 => jars,
+        1 => format!("{jars} and 1 class folder"),
+        n => format!("{jars} and {n} class folders"),
+    }
+}
+
+/// What a robot folder holds, for the options: `2 jars`, `class files`, ...
+fn holds(contents: &Contents) -> String {
+    let jars = match contents.jars.len() {
+        0 => None,
+        1 => Some("1 jar".to_string()),
+        n => Some(format!("{n} jars")),
+    };
+    match (jars, contents.classes) {
+        (Some(jars), true) => format!("{jars} and class files"),
+        (Some(jars), false) => jars,
+        (None, true) => "class files".to_string(),
+        (None, false) => "no jars or class files".to_string(),
+    }
+}
+
 /// The results window's title: a stopped battle says in which round.
 fn results_title(outcome: &BattleOutcome) -> String {
     if outcome.aborted {
@@ -1737,7 +1771,11 @@ impl eframe::App for App {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        let tab = self.tab;
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
+        if self.tab == Tab::Start && tab != Tab::Start {
+            self.refresh(ctx);
+        }
         shell::footer(root);
         self.poll_listing();
         self.poll_starting(ctx);
@@ -1750,7 +1788,10 @@ impl eframe::App for App {
             Tab::Start if self.starting.is_some() => self.loading_page(root),
             Tab::Start if self.live.is_some() => match self.live_ui(root) {
                 Next::Stay => {}
-                Next::Setup => self.live = None,
+                Next::Setup => {
+                    self.live = None;
+                    self.refresh(ctx);
+                }
                 Next::Restart { new_seed } => {
                     let seed = match &self.live {
                         Some(live) if !new_seed => live.seed,

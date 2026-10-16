@@ -127,30 +127,95 @@ impl Settings {
         std::fs::write(&path, text + "\n").map_err(fail)
     }
 
-    /// The robot jars: the `.jar` files in the robot folders (a folder entry may also name
-    /// a jar), then `extra` (from `ROBOCODES_ROBOT_JARS`); each once, folders sorted.
-    pub fn robot_jars(&self, extra: &[PathBuf]) -> Vec<PathBuf> {
-        let mut jars = Vec::new();
+    /// Where the robots are: per robot folder its `.jar` files, then the folder itself if
+    /// it holds class files (an IDE's output, read in place as classic's development
+    /// path); a folder entry may also name a jar. Then `extra` (from
+    /// `ROBOCODES_ROBOT_JARS`). Each once, jars sorted.
+    pub fn robot_paths(&self, extra: &[PathBuf]) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
         for folder in &self.robot_folders {
-            if is_jar(folder) && folder.is_file() {
-                jars.push(folder.clone());
-                continue;
+            let contents = Contents::of(folder);
+            paths.extend(contents.jars);
+            if contents.classes {
+                paths.push(folder.clone());
             }
-            let Ok(entries) = std::fs::read_dir(folder) else {
+        }
+        paths.extend(extra.iter().cloned());
+        let mut seen = std::collections::HashSet::new();
+        paths.retain(|p| seen.insert(p.clone()));
+        paths
+    }
+}
+
+/// What a robot folder holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Contents {
+    /// The `.jar` files in it (not in its subfolders), sorted.
+    pub jars: Vec<PathBuf>,
+    /// Class files in it or below: a class folder.
+    pub classes: bool,
+}
+
+impl Contents {
+    /// What `folder` holds; nothing if it can't be read. A jar named as a folder holds
+    /// itself.
+    pub fn of(folder: &Path) -> Self {
+        if is_jar(folder) && folder.is_file() {
+            return Self {
+                jars: vec![folder.to_path_buf()],
+                classes: false,
+            };
+        }
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            return Self::default();
+        };
+        let mut jars: Vec<PathBuf> = entries
+            .filter_map(|e| Some(e.ok()?.path()))
+            .filter(|p| is_jar(p) && p.is_file())
+            .collect();
+        jars.sort();
+        Self {
+            jars,
+            classes: has_classes(folder),
+        }
+    }
+}
+
+/// Whether there is a `.class` file in `folder` or a few levels below (its packages),
+/// looking at a bounded number of entries so that a large folder stays quick. Hidden
+/// folders are skipped.
+fn has_classes(folder: &Path) -> bool {
+    const DEPTH: usize = 8;
+    const ENTRIES: usize = 20_000;
+    let mut seen = 0;
+    let mut stack = vec![(folder.to_path_buf(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > ENTRIES {
+                return false;
+            }
+            let Ok(kind) = entry.file_type() else {
                 continue;
             };
-            let mut found: Vec<PathBuf> = entries
-                .filter_map(|e| Some(e.ok()?.path()))
-                .filter(|p| is_jar(p) && p.is_file())
-                .collect();
-            found.sort();
-            jars.extend(found);
+            let path = entry.path();
+            if kind.is_dir() {
+                let hidden = entry.file_name().to_string_lossy().starts_with('.');
+                if depth < DEPTH && !hidden {
+                    stack.push((path, depth + 1));
+                }
+            } else if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("class"))
+            {
+                return true;
+            }
         }
-        jars.extend(extra.iter().cloned());
-        let mut seen = std::collections::HashSet::new();
-        jars.retain(|j| seen.insert(j.clone()));
-        jars
     }
+    false
 }
 
 fn is_jar(path: &Path) -> bool {
@@ -158,7 +223,8 @@ fn is_jar(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("jar"))
 }
 
-/// `ROBOCODES_ROBOT_JARS`: extra robot jars (a path list), as for `robocode-s battle`.
+/// `ROBOCODES_ROBOT_JARS`: extra robot jars and class folders (a path list), as for
+/// `robocode-s battle`.
 pub fn env_jars() -> Vec<PathBuf> {
     std::env::var_os("ROBOCODES_ROBOT_JARS")
         .map(|v| {
@@ -224,7 +290,7 @@ mod tests {
         };
         let extra = [dir.join("b.jar"), PathBuf::from("/elsewhere/d.jar")];
         assert_eq!(
-            s.robot_jars(&extra),
+            s.robot_paths(&extra),
             vec![
                 dir.join("a.JAR"),
                 dir.join("b.jar"),
@@ -232,6 +298,31 @@ mod tests {
                 PathBuf::from("/elsewhere/d.jar"),
             ]
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_class_folders() {
+        let dir =
+            std::env::temp_dir().join(format!("robocode-s-gui-classes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["out/my/pkg", "empty/a", "hidden/.cache"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        for f in ["out/r.jar", "out/my/pkg/Bot.class", "hidden/.cache/X.class"] {
+            std::fs::write(dir.join(f), "").unwrap();
+        }
+        let s = Settings {
+            robot_folders: vec![dir.join("out"), dir.join("empty"), dir.join("hidden")],
+            ..Settings::default()
+        };
+        assert_eq!(
+            s.robot_paths(&[]),
+            vec![dir.join("out/r.jar"), dir.join("out")]
+        );
+        assert!(Contents::of(&dir.join("out")).classes);
+        assert_eq!(Contents::of(&dir.join("empty")), Contents::default());
+        assert_eq!(Contents::of(&dir.join("hidden")), Contents::default());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -44,7 +44,7 @@ pub fn describe(
     parse_description(&run_describe(host, jars, robots, home)?)
 }
 
-/// A robot or team found in the jars, with the details from its `.properties` (empty
+/// A robot or team found in the jars or class folders, with the details from its `.properties` (empty
 /// when it has none).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Listed {
@@ -57,7 +57,9 @@ pub struct Listed {
     pub webpage: String,
 }
 
-/// Every robot and team in `jars`, as classic's repository finds them.
+/// Every robot and team in `jars` (jars and class folders), as classic's repository
+/// finds them. A robot in a class folder is named with classic's `*` for a development
+/// version (`mypackage.MyRobot*`), except classic's `sample.*` and `tested.*`.
 pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec<Listed>, String> {
     let mut robots = parse_list(&run_describe(host, jars, &[], home)?);
     robots.sort_by(|a, b| a.name.cmp(&b.name));
@@ -236,13 +238,15 @@ pub struct Environment {
     pub agent_jar: PathBuf,
     /// The pinned JRE and battle files.
     pub data: PathBuf,
-    /// Robot jars.
+    /// Robot jars, and class folders (an IDE's output, e.g. `bin`): classic reads those
+    /// in place as development paths, so a recompiled robot is new in the next battle.
     pub jars: Vec<PathBuf>,
 }
 
 impl Environment {
     /// From `ROBOCODES_JAVA`, `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_DATA`
-    /// and `ROBOCODES_ROBOT_JARS` (a path list), else the paths of a built source tree.
+    /// and `ROBOCODES_ROBOT_JARS` (a path list of jars and class folders), else the paths
+    /// of a built source tree.
     pub fn from_env() -> Self {
         let var = |name: &str| {
             std::env::var_os(name)
@@ -275,8 +279,8 @@ impl Environment {
     /// Checks the paths and finds Java (downloading the pinned JRE if needed).
     pub fn host(&self, deterministic: bool) -> Result<JavaHost, String> {
         for jar in &self.jars {
-            if !jar.is_file() {
-                return Err(format!("robot jar not found: {}", jar.display()));
+            if !jar.is_file() && !jar.is_dir() {
+                return Err(format!("robot jar or folder not found: {}", jar.display()));
             }
         }
         if !self.host_lib.is_dir() {
@@ -365,7 +369,7 @@ pub struct LocalRobot {
 pub struct LocalBattle {
     pub config: ServerConfig,
     pub robots: Vec<LocalRobot>,
-    /// Jars containing the robots.
+    /// Jars and class folders containing the robots.
     pub jars: Vec<PathBuf>,
     /// This battle's directory: robot `i` runs in `robot-<i>` below it.
     pub dir: PathBuf,

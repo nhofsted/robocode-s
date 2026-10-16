@@ -32,7 +32,10 @@ Without arguments: the battle setup. With a recording (from --record or
 \"Record to\", or a website viewer track): its replay.
 Robots come from the robot folders set in the options (the gear), saved in
 $XDG_CONFIG_HOME/robocode-s/gui.json (~/.config/... by default; another file
-with ROBOCODES_GUI_CONFIG), and from the jars in ROBOCODES_ROBOT_JARS (a path list). The other paths come from
+with ROBOCODES_GUI_CONFIG): their jars, and the folders themselves when they hold
+class files (an IDE's output, read in place: a recompiled robot is new in the
+next battle). ROBOCODES_ROBOT_JARS adds jars and class folders (a path list).
+The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the

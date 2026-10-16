@@ -31,7 +31,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,7 +42,10 @@ import java.util.regex.Pattern;
  * then runs the robot with classic Robocode's own robot side and a {@link RemotePeer}.
  *
  * <p>Usage: {@code robot-host --server host:port --token T --robot sample.Fire
- * --jar robot.jar [--jar ...] --home dir [--seed N]}. With the determinism agent loaded,
+ * --jar robot.jar [--jar ...] --home dir [--seed N]}. A {@code --jar} may also name a class
+ * folder (an IDE's output, e.g. {@code bin}): classic reads it as a development path, so
+ * its robots are named with classic's {@code *} for development versions (except classic's
+ * {@code sample.*} and {@code tested.*}). With the determinism agent loaded,
  * the robot's random streams are derived from the seed and its unique name (ADR 0009).
  *
  * <p>{@code robot-host --describe --home dir --jar robot.jar --robot a [--robot b ...]}
@@ -150,8 +155,10 @@ public final class RobotHost {
             StringBuilder out = new StringBuilder();
             for (RobotSpecification spec : engine.getLocalRepository()) {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
-                // Then the details from its .properties, for the robot chooser.
-                out.append("list\t").append(spec.getNameAndVersion())
+                // The name classic looks it up by: a development version's is
+                // `name version*`, where the specification says `name* version`. Then the
+                // details from its .properties, for the robot chooser.
+                out.append("list\t").append(item.getUniqueFullClassNameWithVersion())
                         .append('\t').append(item.isTeam() ? '1' : '0')
                         .append('\t').append(field(spec.getAuthorName()))
                         .append('\t').append(field(spec.getVersion()))
@@ -191,11 +198,47 @@ public final class RobotHost {
         return 0;
     }
 
+    /**
+     * Gives classic's repository the robots: jars are copied into {@code home/robots},
+     * class folders (an IDE's output) become classic's development paths, read in place.
+     * The robots directory starts empty, so jars and the robot database of an earlier
+     * listing in the same home are not found again.
+     */
     private static void copyJars(List<Path> jars, Path home) throws IOException {
-        Path robots = Files.createDirectories(home.resolve("robots"));
-        for (Path jar : jars) {
-            Files.copy(jar, robots.resolve(jar.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+        Path robots = home.resolve("robots");
+        if (Files.isDirectory(robots)) {
+            try (var paths = Files.walk(robots)) {
+                for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.delete(p);
+                }
+            }
         }
+        Files.createDirectories(robots);
+        List<String> folders = new ArrayList<>();
+        for (Path jar : jars) {
+            if (Files.isDirectory(jar)) {
+                folders.add(jar.toAbsolutePath().toString());
+            } else {
+                Files.copy(jar, robots.resolve(jar.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        // Classic's development paths, in its robocode.properties (it splits them at commas
+        // and the path separator).
+        Path settings = Files.createDirectories(home.resolve("config")).resolve("robocode.properties");
+        Properties properties = new Properties();
+        if (Files.isRegularFile(settings)) {
+            try (InputStream in = Files.newInputStream(settings)) {
+                properties.load(in);
+            }
+        }
+        properties.setProperty("robocode.options.development.path", String.join(",", folders));
+        properties.setProperty("robocode.options.development.path.excluded", "");
+        try (OutputStream out = Files.newOutputStream(settings)) {
+            properties.store(out, "Robocode Properties");
+        }
+        // Robots in a class folder write their data files into the battle's home, as robots
+        // in jars do, rather than into the folder (classic's default for development robots).
+        System.setProperty("ALWAYSUSECACHEFORDATA", "true");
     }
 
     private static IHostingRobotProxy createProxy(RobotSpecification spec,
