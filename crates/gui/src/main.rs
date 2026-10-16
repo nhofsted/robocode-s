@@ -7,6 +7,7 @@ mod app;
 mod backdrop;
 mod graphs;
 mod icons;
+mod input;
 mod live;
 mod replay;
 mod screen;
@@ -54,6 +55,13 @@ system's frame).
                      after --after frames instead
   --kill-at TURN:N   with --battle: kill robot N (from 0, in --battle's order) at
                      turn TURN of the first round, as its kill button does
+  --input-at TURN:EVENT
+                     with --battle: send a mouse or keyboard event to interactive
+                     robots at turn TURN of the first round, as the battlefield
+                     does (repeatable): move X,Y, drag X,Y, press X,Y[,BUTTON],
+                     release X,Y[,BUTTON], click X,Y[,BUTTON], wheel X,Y,NOTCHES,
+                     key NAME or keyup NAME (egui's key names: ArrowUp, W, ...);
+                     battlefield coordinates, y up
 ";
 
 /// The smallest window, in points, at which no page clips its controls: the title bar's
@@ -75,6 +83,7 @@ fn main() -> ExitCode {
     let mut tab = None;
     let mut browse = None;
     let mut kill_at = None;
+    let mut input_at = Vec::new();
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -102,6 +111,16 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 };
                 kill_at = Some(k);
+            }
+            "--input-at" => {
+                let text = value();
+                match input::parse_scripted(&text) {
+                    Ok(scripted) => input_at.push(scripted),
+                    Err(e) => {
+                        eprint!("--input-at {text:?}: {e}\n\n{USAGE}");
+                        return ExitCode::from(2);
+                    }
+                }
             }
             "--tab" => {
                 let name = value();
@@ -173,6 +192,7 @@ fn main() -> ExitCode {
                 tab,
                 browse,
                 kill_at,
+                input_at,
             };
             Ok(Box::new(App::new(
                 cc,

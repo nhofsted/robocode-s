@@ -89,6 +89,17 @@ impl Transform {
     pub fn len(&self, d: f64) -> f32 {
         d as f32 * self.scale
     }
+
+    /// The battlefield point at a screen position (y up), as classic's
+    /// `InteractiveHandler` rounds it: `(int) (v + 0.5)`. None at scale 0.
+    pub fn field_point(&self, p: Pos2) -> Option<(i32, i32)> {
+        if self.scale == 0.0 {
+            return None;
+        }
+        let x = f64::from((p.x - self.origin.x) / self.scale);
+        let y = self.height - f64::from((p.y - self.origin.y) / self.scale);
+        Some(((x + 0.5) as i32, (y + 0.5) as i32))
+    }
 }
 
 /// A textured quad of `size` (screen pixels) centred on `center`, turned by `angle`
@@ -582,6 +593,19 @@ mod tests {
             Rect::from_min_size(pos2(110.0, 20.0), vec2(800.0, 600.0))
         );
         assert_eq!(t.point(0.0, 0.0), pos2(110.0, 620.0));
+    }
+
+    #[test]
+    fn field_points_are_mirrored_and_rounded_as_classic() {
+        let available = Rect::from_min_size(pos2(10.0, 20.0), vec2(1600.0, 1200.0));
+        let (t, _) = Transform::fit(available, 800.0, 600.0);
+        // Scale 2: the bottom left corner is (0, 0), y grows upwards.
+        assert_eq!(t.field_point(pos2(10.0, 1220.0)), Some((0, 0)));
+        assert_eq!(t.field_point(pos2(210.0, 220.0)), Some((100, 500)));
+        assert_eq!(t.field_point(pos2(211.0, 219.0)), Some((101, 501)));
+        assert_eq!(t.field_point(t.point(123.0, 456.0)), Some((123, 456)));
+        let (none, _) = Transform::fit(Rect::NOTHING, 800.0, 600.0);
+        assert_eq!(none.field_point(pos2(1.0, 1.0)), None);
     }
 
     #[test]
