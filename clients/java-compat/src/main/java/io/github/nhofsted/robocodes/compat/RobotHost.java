@@ -155,8 +155,10 @@ public final class RobotHost {
             StringBuilder out = new StringBuilder();
             for (RobotSpecification spec : engine.getLocalRepository()) {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
-                // Then the details from its .properties, for the robot chooser.
-                out.append("list\t").append(spec.getNameAndVersion())
+                // The name classic looks it up by: a development version's is
+                // `name version*`, where the specification says `name* version`. Then the
+                // details from its .properties, for the robot chooser.
+                out.append("list\t").append(item.getUniqueFullClassNameWithVersion())
                         .append('\t').append(item.isTeam() ? '1' : '0')
                         .append('\t').append(field(spec.getAuthorName()))
                         .append('\t').append(field(spec.getVersion()))
