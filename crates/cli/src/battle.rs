@@ -22,7 +22,7 @@ Battle:
   --battle FILE          classic .battle file: its robots and rules (options
                          after it override its rules)
   --rounds N             rounds (default 10)
-  --seed N               battle seed (default: random, printed)
+  --seed N               battle seed, a Java long (default: random, printed)
   --width N, --height N  battlefield size (default 800x600)
   --gun-cooling-rate X   (default 0.1)
   --inactivity-time N    turns (default 450)

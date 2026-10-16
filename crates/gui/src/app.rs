@@ -599,15 +599,12 @@ impl App {
             self.error = Some("Add some robots to the battle first.".into());
             return;
         }
-        let seed = match self.setup.seed.trim() {
-            "" => random_seed(),
-            text => match text.parse() {
-                Ok(seed) => seed,
-                Err(_) => {
-                    self.error = Some(format!("The seed is not a number: {text}"));
-                    return;
-                }
-            },
+        let seed = match parse_seed(&self.setup.seed) {
+            Ok(seed) => seed.unwrap_or_else(random_seed),
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
         };
         self.launch(ctx, seed);
     }
@@ -1992,9 +1989,34 @@ impl App {
     }
 }
 
+/// The seed field: empty for a random seed, or a Java `long` as the battle screen, the
+/// results and `robocode-s` show it (negative too).
+fn parse_seed(text: &str) -> Result<Option<i64>, String> {
+    match text.trim() {
+        "" => Ok(None),
+        text => text.parse().map(Some).map_err(|_| {
+            format!(
+                "The seed is not a number from {} to {}: {text}",
+                i64::MIN,
+                i64::MAX
+            )
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GAME_TYPES, Setup, battle_file, parse_robots};
+    use super::{GAME_TYPES, Setup, battle_file, parse_robots, parse_seed};
+
+    #[test]
+    fn a_shown_seed_can_be_typed_back() {
+        for seed in [0, 7, -8938542223750784803, i64::MIN, i64::MAX] {
+            assert_eq!(parse_seed(&format!(" {seed} ")), Ok(Some(seed)));
+        }
+        assert_eq!(parse_seed("  "), Ok(None));
+        assert!(parse_seed("9223372036854775808").is_err());
+        assert!(parse_seed("12x").is_err());
+    }
     use crate::settings::Settings;
 
     #[test]

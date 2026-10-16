@@ -308,7 +308,8 @@ impl Environment {
 }
 
 /// A seed for battles without one: different per run (report it, so the battle can be
-/// fought again).
+/// fought again). Seeds are Java `long`s (classic's `RANDOMSEED`), so any `i64` is a seed,
+/// negative ones too; the random ones are kept non-negative only so that they read alike.
 pub fn random_seed() -> i64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -317,7 +318,7 @@ pub fn random_seed() -> i64 {
     let mut z = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    (z ^ (z >> 31)) as i64
+    ((z ^ (z >> 31)) >> 1) as i64
 }
 
 /// Prepares a battle of `robots` (classic names; teams expand): describes and names them
@@ -508,6 +509,15 @@ pub fn lookup_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn random_seeds_are_non_negative() {
+        // Any i64 is a seed, but the random ones read alike (#36: a screenshot showed a
+        // negative one beside the usual positive ones).
+        for _ in 0..1000 {
+            assert!(random_seed() >= 0);
+        }
+    }
 
     #[test]
     fn parses_the_list_with_details() {
