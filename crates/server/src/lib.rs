@@ -540,11 +540,12 @@ impl<'a> BattleLoop<'a> {
         }
         link.awaiting = None;
         link.final_execute = false;
-        link.output.push_str(&execute.output);
         link.paint = execute.paint;
         link.cpu_nanos = link.cpu_nanos.saturating_add(execute.cpu_nanos);
-        // Only for observers and recordings (which take them with the next snapshot).
+        // Only for observers and recordings (which take them with the next snapshot);
+        // without either, nothing takes them and they would pile up.
         if !self.observers.is_empty() || self.engine.is_recording() {
+            link.output.push_str(&execute.output);
             link.debug_properties.extend(execute.debug_properties);
         }
         let robot = i as i32;
