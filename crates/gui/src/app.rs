@@ -150,6 +150,9 @@ pub struct App {
     /// native one), and the field it is open for. It opens where the last pick was.
     files: FileDialog,
     browsing: Option<Browse>,
+    /// The text [`Browse::Save`] saves, and why the last save failed.
+    saving: Option<screen::SaveRequest>,
+    save_error: Option<String>,
 }
 
 /// The field a file dialog is open for.
@@ -161,6 +164,8 @@ pub enum Browse {
     Replay,
     /// A robot folder for the options.
     Folder,
+    /// A file to save [`App::saving`] to.
+    Save,
 }
 
 /// What the user wants from the battle screen.
@@ -225,6 +230,8 @@ impl App {
                 .id("file-dialog")
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]),
             browsing: None,
+            saving: None,
+            save_error: None,
         };
         app.count_folder_jars();
         app.list_robots(&cc.egui_ctx);
@@ -743,6 +750,7 @@ impl App {
             Browse::Record => &self.setup.record,
             Browse::Replay => &self.open_path,
             Browse::Folder => &self.new_folder,
+            Browse::Save => "",
         };
         let path = expand_home(text.trim());
         let dir = match field {
@@ -757,9 +765,11 @@ impl App {
             }
             None => OpeningMode::LastPickedDir,
         };
+        let saving = self.saving.as_ref();
         config.default_file_name = match (field, path.file_name()) {
             (Browse::Record, Some(name)) => name.to_string_lossy().into_owned(),
             (Browse::Record, None) => "battle.rec".to_string(),
+            (Browse::Save, _) => saving.map_or_else(String::new, |s| s.name.clone()),
             _ => String::new(),
         };
         config.title = Some(
@@ -767,11 +777,12 @@ impl App {
                 Browse::Record => "Record to",
                 Browse::Replay => "Open a recording",
                 Browse::Folder => "Add a robot folder",
+                Browse::Save => saving.map_or("Save", |s| s.title),
             }
             .to_string(),
         );
         match field {
-            Browse::Record => self.files.save_file(),
+            Browse::Record | Browse::Save => self.files.save_file(),
             Browse::Replay => self.files.pick_file(),
             Browse::Folder => self.files.pick_directory(),
         }
@@ -800,9 +811,42 @@ impl App {
                         self.settings_changed(ctx, &before);
                     }
                 }
+                Browse::Save => {
+                    if let Some(saving) = self.saving.take()
+                        && let Err(e) = std::fs::write(&path, saving.text)
+                    {
+                        self.save_error = Some(format!("{}: {e}", path.display()));
+                    }
+                }
             }
         } else if *self.files.state() != DialogState::Open {
             self.browsing = None;
+            self.saving = None;
+        }
+    }
+
+    /// Asks where to save `request`'s text, and saves it there.
+    fn save(&mut self, request: screen::SaveRequest) {
+        self.saving = Some(request);
+        self.browse(Browse::Save);
+    }
+
+    /// Why the last save failed, in a window until it is closed.
+    fn save_error_window(&mut self, ctx: &egui::Context) {
+        let Some(error) = &self.save_error else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new("Could not save")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(error.as_str());
+                close = ui.button("OK").clicked();
+            });
+        if close {
+            self.save_error = None;
         }
     }
 
@@ -1062,7 +1106,7 @@ impl App {
             true,
         );
         let output = &live.output;
-        let toggled = screen::output_panel(
+        let event = screen::output_panel(
             root,
             "output",
             &live.robots,
@@ -1071,9 +1115,21 @@ impl App {
             &live.paint,
             |i| Cow::Borrowed(output.get(i).map_or("", String::as_str)),
         );
-        if let Some(i) = toggled {
-            let on = !live.paint[i];
-            live.set_paint(i, on);
+        let mut save = None;
+        match event {
+            Some(screen::OutputEvent::TogglePaint(i)) => {
+                let on = !live.paint[i];
+                live.set_paint(i, on);
+            }
+            Some(screen::OutputEvent::Save(i, text)) => {
+                save = Some(screen::output_save(&live.robots[i], text));
+            }
+            Some(screen::OutputEvent::Clear(i)) => {
+                if let Some(out) = live.output.get_mut(i) {
+                    out.clear();
+                }
+            }
+            None => {}
         }
         screen::controls_panel(root, "controls", |ui| {
             ui.horizontal(|ui| {
@@ -1204,6 +1260,9 @@ impl App {
                 });
             }
             None => {}
+        }
+        if let Some(save) = save {
+            self.save(save);
         }
         next
     }
@@ -1455,8 +1514,13 @@ impl eframe::App for App {
             Tab::Start => self.start_page(root),
             Tab::Replay => match &mut self.replay {
                 Some(replay) => {
-                    if replay.ui(root, &mut self.sprites, style, &mut self.selected) {
+                    let mut save = None;
+                    let sprites = &mut self.sprites;
+                    if replay.ui(root, sprites, style, &mut self.selected, &mut save) {
                         self.replay = None;
+                    }
+                    if let Some(save) = save {
+                        self.save(save);
                     }
                 }
                 None => self.replay_page(root),
@@ -1465,6 +1529,7 @@ impl eframe::App for App {
             Tab::Options => self.options_page(root),
         }
         self.file_dialog(ctx);
+        self.save_error_window(ctx);
         // A file dropped on the window opens as a replay.
         let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
         if let Some(path) = dropped {

@@ -51,6 +51,8 @@ pub struct ReplayView {
     turns_per_second: u32,
     last_tick: Option<Instant>,
     paint_visible: Vec<bool>,
+    /// Per robot, the turn index its output was cleared at: output up to it is not shown.
+    cleared: Vec<Option<usize>>,
     /// The results window was closed at the last turn; it shows again there after a seek.
     results_closed: bool,
 }
@@ -118,6 +120,7 @@ impl ReplayView {
         let mut view = Self {
             title: title(path),
             paint_visible: vec![true; robots.len()],
+            cleared: vec![None; robots.len()],
             robots,
             width: f64::from(rules.battlefield_width),
             height: f64::from(rules.battlefield_height),
@@ -153,6 +156,7 @@ impl ReplayView {
         let mut view = Self {
             title: title(path),
             paint_visible: vec![true; decoded.robots.len()],
+            cleared: vec![None; decoded.robots.len()],
             robots: decoded.robots,
             width: decoded.width,
             height: decoded.height,
@@ -253,12 +257,14 @@ impl ReplayView {
     }
 
     /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
+    /// A robot's output to save goes in `save`.
     pub fn ui(
         &mut self,
         root: &mut egui::Ui,
         sprites: &mut Sprites,
         style: Style,
         selected: &mut usize,
+        save: &mut Option<screen::SaveRequest>,
     ) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
@@ -279,7 +285,8 @@ impl ReplayView {
         if full {
             let output = &self.output;
             let position = self.position;
-            let toggled = screen::output_panel(
+            let cleared = &self.cleared;
+            let event = screen::output_panel(
                 root,
                 "replay-output",
                 &self.robots,
@@ -287,17 +294,31 @@ impl ReplayView {
                 selected,
                 &self.paint_visible,
                 |i| {
+                    let from = cleared.get(i).copied().flatten();
                     let text: String = output
                         .iter()
                         .take_while(|(turn, _, _)| *turn <= position)
-                        .filter(|(_, robot, _)| *robot == i)
+                        .filter(|(turn, robot, _)| {
+                            *robot == i && from.is_none_or(|from| *turn > from)
+                        })
                         .map(|(_, _, t)| t.as_str())
                         .collect();
                     Cow::Owned(text)
                 },
             );
-            if let Some(i) = toggled {
-                self.paint_visible[i] = !self.paint_visible[i];
+            match event {
+                Some(screen::OutputEvent::TogglePaint(i)) => {
+                    self.paint_visible[i] = !self.paint_visible[i];
+                }
+                Some(screen::OutputEvent::Save(i, text)) => {
+                    *save = Some(screen::output_save(&self.robots[i], text));
+                }
+                Some(screen::OutputEvent::Clear(i)) => {
+                    if let Some(c) = self.cleared.get_mut(i) {
+                        *c = Some(position);
+                    }
+                }
+                None => {}
             }
         }
         screen::controls_panel(root, "replay-controls", |ui| {

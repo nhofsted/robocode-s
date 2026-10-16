@@ -157,6 +157,87 @@ pub fn folder(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32
     painter.line_segment([egui::pos2(l, t + tab), egui::pos2(r, t + tab)], stroke);
 }
 
+/// Copy: two overlapping pages, the front one bottom right.
+pub fn copy(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let (w, h) = (radius * 0.6, radius * 0.75);
+    let shift = vec2(radius * 0.25, radius * 0.25);
+    let back = egui::Rect::from_center_size(center - shift, vec2(w * 2.0, h * 2.0));
+    let front = egui::Rect::from_center_size(center + shift, vec2(w * 2.0, h * 2.0));
+    // The back page shows only where the front one doesn't cover it.
+    painter.line_segment([back.left_bottom(), back.left_top()], stroke);
+    painter.line_segment([back.left_top(), back.right_top()], stroke);
+    painter.rect_stroke(front, 1.0, stroke, egui::StrokeKind::Middle);
+}
+
+/// Save: an arrow down into a tray.
+pub fn save(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let top = center.y - radius;
+    let tip = center.y + radius * 0.35;
+    painter.line_segment(
+        [egui::pos2(center.x, top), egui::pos2(center.x, tip)],
+        stroke,
+    );
+    let head = radius * 0.45;
+    painter.line_segment(
+        [
+            egui::pos2(center.x - head, tip - head),
+            egui::pos2(center.x, tip),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(center.x + head, tip - head),
+            egui::pos2(center.x, tip),
+        ],
+        stroke,
+    );
+    let (l, r, b) = (center.x - radius, center.x + radius, center.y + radius);
+    painter.add(Shape::line(
+        vec![
+            egui::pos2(l, center.y + radius * 0.3),
+            egui::pos2(l, b),
+            egui::pos2(r, b),
+            egui::pos2(r, center.y + radius * 0.3),
+        ],
+        stroke,
+    ));
+}
+
+/// Clear: a bin with a lid.
+pub fn clear(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let lid = center.y - radius * 0.65;
+    let (top, bottom) = (lid + radius * 0.3, center.y + radius);
+    let (w, narrow) = (radius * 0.7, radius * 0.55);
+    painter.line_segment(
+        [
+            egui::pos2(center.x - radius, lid),
+            egui::pos2(center.x + radius, lid),
+        ],
+        stroke,
+    );
+    let handle = radius * 0.3;
+    painter.line_segment(
+        [
+            egui::pos2(center.x - handle, lid - radius * 0.3),
+            egui::pos2(center.x + handle, lid - radius * 0.3),
+        ],
+        stroke,
+    );
+    painter.add(Shape::line(
+        vec![
+            egui::pos2(center.x - w, top),
+            egui::pos2(center.x - narrow, bottom),
+            egui::pos2(center.x + narrow, bottom),
+            egui::pos2(center.x + w, top),
+        ],
+        stroke,
+    ));
+}
+
 /// A square, borderless button showing an icon; brighter when hovered, dimmed when the
 /// `ui` is disabled.
 pub fn button(
