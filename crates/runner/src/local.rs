@@ -9,7 +9,7 @@
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use robocode_s_server::{BattleOutcome, RobotEntry, ServerConfig, run_battle};
+use robocode_s_server::{BattleOutcome, Observers, RobotEntry, ServerConfig, run_battle_with};
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -392,6 +392,18 @@ pub fn run_local_battle(
     host: &JavaHost,
     battle: &LocalBattle,
     controls: Option<mpsc::Receiver<v1::ObserverControl>>,
+    observe: impl FnMut(&server_message::Msg),
+) -> Result<LocalOutcome, String> {
+    run_local_battle_with(host, battle, None, controls, observe)
+}
+
+/// [`run_local_battle`], with observers from elsewhere on a listener of their own
+/// (`robocode-s battle --observe`).
+pub fn run_local_battle_with(
+    host: &JavaHost,
+    battle: &LocalBattle,
+    observers: Option<Observers>,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
     mut observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -409,7 +421,7 @@ pub fn run_local_battle(
         })
         .collect();
     let config = battle.config.clone();
-    let server = thread::spawn(move || run_battle(listener, &config, entries));
+    let server = thread::spawn(move || run_battle_with(listener, observers, &config, entries));
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
     let hello = v1::ClientMessage {

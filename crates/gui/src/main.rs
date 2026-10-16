@@ -29,6 +29,7 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 usage: robocode-s-gui [recording]
        robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
+       robocode-s-gui --watch HOST:PORT [--token TOKEN] [--tps N]
 
 Without arguments: the battle setup. With a recording (from --record or
 \"Record to\", or a website viewer track): its replay.
@@ -43,6 +44,9 @@ for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
 system's frame).
 
+  --watch HOST:PORT  watch the battle on that server as an observer (one run with
+                     `robocode-s battle --observe PORT`), as Start Battle's Watch
+  --token TOKEN      with --watch: the observer token ($ROBOCODES_OBSERVE_TOKEN)
   --zoom Z[,X,Y]     battles and replays start zoomed in Z times (1 to 16), centred
                      on battlefield point X,Y (y up; default the field's centre)
   --tab NAME         open a tab at start: start, replay or options
@@ -99,6 +103,10 @@ fn main() -> ExitCode {
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);
+    let mut watch = false;
+    if let Ok(token) = std::env::var("ROBOCODES_OBSERVE_TOKEN") {
+        setup.watch_token = token;
+    }
     let mut loading = false;
     let mut tab = None;
     let mut browse = None;
@@ -114,6 +122,11 @@ fn main() -> ExitCode {
                 setup.robots = parse_robots(&value());
                 start = true;
             }
+            "--watch" => {
+                setup.watch = value();
+                watch = true;
+            }
+            "--token" => setup.watch_token = value(),
             "--rounds" => setup.rounds = value().parse().unwrap_or(setup.rounds),
             "--seed" => setup.seed = value(),
             "--tps" => setup.turns_per_second = value().parse().unwrap_or(30),
@@ -219,6 +232,7 @@ fn main() -> ExitCode {
             let launch = Launch {
                 setup,
                 start,
+                watch,
                 replay,
                 tab,
                 browse,

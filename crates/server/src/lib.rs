@@ -11,6 +11,7 @@ pub mod convert;
 pub mod driver;
 pub mod recording;
 pub mod results;
+pub mod watch;
 
 use driver::RecordingDriver;
 use recording::Recorder;
@@ -21,10 +22,13 @@ use std::io;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// At most this many observers at once on an [`Observers`] listener.
+const MAX_REMOTE_OBSERVERS: usize = 16;
 
 /// More consecutive skipped turns disable a robot (240 for robots that did file I/O).
 const MAX_SKIPPED_TURNS: i64 = 30;
@@ -73,6 +77,19 @@ pub struct RobotEntry {
     pub token: String,
 }
 
+/// Observers from elsewhere (design §10: a remote GUI attached as an observer): a
+/// listener of their own beside the robots', which takes only observers. Robots' tokens
+/// never reach it, so the robots' listener can stay on loopback.
+#[derive(Debug)]
+pub struct Observers {
+    pub listener: TcpListener,
+    /// The credential observers present in their `Hello`; empty: none (for a loopback
+    /// listener only, as the CLI ensures).
+    pub token: String,
+    /// The battle starts only once the first observer is here (so that it sees it all).
+    pub wait: bool,
+}
+
 /// The end of a battle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BattleOutcome {
@@ -92,6 +109,12 @@ enum Incoming {
     },
     ObserverConnected {
         stream: TcpStream,
+        /// It came to the [`Observers`] listener.
+        remote: bool,
+    },
+    /// An observer's connection ended.
+    ObserverLeft {
+        remote: bool,
     },
     Message {
         robot: usize,
@@ -139,6 +162,16 @@ pub fn run_battle(
     config: &ServerConfig,
     robots: Vec<RobotEntry>,
 ) -> io::Result<BattleOutcome> {
+    run_battle_with(listener, None, config, robots)
+}
+
+/// [`run_battle`], with observers from elsewhere on a listener of their own.
+pub fn run_battle_with(
+    listener: TcpListener,
+    observers: Option<Observers>,
+    config: &ServerConfig,
+    robots: Vec<RobotEntry>,
+) -> io::Result<BattleOutcome> {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let tokens: Vec<String> = robots.iter().map(|r| r.token.clone()).collect();
@@ -147,11 +180,107 @@ pub fn run_battle(
         listener.set_nonblocking(true)?;
         thread::spawn(move || accept_loop(&listener, &tokens, &tx, &stop))
     };
+    let wait = observers.as_ref().is_some_and(|o| o.wait);
+    let observer_acceptor = match observers {
+        Some(o) => {
+            let (tx, stop) = (tx.clone(), stop.clone());
+            o.listener.set_nonblocking(true)?;
+            Some(thread::spawn(move || {
+                observer_accept_loop(&o.listener, &o.token, &tx, &stop)
+            }))
+        }
+        None => None,
+    };
     drop(tx);
-    let result = BattleLoop::new(config, robots, rx).and_then(BattleLoop::run);
+    let result = BattleLoop::new(config, robots, rx).and_then(|mut b| {
+        b.await_observer = wait;
+        b.run()
+    });
     stop.store(true, Ordering::SeqCst);
     let _ = acceptor.join();
+    if let Some(a) = observer_acceptor {
+        let _ = a.join();
+    }
     result
+}
+
+/// Accepts observers on an [`Observers`] listener, each handshake on its own thread (a
+/// slow one doesn't hold up the next), at most [`MAX_REMOTE_OBSERVERS`] at once.
+fn observer_accept_loop(
+    listener: &TcpListener,
+    token: &str,
+    tx: &Sender<Incoming>,
+    stop: &AtomicBool,
+) {
+    let connected = Arc::new(AtomicUsize::new(0));
+    while !stop.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let (token, tx, connected) = (token.to_string(), tx.clone(), connected.clone());
+                thread::spawn(move || {
+                    let _ = observer_handshake(stream, &token, &tx, &connected);
+                });
+            }
+            Err(_) => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+}
+
+/// Reads an observer's `Hello` on an [`Observers`] listener: only observers, with the
+/// token.
+fn observer_handshake(
+    stream: TcpStream,
+    token: &str,
+    tx: &Sender<Incoming>,
+    connected: &Arc<AtomicUsize>,
+) -> io::Result<()> {
+    stream.set_nonblocking(false)?;
+    stream.set_nodelay(true)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let mut reader = stream.try_clone()?;
+    let hello = match read_message::<v1::ClientMessage>(&mut reader)? {
+        Some(v1::ClientMessage {
+            msg: Some(client_message::Msg::Hello(h)),
+        }) => h,
+        _ => return refuse(stream, "expected Hello"),
+    };
+    if hello.version.map(|v| v.major) != Some(PROTOCOL_VERSION.major) {
+        return refuse(stream, "unsupported protocol version");
+    }
+    if v1::Role::try_from(hello.role) != Ok(v1::Role::Observer) {
+        return refuse(stream, "only observers connect here");
+    }
+    if !same_secret(hello.token.as_bytes(), token.as_bytes()) {
+        // A moment's delay makes guessing slower.
+        thread::sleep(Duration::from_millis(500));
+        return refuse(stream, "wrong observer token");
+    }
+    if connected.fetch_add(1, Ordering::SeqCst) >= MAX_REMOTE_OBSERVERS {
+        connected.fetch_sub(1, Ordering::SeqCst);
+        return refuse(stream, "too many observers");
+    }
+    stream.set_read_timeout(None)?;
+    let (tx2, connected) = (tx.clone(), connected.clone());
+    spawn_observer_reader(reader, tx.clone(), move || {
+        connected.fetch_sub(1, Ordering::SeqCst);
+        let _ = tx2.send(Incoming::ObserverLeft { remote: true });
+    });
+    let _ = tx.send(Incoming::ObserverConnected {
+        stream,
+        remote: true,
+    });
+    Ok(())
+}
+
+/// Compares a presented token with the secret in time that doesn't depend on where they
+/// differ.
+fn same_secret(presented: &[u8], secret: &[u8]) -> bool {
+    presented.len() == secret.len()
+        && presented
+            .iter()
+            .zip(secret)
+            .fold(0u8, |d, (a, b)| d | (a ^ b))
+            == 0
 }
 
 fn accept_loop(
@@ -208,8 +337,14 @@ fn handshake(
             let _ = tx.send(Incoming::RobotConnected { index, stream });
         }
         Ok(v1::Role::Observer) => {
-            spawn_observer_reader(reader, tx.clone());
-            let _ = tx.send(Incoming::ObserverConnected { stream });
+            let left = tx.clone();
+            spawn_observer_reader(reader, tx.clone(), move || {
+                let _ = left.send(Incoming::ObserverLeft { remote: false });
+            });
+            let _ = tx.send(Incoming::ObserverConnected {
+                stream,
+                remote: false,
+            });
         }
         _ => return refuse(stream, "unsupported role"),
     }
@@ -245,15 +380,21 @@ fn spawn_robot_reader(robot: usize, mut reader: TcpStream, tx: Sender<Incoming>)
     });
 }
 
-fn spawn_observer_reader(mut reader: TcpStream, tx: Sender<Incoming>) {
+/// Forwards an observer's controls; `left` runs when its connection ends.
+fn spawn_observer_reader(
+    mut reader: TcpStream,
+    tx: Sender<Incoming>,
+    left: impl FnOnce() + Send + 'static,
+) {
     thread::spawn(move || {
         while let Ok(Some(message)) = read_message::<v1::ClientMessage>(&mut reader) {
-            if let Some(client_message::Msg::ObserverControl(c)) = message.msg {
-                if tx.send(Incoming::Control(c)).is_err() {
-                    return;
-                }
+            if let Some(client_message::Msg::ObserverControl(c)) = message.msg
+                && tx.send(Incoming::Control(c)).is_err()
+            {
+                break;
             }
         }
+        left();
     });
 }
 
@@ -278,6 +419,10 @@ struct BattleLoop<'a> {
     kills: Vec<usize>,
     /// Observers' mouse and keyboard events, delivered with the next step's events.
     input: Vec<v1::InputEvent>,
+    /// The battle waits for an observer from an [`Observers`] listener before it starts.
+    await_observer: bool,
+    /// Observers from an [`Observers`] listener connected now.
+    remote_observers: usize,
 }
 
 impl<'a> BattleLoop<'a> {
@@ -321,11 +466,19 @@ impl<'a> BattleLoop<'a> {
             abort: false,
             kills: Vec::new(),
             input: Vec::new(),
+            await_observer: false,
+            remote_observers: 0,
         })
     }
 
     fn run(mut self) -> io::Result<BattleOutcome> {
         self.await_robots();
+        while self.await_observer && !self.abort {
+            match self.rx.recv() {
+                Ok(incoming) => self.handle(incoming),
+                Err(_) => break,
+            }
+        }
         let mut rounds = 0;
         // As classic: no round starts after a stop.
         while rounds < self.config.rules.num_rounds && !self.abort {
@@ -337,10 +490,18 @@ impl<'a> BattleLoop<'a> {
         for i in 0..self.links.len() {
             self.send(
                 i,
-                server_message::Msg::BattleOver(v1::BattleOver { aborted }),
+                server_message::Msg::BattleOver(v1::BattleOver {
+                    aborted,
+                    ..Default::default()
+                }),
             );
         }
         let results = recording::round_result(self.battle()).results;
+        self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
+            aborted,
+            rounds,
+            results: results.clone(),
+        }));
         // Reader threads hold clones of the sockets; shutting them down closes the
         // connections and ends those threads.
         for stream in self
@@ -527,13 +688,14 @@ impl<'a> BattleLoop<'a> {
                     }),
                 );
             }
-            Incoming::ObserverConnected { mut stream } => {
+            Incoming::ObserverConnected { mut stream, remote } => {
                 let info = v1::BattleInfo {
                     rules: Some(convert::rules(
                         &self.config.rules,
                         self.config.deterministic,
                     )),
                     robots: self.statics.clone(),
+                    seed: self.config.seed,
                 };
                 let ack = server(server_message::Msg::HelloAck(v1::HelloAck {
                     version: Some(PROTOCOL_VERSION),
@@ -544,6 +706,23 @@ impl<'a> BattleLoop<'a> {
                         .is_ok()
                 {
                     self.observers.push(stream);
+                    if remote {
+                        self.await_observer = false;
+                        self.remote_observers += 1;
+                    }
+                }
+            }
+            // An observer that paused the battle and left doesn't hold it up for the others
+            // (such as the command line's own). Once the last one from elsewhere left, the
+            // battle runs at full speed again, as it did before them.
+            Incoming::ObserverLeft { remote } => {
+                self.paused = false;
+                self.steps = 0;
+                if remote {
+                    self.remote_observers = self.remote_observers.saturating_sub(1);
+                    if self.remote_observers == 0 {
+                        self.turns_per_second = 0;
+                    }
                 }
             }
             Incoming::Message { robot, message } => {

@@ -40,6 +40,9 @@ pub struct Setup {
     pub paint: bool,
     pub turns_per_second: u32,
     pub rules: Rules,
+    /// Watch a battle: the server's address (`host:port`) and observer token.
+    pub watch: String,
+    pub watch_token: String,
 }
 
 impl Setup {
@@ -56,6 +59,8 @@ impl Setup {
             paint: false,
             turns_per_second: 30,
             rules: settings.rules,
+            watch: "localhost:7654".into(),
+            watch_token: String::new(),
         }
     }
 
@@ -166,6 +171,9 @@ struct Starting {
     paint: bool,
     /// Why the battle couldn't start.
     error: Option<String>,
+    /// A battle on another server, watched: its address. The contestants and settings
+    /// come once it is connected.
+    watching: Option<String>,
 }
 
 /// Saves a screenshot to a file once the condition holds, then quits (for checks).
@@ -279,6 +287,8 @@ enum Next {
 pub struct Launch {
     pub setup: Setup,
     pub start: bool,
+    /// Watch the battle at the setup's address (`--watch`).
+    pub watch: bool,
     pub replay: Option<PathBuf>,
     pub tab: Option<Tab>,
     /// The field whose file dialog opens at start (`--browse`).
@@ -348,6 +358,8 @@ impl App {
             app.open_replay(path);
         } else if launch.start {
             app.start(&cc.egui_ctx);
+        } else if launch.watch {
+            app.watch(&cc.egui_ctx);
         }
         if let Some(tab) = launch.tab {
             app.tab = tab;
@@ -635,9 +647,40 @@ impl App {
             turns_per_second: s.turns_per_second,
             paint: s.paint,
             error: None,
+            watching: None,
         });
         self.error = None;
         self.live = None;
+        self.battles += 1;
+        self.tab = Tab::Start;
+    }
+
+    /// Watches the battle at the setup's address as an observer: the loading screen until
+    /// it is connected and its first turn is there.
+    fn watch(&mut self, ctx: &egui::Context) {
+        let address = self.setup.watch.trim().to_string();
+        if address.is_empty() {
+            self.error = Some("Give the address of the battle to watch.".into());
+            return;
+        }
+        let mut live = Live::watch(ctx, address.clone(), self.setup.watch_token.clone());
+        live.camera = self.camera;
+        live.set_speed(self.setup.turns_per_second);
+        self.starting = Some(Starting {
+            contestants: Vec::new(),
+            prepared: None,
+            seed: 0,
+            rounds: 1,
+            size: (800, 600),
+            classic: false,
+            turns_per_second: self.setup.turns_per_second,
+            paint: false,
+            error: None,
+            watching: Some(address),
+        });
+        self.selected = 0;
+        self.live = Some(Box::new(live));
+        self.error = None;
         self.battles += 1;
         self.tab = Tab::Start;
     }
@@ -675,6 +718,17 @@ impl App {
             }
         }
         if let Some(live) = &self.live {
+            // A watched battle's contestants and settings, once it is connected.
+            if starting.watching.is_some()
+                && starting.contestants.is_empty()
+                && !live.robots.is_empty()
+            {
+                starting.contestants = live.robots.iter().map(|r| r.name.clone()).collect();
+                starting.seed = live.seed;
+                starting.rounds = live.rounds;
+                starting.size = (live.width as i32, live.height as i32);
+                starting.classic = !live.deterministic;
+            }
             match &live.outcome {
                 // It failed before its first turn: say so on the loading screen.
                 Some(Err(e)) if live.latest.is_none() => {
@@ -839,6 +893,41 @@ impl App {
                     });
                 });
             });
+
+            section(ui, "Watch a battle");
+            ui.label(
+                RichText::new(
+                    "A battle on a server, here or on another machine, run with \
+                     robocode-s battle --observe PORT.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Address");
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.setup.watch)
+                        .hint_text("host:port")
+                        .desired_width(180.0),
+                );
+                ui.add_space(8.0);
+                ui.label("Token");
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.setup.watch_token)
+                        .password(true)
+                        .hint_text("none")
+                        .desired_width(120.0),
+                )
+                .on_hover_text("The battle's --observe-token, if it has one");
+                ui.add_space(8.0);
+                if ui
+                    .add(egui::Button::new("Watch").min_size(egui::vec2(90.0, 0.0)))
+                    .on_hover_text("Connect to the battle as an observer")
+                    .clicked()
+                {
+                    app.watch(ctx);
+                }
+            });
         });
     }
 
@@ -851,7 +940,14 @@ impl App {
             let Some(starting) = &app.starting else {
                 return;
             };
-            section(ui, "Starting the battle");
+            let watching = starting.watching.as_deref();
+            section(
+                ui,
+                match watching {
+                    Some(_) => "Watching a battle",
+                    None => "Starting the battle",
+                },
+            );
             ui.add_space(8.0);
             contestants_row(ui, &mut app.sprites, &starting.contestants, time);
             ui.add_space(12.0);
@@ -866,20 +962,24 @@ impl App {
                 n => format!("{n} rounds"),
             };
             ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{rounds} · {w} × {h} · {mode} · seed {}",
-                        starting.seed
-                    ))
-                    .weak(),
-                );
+                let known = watching.is_none() || !starting.contestants.is_empty();
+                if known {
+                    ui.label(
+                        RichText::new(format!(
+                            "{rounds} · {w} × {h} · {mode} · seed {}",
+                            starting.seed
+                        ))
+                        .weak(),
+                    );
+                }
                 ui.add_space(20.0);
                 match &starting.error {
                     None => {
-                        let what = if starting.prepared.is_some() {
-                            "Looking up the robots…"
-                        } else {
-                            "Starting the robots…"
+                        let what = match watching {
+                            Some(a) if !known => format!("Connecting to {a}…"),
+                            Some(a) => format!("Waiting for the battle on {a} to start…"),
+                            None if starting.prepared.is_some() => "Looking up the robots…".into(),
+                            None => "Starting the robots…".into(),
                         };
                         ui.add(egui::Spinner::new().size(28.0).color(shell::ACCENT));
                         ui.add_space(8.0);
@@ -892,10 +992,13 @@ impl App {
                     }
                     Some(e) => {
                         ui.label(
-                            RichText::new("The battle couldn't start")
-                                .size(16.0)
-                                .strong()
-                                .color(Color32::LIGHT_RED),
+                            RichText::new(match watching {
+                                Some(_) => "Couldn't watch the battle",
+                                None => "The battle couldn't start",
+                            })
+                            .size(16.0)
+                            .strong()
+                            .color(Color32::LIGHT_RED),
                         );
                         ui.add_space(8.0);
                         egui::Frame::NONE
@@ -1496,7 +1599,17 @@ impl App {
                 let id = egui::Id::new(("results", self.battles));
                 let sprites = &mut self.sprites;
                 let request = screen::results_window(ctx, sprites, id, &shown, |ui| {
-                    let replays = if self.setup.classic {
+                    if live.watching.is_some() {
+                        if ui
+                            .add(egui::Button::new(RichText::new("Done").strong()))
+                            .on_hover_text("Back to the setup.")
+                            .clicked()
+                        {
+                            next = Next::Setup;
+                        }
+                        return;
+                    }
+                    let replays = if !live.deterministic {
                         "Classic mode: the robots' timing differs, so it may go differently."
                     } else {
                         "Deterministic mode: the battle repeats exactly."

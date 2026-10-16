@@ -5,10 +5,12 @@
 use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
-use robocode_s_runner::local::{Environment, prepare, random_seed, run_local_battle};
+use robocode_s_runner::local::{Environment, prepare, random_seed, run_local_battle_with};
+use robocode_s_server::Observers;
 use robocode_s_server::ServerConfig;
 use std::fs::File;
 use std::io::{IsTerminal, Write};
+use std::net::{TcpListener, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -48,6 +50,16 @@ Output:
   --json                 results as JSON instead of a table
   --record FILE          record the battle (replay with `robocode-s replay FILE`)
   --paint                ask every robot for its debug painting (stored by --record)
+
+Watching (the GUI's Start Battle, Watch a battle):
+  --observe ADDR         let observers watch on ADDR (PORT, or HOST:PORT; HOST
+                         defaults to 127.0.0.1); the battle starts once the first
+                         one connected. Observers control the battle as the GUI
+                         does (pause, speed, stop, kill, input).
+  --observe-token TOKEN  observers must present TOKEN ($ROBOCODES_OBSERVE_TOKEN);
+                         required unless ADDR is a loopback address. The
+                         connection is not encrypted: use a network you trust,
+                         or an SSH tunnel to a loopback address
 ";
 
 /// The parsed command line.
@@ -64,6 +76,10 @@ pub struct Options {
     pub json: bool,
     pub record: Option<PathBuf>,
     pub paint: bool,
+    /// `--observe`: where observers may watch (`host:port`).
+    pub observe: Option<String>,
+    /// The token observers present; empty: none (loopback only).
+    pub observe_token: String,
 }
 
 impl Options {
@@ -80,6 +96,8 @@ impl Options {
             json: false,
             record: None,
             paint: false,
+            observe: None,
+            observe_token: std::env::var("ROBOCODES_OBSERVE_TOKEN").unwrap_or_default(),
         }
     }
 
@@ -128,6 +146,8 @@ impl Options {
                 "--json" => o.json = true,
                 "--record" => o.record = Some(value(arg)?.into()),
                 "--paint" => o.paint = true,
+                "--observe" => o.observe = Some(observe_address(&value(arg)?)),
+                "--observe-token" => o.observe_token = value(arg)?,
                 a if a.starts_with("--") => return Err(format!("unknown option {a}")),
                 robot => o.robots.extend(
                     robot
@@ -147,12 +167,58 @@ impl Options {
         if o.rules.num_rounds < 1 {
             return Err("--rounds must be at least 1".into());
         }
+        if let Some(address) = &o.observe
+            && o.observe_token.is_empty()
+            && !is_loopback(address)?
+        {
+            return Err(format!(
+                "--observe {address} is reachable from other machines: give observers a \
+                 token with --observe-token (or $ROBOCODES_OBSERVE_TOKEN)"
+            ));
+        }
         Ok(o)
     }
 }
 
+/// `--observe`'s address: a port alone is on loopback.
+fn observe_address(text: &str) -> String {
+    match text.parse::<u16>() {
+        Ok(port) => format!("127.0.0.1:{port}"),
+        Err(_) => text.to_string(),
+    }
+}
+
+/// Whether every address `address` stands for is a loopback one.
+fn is_loopback(address: &str) -> Result<bool, String> {
+    let addresses: Vec<_> = address
+        .to_socket_addrs()
+        .map_err(|e| format!("--observe {address}: {e}"))?
+        .collect();
+    Ok(!addresses.is_empty() && addresses.iter().all(|a| a.ip().is_loopback()))
+}
+
 pub fn run(o: &Options) -> Result<(), String> {
     let seed = o.seed.unwrap_or_else(random_seed);
+    // Bound first, so that a taken port fails before any robot starts.
+    let observers = match &o.observe {
+        Some(address) => {
+            let listener =
+                TcpListener::bind(address).map_err(|e| format!("--observe {address}: {e}"))?;
+            let bound = listener.local_addr().map_err(|e| e.to_string())?;
+            let watch = if bound.ip().is_unspecified() {
+                format!("THIS-HOST:{}", bound.port())
+            } else {
+                bound.to_string()
+            };
+            eprintln!("Waiting for an observer on {bound} (robocode-s-gui --watch {watch})");
+            Some(Observers {
+                listener,
+                token: o.observe_token.clone(),
+                wait: true,
+            })
+        }
+        None => None,
+    };
     let config = ServerConfig {
         rules: o.rules.clone(),
         seed,
@@ -180,7 +246,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         }
         rx
     });
-    let local = run_local_battle(&host, &battle, controls, |msg| match msg {
+    let local = run_local_battle_with(&host, &battle, observers, controls, |msg| match msg {
         server_message::Msg::TurnSnapshot(s) => {
             for (i, r) in s.robots.iter().enumerate() {
                 if r.output.is_empty() {
@@ -267,6 +333,21 @@ mod tests {
         assert_eq!(o.rules.height, 600);
         assert!(o.rules.hide_enemy_names && o.json && !o.classic);
         assert_eq!(o.seed, Some(-7));
+    }
+
+    #[test]
+    fn observers_need_a_token_off_loopback() {
+        let o = Options::parse(&args("sample.Fire --observe 7654")).unwrap();
+        assert_eq!(o.observe.as_deref(), Some("127.0.0.1:7654"));
+        assert!(Options::parse(&args("sample.Fire --observe localhost:7654")).is_ok());
+        let open = Options::parse(&args(
+            "sample.Fire --observe 0.0.0.0:7654 --observe-token t0ken",
+        ));
+        assert_eq!(open.unwrap().observe_token, "t0ken");
+        let open = Options::parse(&args("sample.Fire --observe 0.0.0.0:7654"));
+        if std::env::var_os("ROBOCODES_OBSERVE_TOKEN").is_none_or(|t| t.is_empty()) {
+            assert!(open.unwrap_err().contains("--observe-token"));
+        }
     }
 
     #[test]
