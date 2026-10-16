@@ -59,6 +59,59 @@ impl Setup {
     }
 }
 
+/// A game type (Tank Royale's): its name, a hint, and the rounds, battlefield size and
+/// rules it sets.
+pub struct GameType {
+    pub name: &'static str,
+    pub hint: &'static str,
+    pub rounds: i32,
+    pub size: (i32, i32),
+}
+
+/// The game types: classic's defaults, and the rumbles' 1v1, melee and team settings.
+/// Each sets the default rules.
+pub const GAME_TYPES: [GameType; 4] = [
+    GameType {
+        name: "Classic",
+        hint: "Classic Robocode's defaults: 10 rounds on 800 × 600",
+        rounds: 10,
+        size: (800, 600),
+    },
+    GameType {
+        name: "1v1",
+        hint: "Two robots, as the RoboRumble: 35 rounds on 800 × 600",
+        rounds: 35,
+        size: (800, 600),
+    },
+    GameType {
+        name: "Melee",
+        hint: "Many robots, as the MeleeRumble: 35 rounds on 1000 × 1000",
+        rounds: 35,
+        size: (1000, 1000),
+    },
+    GameType {
+        name: "Teams",
+        hint: "Teams, as the TeamRumble: 10 rounds on 1200 × 1200",
+        rounds: 10,
+        size: (1200, 1200),
+    },
+];
+
+impl GameType {
+    /// Whether `setup` has this game type's settings.
+    pub fn matches(&self, setup: &Setup) -> bool {
+        setup.rounds == self.rounds
+            && (setup.width, setup.height) == self.size
+            && setup.rules == Rules::default()
+    }
+
+    pub fn apply(&self, setup: &mut Setup) {
+        setup.rounds = self.rounds;
+        (setup.width, setup.height) = self.size;
+        setup.rules = Rules::default();
+    }
+}
+
 /// `--battle`: robots and teams separated by commas.
 pub fn parse_robots(text: &str) -> Vec<String> {
     text.split(',')
@@ -587,6 +640,24 @@ impl App {
                 .min_col_width(LABELS)
                 .spacing([12.0, 8.0])
                 .show(ui, |ui| {
+                    ui.label("Game type");
+                    ui.horizontal(|ui| {
+                        let mut custom = true;
+                        for game in &GAME_TYPES {
+                            let on = game.matches(s);
+                            custom &= !on;
+                            if ui
+                                .selectable_label(on, game.name)
+                                .on_hover_text(game.hint)
+                                .clicked()
+                            {
+                                game.apply(s);
+                            }
+                        }
+                        ui.add_enabled(false, egui::Button::selectable(custom, "Custom"))
+                            .on_disabled_hover_text("Rules of your own: change any below");
+                    });
+                    ui.end_row();
                     ui.label("Rounds");
                     ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
                     ui.end_row();
@@ -1665,7 +1736,21 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_robots;
+    use super::{GAME_TYPES, Setup, parse_robots};
+    use crate::settings::Settings;
+
+    #[test]
+    fn a_game_type_sets_its_rules_and_is_recognised() {
+        let mut setup = Setup::new(&Settings::default());
+        let matching = |s: &Setup| GAME_TYPES.iter().filter(|g| g.matches(s)).count();
+        assert!(GAME_TYPES[0].matches(&setup), "the defaults are classic's");
+        setup.rules.inactivity_time = 900;
+        assert_eq!(matching(&setup), 0, "custom");
+        GAME_TYPES[2].apply(&mut setup);
+        assert!(GAME_TYPES[2].matches(&setup));
+        assert_eq!(matching(&setup), 1);
+        assert_eq!((setup.width, setup.height, setup.rounds), (1000, 1000, 35));
+    }
 
     #[test]
     fn robots_from_the_command_line() {
