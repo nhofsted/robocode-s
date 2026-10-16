@@ -23,6 +23,30 @@ pub struct Settings {
     pub rounds: i32,
     pub width: i32,
     pub height: i32,
+    pub rules: Rules,
+}
+
+/// The battle rules besides the rounds and the battlefield size (classic's `BattleRules`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Rules {
+    pub gun_cooling_rate: f64,
+    /// Turns without damage before the robots lose energy.
+    pub inactivity_time: i64,
+    pub hide_enemy_names: bool,
+    pub sentry_border: i32,
+}
+
+impl Default for Rules {
+    fn default() -> Self {
+        let rules = robocode_s_engine::BattleRules::default();
+        Self {
+            gun_cooling_rate: rules.gun_cooling_rate,
+            inactivity_time: rules.inactivity_time,
+            hide_enemy_names: rules.hide_enemy_names,
+            sentry_border: rules.sentry_border_size,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -36,6 +60,7 @@ impl Default for Settings {
             rounds: 10,
             width: 800,
             height: 600,
+            rules: Rules::default(),
         }
     }
 }
@@ -142,6 +167,7 @@ mod tests {
         assert_eq!(s.rounds, 3);
         assert_eq!(s.width, Settings::default().width);
         assert_eq!(s.robot_folders, Settings::default().robot_folders);
+        assert_eq!(s.rules.inactivity_time, 450);
     }
 
     #[test]
@@ -154,6 +180,12 @@ mod tests {
             rounds: 35,
             width: 1000,
             height: 1000,
+            rules: Rules {
+                gun_cooling_rate: 0.2,
+                inactivity_time: 900,
+                hide_enemy_names: true,
+                sentry_border: 150,
+            },
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);

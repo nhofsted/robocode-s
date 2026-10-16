@@ -8,7 +8,7 @@ use crate::icons;
 use crate::live::Live;
 use crate::replay::ReplayView;
 use crate::screen;
-use crate::settings::Settings;
+use crate::settings::{Rules, Settings};
 use crate::shell::{self, Tab};
 use crate::sprites::{Part, Sprites};
 use crate::view::{self, Field, Style};
@@ -38,6 +38,7 @@ pub struct Setup {
     pub record: String,
     pub paint: bool,
     pub turns_per_second: u32,
+    pub rules: Rules,
 }
 
 impl Setup {
@@ -53,6 +54,7 @@ impl Setup {
             record: String::new(),
             paint: false,
             turns_per_second: 30,
+            rules: settings.rules,
         }
     }
 }
@@ -465,7 +467,10 @@ impl App {
                 width: s.width,
                 height: s.height,
                 num_rounds: s.rounds.max(1),
-                ..Default::default()
+                gun_cooling_rate: s.rules.gun_cooling_rate,
+                inactivity_time: s.rules.inactivity_time,
+                hide_enemy_names: s.rules.hide_enemy_names,
+                sentry_border_size: s.rules.sentry_border,
             },
             seed,
             deterministic: !s.classic,
@@ -586,6 +591,7 @@ impl App {
                         ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
                     });
                     ui.end_row();
+                    rules_rows(ui, &mut s.rules);
                     ui.label("Seed");
                     ui.add(
                         egui::TextEdit::singleline(&mut s.seed)
@@ -1048,6 +1054,7 @@ impl App {
                         ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
                     });
                     ui.end_row();
+                    rules_rows(ui, &mut s.rules);
                 });
 
             if let Some(e) = &app.settings_error {
@@ -1078,6 +1085,9 @@ impl App {
         }
         if (s.width, s.height) != (before.width, before.height) {
             (setup.width, setup.height) = (s.width, s.height);
+        }
+        if s.rules != before.rules {
+            setup.rules = s.rules;
         }
         if s.robot_folders != before.robot_folders {
             self.rescan(ctx);
@@ -1283,6 +1293,35 @@ fn browse_button(ui: &mut egui::Ui, hint: &str) -> bool {
         icons::folder(p, c, 7.0, color);
     })
     .clicked()
+}
+
+/// The rules' rows in a two-column grid: gun cooling rate, inactivity time, sentry border
+/// and hiding enemy names.
+fn rules_rows(ui: &mut egui::Ui, rules: &mut Rules) {
+    ui.label("Gun cooling rate");
+    ui.add(
+        egui::DragValue::new(&mut rules.gun_cooling_rate)
+            .range(0.01..=1.0)
+            .speed(0.01)
+            .fixed_decimals(2),
+    )
+    .on_hover_text("Gun heat lost per turn (classic's default 0.1)");
+    ui.end_row();
+    ui.label("Inactivity time");
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut rules.inactivity_time).range(0..=1_000_000));
+        ui.label("turns");
+    })
+    .response
+    .on_hover_text("Turns without damage before the robots start losing energy");
+    ui.end_row();
+    ui.label("Sentry border");
+    ui.add(egui::DragValue::new(&mut rules.sentry_border).range(50..=1000))
+        .on_hover_text("How far into the battlefield a sentry robot's border reaches");
+    ui.end_row();
+    ui.label("Enemy names");
+    ui.checkbox(&mut rules.hide_enemy_names, "Hide them from the robots");
+    ui.end_row();
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {
