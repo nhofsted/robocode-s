@@ -11,7 +11,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 
-fn entry(name: &str, token: &str) -> RobotEntry {
+fn entry(name: &str, token: &str, interactive: bool) -> RobotEntry {
     RobotEntry {
         token: token.into(),
         statics: v1::RobotStatics {
@@ -19,6 +19,7 @@ fn entry(name: &str, token: &str) -> RobotEntry {
             full_class_name: name.into(),
             r#type: Some(v1::RobotType {
                 advanced: true,
+                interactive,
                 ..Default::default()
             }),
             team_index: -1,
@@ -42,8 +43,13 @@ fn connect(address: &str, role: v1::Role, token: &str) -> TcpStream {
 }
 
 /// A robot that drives, turns its gun and fires on a fixed pseudo-random script, and
-/// prints something and sets and removes debug properties now and then.
-fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::JoinHandle<()> {
+/// prints something and sets and removes debug properties now and then. A turn with
+/// mouse or keyboard events it prints and fires hard; it returns them, by turn.
+fn scripted_robot(
+    address: String,
+    token: &'static str,
+    seed: u64,
+) -> thread::JoinHandle<Vec<(i64, v1::InputEvent)>> {
     thread::spawn(move || {
         let mut stream = connect(&address, v1::Role::Robot, token);
         let mut state = seed;
@@ -54,10 +60,20 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
             (state >> 33) as f64 / (1u64 << 31) as f64
         };
         let mut bullet_id = 0;
+        let mut inputs = Vec::new();
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut stream) {
+            let mut got_input = false;
             let (turn, paint_enabled) = match message.msg {
                 Some(server_message::Msg::RoundStart(_)) => (0, false),
-                Some(server_message::Msg::Tick(t)) => (t.turn, t.paint_enabled),
+                Some(server_message::Msg::Tick(t)) => {
+                    for e in t.events {
+                        if let Some(v1::event::Kind::Input(input)) = e.kind {
+                            inputs.push((t.turn, input));
+                            got_input = true;
+                        }
+                    }
+                    (t.turn, t.paint_enabled)
+                }
                 Some(server_message::Msg::BattleOver(_)) => break,
                 _ => continue,
             };
@@ -78,7 +94,17 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
                     ..Default::default()
                 });
             }
-            let output = if turn % 37 == 5 {
+            if got_input {
+                bullet_id += 1;
+                commands.bullets.push(v1::BulletCommand {
+                    bullet_id,
+                    power: Some(3.0),
+                    ..Default::default()
+                });
+            }
+            let output = if got_input {
+                format!("{token} got input at turn {turn}\n")
+            } else if turn % 37 == 5 {
                 format!("{token} at turn {turn}\n")
             } else {
                 String::new()
@@ -131,6 +157,7 @@ fn scripted_robot(address: String, token: &'static str, seed: u64) -> thread::Jo
                 break;
             }
         }
+        inputs
     })
 }
 
@@ -140,12 +167,17 @@ enum Act {
     Stop(i32, i64),
     /// Kills a robot (by index).
     Kill(i32, i64, i32),
+    /// Sends these mouse and keyboard events, while paused so that they arrive together.
+    Input(i32, i64, &'static [v1::InputEvent]),
 }
 
+/// What a fight gives: the outcome, what the observer saw, and the mouse and keyboard
+/// events each robot got, by turn.
+type Fought = (BattleOutcome, Vec<Frame>, [Vec<(i64, v1::InputEvent)>; 2]);
+
 /// Fights a recorded battle of three rounds between two scripted robots, with robot a's
-/// debug paint on; an observer acts at the given turn, if any. Returns the outcome and
-/// what the observer saw.
-fn fight(path: &Path, act: Option<Act>) -> (BattleOutcome, Vec<Frame>) {
+/// debug paint on (a is interactive, b isn't); an observer acts at the given turn, if any.
+fn fight(path: &Path, act: Option<Act>) -> Fought {
     let path = path.to_path_buf();
     let config = ServerConfig {
         rules: BattleRules {
@@ -161,7 +193,7 @@ fn fight(path: &Path, act: Option<Act>) -> (BattleOutcome, Vec<Frame>) {
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap().to_string();
-    let robots = vec![entry("a.A", "a"), entry("b.B", "b")];
+    let robots = vec![entry("a.A", "a", true), entry("b.B", "b", false)];
     let server = thread::spawn(move || run_battle(listener, &config, robots));
 
     let mut observer = connect(&address, v1::Role::Observer, "");
@@ -180,16 +212,23 @@ fn fight(path: &Path, act: Option<Act>) -> (BattleOutcome, Vec<Frame>) {
         while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {
             match message.msg {
                 Some(server_message::Msg::TurnSnapshot(snapshot)) => {
-                    let control = match act {
+                    use v1::observer_control::Control;
+                    let controls = match act {
                         Some(Act::Stop(round, turn)) if (round, turn) == at(&snapshot) => {
-                            Some(v1::observer_control::Control::Abort(true))
+                            vec![Control::Abort(true)]
                         }
                         Some(Act::Kill(round, turn, robot)) if (round, turn) == at(&snapshot) => {
-                            Some(v1::observer_control::Control::Kill(robot))
+                            vec![Control::Kill(robot)]
                         }
-                        _ => None,
+                        Some(Act::Input(round, turn, inputs)) if (round, turn) == at(&snapshot) => {
+                            std::iter::once(Control::Pause(true))
+                                .chain(inputs.iter().map(|i| Control::Input(*i)))
+                                .chain(std::iter::once(Control::Pause(false)))
+                                .collect()
+                        }
+                        _ => Vec::new(),
                     };
-                    if let Some(control) = control {
+                    for control in controls {
                         let message = v1::ClientMessage {
                             msg: Some(client_message::Msg::ObserverControl(v1::ObserverControl {
                                 control: Some(control),
@@ -212,9 +251,7 @@ fn fight(path: &Path, act: Option<Act>) -> (BattleOutcome, Vec<Frame>) {
     let b = scripted_robot(address, "b", 2);
     let outcome = server.join().unwrap().unwrap();
     let seen = watcher.join().unwrap();
-    a.join().unwrap();
-    b.join().unwrap();
-    (outcome, seen)
+    (outcome, seen, [a.join().unwrap(), b.join().unwrap()])
 }
 
 fn at(snapshot: &v1::TurnSnapshot) -> (i32, i64) {
@@ -248,7 +285,7 @@ fn temp_dir(name: &str) -> PathBuf {
 fn a_recorded_battle_replays_exactly() {
     let dir = temp_dir("recording");
     let path = dir.join("battle.rsr");
-    let (outcome, seen) = fight(&path, None);
+    let (outcome, seen, _) = fight(&path, None);
     check_replay(&path, &outcome, &seen);
     assert!(!outcome.aborted);
     assert_eq!(outcome.rounds, 3);
@@ -296,7 +333,7 @@ fn a_recorded_battle_replays_exactly() {
 fn a_stopped_battle_replays_exactly_with_the_results_so_far() {
     let dir = temp_dir("stopped");
     let path = dir.join("battle.rsr");
-    let (outcome, seen) = fight(&path, Some(Act::Stop(1, 400)));
+    let (outcome, seen, _) = fight(&path, Some(Act::Stop(1, 400)));
     check_replay(&path, &outcome, &seen);
     assert!(outcome.aborted);
     assert_eq!(outcome.rounds, 2);
@@ -330,7 +367,7 @@ fn a_stopped_battle_replays_exactly_with_the_results_so_far() {
 fn a_killed_robot_dies_and_the_battle_replays_exactly() {
     let dir = temp_dir("killed");
     let path = dir.join("battle.rsr");
-    let (outcome, seen) = fight(&path, Some(Act::Kill(0, 50, 1)));
+    let (outcome, seen, _) = fight(&path, Some(Act::Kill(0, 50, 1)));
     check_replay(&path, &outcome, &seen);
     assert!(!outcome.aborted);
     assert_eq!(outcome.rounds, 3);
@@ -352,7 +389,7 @@ fn a_killed_robot_dies_and_the_battle_replays_exactly() {
         "no explosion"
     );
     // Without the kill, robot b lived on at that turn: the kill killed it.
-    let (_, unkilled) = fight(&dir.join("unkilled.rsr"), None);
+    let (_, unkilled, _) = fight(&dir.join("unkilled.rsr"), None);
     let same_turn = unkilled.iter().find_map(|f| match f {
         Frame::Snapshot { snapshot, .. } if at(snapshot) == at(&killed) => Some(snapshot),
         _ => None,
@@ -367,5 +404,70 @@ fn a_killed_robot_dies_and_the_battle_replays_exactly() {
         Frame::Snapshot { .. } => None,
     });
     assert_eq!(first_round.unwrap()[0].firsts, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn mouse(action: v1::MouseAction, x: i32, y: i32) -> v1::InputEvent {
+    v1::InputEvent {
+        kind: Some(v1::input_event::Kind::Mouse(v1::MouseInput {
+            action: action as i32,
+            x,
+            y,
+            when: 1_700_000_000_000,
+            ..Default::default()
+        })),
+    }
+}
+
+#[test]
+fn input_events_reach_interactive_robots_and_the_battle_replays_exactly() {
+    use std::sync::LazyLock;
+    static INPUTS: LazyLock<[v1::InputEvent; 4]> = LazyLock::new(|| {
+        [
+            mouse(v1::MouseAction::MouseMoved, 10, 20),
+            // Replaces the move before it: one a turn.
+            mouse(v1::MouseAction::MouseMoved, 30, 40),
+            mouse(v1::MouseAction::MousePressed, 30, 40),
+            v1::InputEvent {
+                kind: Some(v1::input_event::Kind::Key(v1::KeyInput {
+                    action: v1::KeyAction::KeyPressed as i32,
+                    key_code: 38, // VK_UP
+                    key_char: 0xFFFF,
+                    key_location: 1,
+                    ..Default::default()
+                })),
+            },
+        ]
+    });
+    let dir = temp_dir("input");
+    let path = dir.join("battle.rsr");
+    let (outcome, seen, [a, b]) = fight(&path, Some(Act::Input(0, 50, &*INPUTS)));
+    check_replay(&path, &outcome, &seen);
+    assert_eq!(outcome.rounds, 3);
+    // Robot a (interactive) got them in one turn after 50, the moves coalesced; b nothing.
+    let expected: Vec<v1::InputEvent> = INPUTS[1..].to_vec();
+    assert_eq!(a.iter().map(|(_, e)| *e).collect::<Vec<_>>(), expected);
+    let turn = a[0].0;
+    assert!(turn > 50, "delivered at turn {turn}");
+    assert!(a.iter().all(|(t, _)| *t == turn));
+    assert!(b.is_empty(), "robot b got {b:?}");
+    // They are recorded, in order, before the step that delivered them.
+    let recording = Recording::read(&path).unwrap();
+    let recorded: Vec<v1::InputEvent> = recording
+        .entries
+        .iter()
+        .filter_map(|e| match e {
+            v1::recording_entry::Entry::Input(i) => Some(*i),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recorded, expected);
+    // Robot a reacted: its output says so, in the snapshot of that turn.
+    let reacted = seen.iter().any(|f| {
+        matches!(f, Frame::Snapshot { snapshot, .. }
+        if snapshot.round == 0 && snapshot.turn == turn
+            && snapshot.robots[0].output.contains(&format!("a got input at turn {turn}")))
+    });
+    assert!(reacted, "robot a's reaction isn't in turn {turn}");
     let _ = std::fs::remove_dir_all(&dir);
 }

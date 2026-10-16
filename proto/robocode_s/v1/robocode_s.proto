@@ -318,6 +318,8 @@ message Event {
     RoundEnded round_ended = 11;
     BattleEnded battle_ended = 12;
     SkippedTurn skipped_turn = 13;
+    // A mouse or keyboard event on the battlefield (interactive robots only).
+    InputEvent input = 14;
   }
 }
 
@@ -378,6 +380,69 @@ message RobotDeath {
 }
 
 message Death {}
+
+// A mouse or keyboard event on the battlefield (classic's interactive events, design
+// §5.2): an observer sends it, the server records it and delivers it with the next
+// turn's events to every running interactive robot (classic's isInteractiveRobot).
+// Fields are those of the java.awt event classic wraps (robocode.MouseMovedEvent, ...).
+message InputEvent {
+  oneof kind {
+    MouseInput mouse = 1;
+    KeyInput key = 2;
+  }
+}
+
+enum MouseAction {
+  MOUSE_ACTION_UNSPECIFIED = 0;
+  MOUSE_MOVED = 1;
+  MOUSE_DRAGGED = 2;
+  MOUSE_PRESSED = 3;
+  MOUSE_RELEASED = 4;
+  MOUSE_CLICKED = 5;
+  MOUSE_ENTERED = 6;
+  MOUSE_EXITED = 7;
+  MOUSE_WHEEL_MOVED = 8;
+}
+
+message MouseInput {
+  MouseAction action = 1;
+  // Battlefield coordinates, y up (classic mirrors the view's y), rounded to pixels.
+  int32 x = 2;
+  int32 y = 3;
+  // java.awt.event.MouseEvent.BUTTON1..3 (left, middle, right); 0: none.
+  int32 button = 4;
+  int32 click_count = 5;
+  // java.awt.event.InputEvent's extended modifiers (SHIFT_DOWN_MASK, ...).
+  int32 modifiers = 6;
+  // Wheel only: MouseWheelEvent.WHEEL_UNIT_SCROLL (0), the scroll amount, and the
+  // rotation in notches (negative: away from the user, up).
+  int32 scroll_type = 7;
+  int32 scroll_amount = 8;
+  int32 wheel_rotation = 9;
+  // When it happened (InputEvent.getWhen), ms since the epoch.
+  int64 when = 10;
+}
+
+enum KeyAction {
+  KEY_ACTION_UNSPECIFIED = 0;
+  KEY_PRESSED = 1;
+  KEY_RELEASED = 2;
+  KEY_TYPED = 3;
+}
+
+message KeyInput {
+  KeyAction action = 1;
+  // java.awt.event.KeyEvent.VK_*; VK_UNDEFINED (0) for typed keys.
+  int32 key_code = 2;
+  // The UTF-16 character; CHAR_UNDEFINED (0xFFFF) for keys without one.
+  int32 key_char = 3;
+  // KeyEvent.KEY_LOCATION_* (0: unknown, as for typed keys; 1: standard).
+  int32 key_location = 4;
+  // java.awt.event.InputEvent's extended modifiers (SHIFT_DOWN_MASK, ...).
+  int32 modifiers = 5;
+  // When it happened (InputEvent.getWhen), ms since the epoch.
+  int64 when = 6;
+}
 
 message Win {}
 
@@ -623,6 +688,9 @@ message ObserverControl {
     // next step it dies as if destroyed (energy 0, an explosion), as classic's
     // KillRobotCommand. Ignored for robots already dead.
     int32 kill = 6;
+    // A mouse or keyboard event on the battlefield, for interactive robots: delivered
+    // with the next turn's events. A mouse move or drag replaces one still queued.
+    InputEvent input = 7;
   }
 }
 
@@ -659,6 +727,10 @@ message RecordingEntry {
     bool abort = 11;
     // An observer killed a robot (ObserverControl.kill), before the next step. Robot index.
     int32 kill = 12;
+    // An observer's mouse or keyboard event (ObserverControl.input), before the next
+    // step: the running interactive robots get it with that step's events. The engine
+    // doesn't see it; robots' reactions are recorded as their commands.
+    InputEvent input = 13;
   }
 }
 
