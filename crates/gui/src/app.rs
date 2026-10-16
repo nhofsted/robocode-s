@@ -597,7 +597,7 @@ impl App {
                         ui.add(
                             egui::TextEdit::singleline(&mut s.record)
                                 .hint_text("a file (optional)")
-                                .desired_width(360.0),
+                                .desired_width((ui.available_width() - 40.0).clamp(120.0, 360.0)),
                         );
                         if browse_button(ui, "Choose the file to record to") {
                             browse = Some(Browse::Record);
@@ -816,7 +816,7 @@ impl App {
                 ui.add(
                     egui::TextEdit::singleline(&mut app.open_path)
                         .hint_text("a file from --record or \"Record to\"")
-                        .desired_width(480.0),
+                        .desired_width((ui.available_width() - 90.0).clamp(120.0, 480.0)),
                 );
                 if browse_button(ui, "Choose a recording") {
                     app.browse(Browse::Replay);
@@ -900,7 +900,7 @@ impl App {
                         let field = ui.add(
                             egui::TextEdit::singleline(&mut app.new_folder)
                                 .hint_text("a folder with robot jars, e.g. ~/robocode/robots")
-                                .desired_width(420.0),
+                                .desired_width((ui.available_width() - 90.0).clamp(120.0, 420.0)),
                         );
                         if browse_button(ui, "Choose a folder with robot jars") {
                             app.browse(Browse::Folder);
@@ -1093,30 +1093,37 @@ impl App {
                 }
                 screen::divider(ui);
                 let mut tps = live.turns_per_second;
-                if screen::speed_slider(ui, &mut tps) {
+                let (ended, stopping) = (live.outcome.is_some(), live.stopping);
+                let changed = screen::speed_and_readouts(
+                    ui,
+                    &mut tps,
+                    &live.seed.to_string(),
+                    |ui| {
+                        if ended {
+                            let button = egui::Button::new(RichText::new("New battle").strong())
+                                .min_size(egui::vec2(0.0, 26.0));
+                            if ui.add(button).clicked() {
+                                next = Next::Setup;
+                            }
+                            ui.add_space(8.0);
+                        } else if stopping {
+                            ui.label(RichText::new("Stopping…").weak());
+                            ui.spinner();
+                            ui.add_space(8.0);
+                        }
+                    },
+                    |ui| {
+                        if let Some(s) = &live.latest {
+                            screen::info(ui, "Turn", s.turn.to_string());
+                            ui.add_space(10.0);
+                            screen::info(ui, "Round", format!("{} / {}", s.round + 1, live.rounds));
+                        }
+                    },
+                    |_| {},
+                );
+                if changed {
                     live.set_speed(tps);
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if live.outcome.is_some() {
-                        let button = egui::Button::new(RichText::new("New battle").strong())
-                            .min_size(egui::vec2(0.0, 26.0));
-                        if ui.add(button).clicked() {
-                            next = Next::Setup;
-                        }
-                        ui.add_space(8.0);
-                    } else if live.stopping {
-                        ui.label(RichText::new("Stopping…").weak());
-                        ui.spinner();
-                        ui.add_space(8.0);
-                    }
-                    screen::info(ui, "Seed", live.seed.to_string());
-                    ui.add_space(10.0);
-                    if let Some(s) = &live.latest {
-                        screen::info(ui, "Turn", s.turn.to_string());
-                        ui.add_space(10.0);
-                        screen::info(ui, "Round", format!("{} / {}", s.round + 1, live.rounds));
-                    }
-                });
             });
         });
         egui::CentralPanel::default()

@@ -270,43 +270,54 @@ impl ReplayView {
                     self.seek(self.position + 1);
                 }
                 screen::divider(ui);
-                screen::speed_slider(ui, &mut self.turns_per_second);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    screen::info(ui, "Seed", self.seed.to_string());
-                    ui.add_space(10.0);
-                    if let Some(s) = &self.current {
-                        screen::info(ui, "Turn", s.turn.to_string());
-                        ui.add_space(10.0);
-                    }
-                    let round = self.round_of(self.position);
-                    egui::ComboBox::from_id_salt("round")
-                        .selected_text(
-                            RichText::new(format!("{} / {}", round + 1, self.rounds)).strong(),
-                        )
-                        .width(70.0)
-                        .show_ui(ui, |ui| {
-                            for (r, &start) in self.round_starts.clone().iter().enumerate() {
-                                if ui
-                                    .selectable_label(r == round, format!("Round {}", r + 1))
-                                    .clicked()
-                                {
-                                    self.seek(start);
+                let round = self.round_of(self.position);
+                let turn = self.current.as_ref().map(|s| s.turn);
+                let (rounds, unverified) = (self.rounds, self.unverified);
+                let mut go_to = None;
+                screen::speed_and_readouts(
+                    ui,
+                    &mut self.turns_per_second,
+                    &self.seed.to_string(),
+                    |_| {},
+                    |ui| {
+                        if let Some(turn) = turn {
+                            screen::info(ui, "Turn", turn.to_string());
+                            ui.add_space(10.0);
+                        }
+                        egui::ComboBox::from_id_salt("round")
+                            .selected_text(
+                                RichText::new(format!("{} / {}", round + 1, rounds)).strong(),
+                            )
+                            .width(70.0)
+                            .show_ui(ui, |ui| {
+                                for (r, &start) in self.round_starts.iter().enumerate() {
+                                    if ui
+                                        .selectable_label(r == round, format!("Round {}", r + 1))
+                                        .clicked()
+                                    {
+                                        go_to = Some(start);
+                                    }
                                 }
-                            }
-                        })
-                        .response
-                        .on_hover_text("Go to a round");
-                    ui.label(RichText::new("Round").weak());
-                    if self.unverified > 0 {
+                            })
+                            .response
+                            .on_hover_text("Go to a round");
+                        ui.label(RichText::new("Round").weak());
+                        if unverified > 0 {
+                            ui.add_space(10.0);
+                            ui.colored_label(
+                                Color32::LIGHT_RED,
+                                format!("{unverified} turns differ from the recording"),
+                            );
+                        }
+                    },
+                    |ui| {
                         ui.add_space(10.0);
-                        ui.colored_label(
-                            Color32::LIGHT_RED,
-                            format!("{} turns differ from the recording", self.unverified),
-                        );
-                    }
-                    ui.add_space(10.0);
-                    ui.add(egui::Label::new(RichText::new(&self.title).weak()).truncate());
-                });
+                        ui.add(egui::Label::new(RichText::new(&self.title).weak()).truncate());
+                    },
+                );
+                if let Some(start) = go_to {
+                    self.seek(start);
+                }
             });
         });
         egui::CentralPanel::default()
