@@ -556,7 +556,7 @@ The engine drops new events when a queue holds more than 256, except `DeathEvent
 | `StatusEvent` | 99 | robot side, every turn |
 | `WinEvent`, `SkippedTurnEvent`, `BattleEndedEvent` | 100 | §5, §11.3 |
 | `RoundEndedEvent` | 110 | §5, step 6 |
-| `PaintEvent`, keyboard and mouse events | 5, 98 | interactive/display, out of scope |
+| `PaintEvent`, keyboard and mouse events | 5, 98 | interactive/display, out of scope (the server delivers keyboard and mouse events, design §5.2) |
 
 ### 12.2 Bullet objects in events
 
