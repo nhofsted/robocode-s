@@ -216,7 +216,7 @@ pub fn default_colors(name: &str) -> [Rgb; 3] {
     ]
 }
 
-fn hsl(hue: f64, s: f64, l: f64) -> Rgb {
+pub fn hsl(hue: f64, s: f64, l: f64) -> Rgb {
     let a = s * l.min(1.0 - l);
     let channel = |n: f64| {
         let k = (n + hue / 30.0) % 12.0;

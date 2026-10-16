@@ -13,6 +13,7 @@ mod screen;
 mod settings;
 mod shell;
 mod sprites;
+mod track;
 mod view;
 mod window;
 
@@ -27,7 +28,8 @@ const USAGE: &str = "\
 usage: robocode-s-gui [recording]
        robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
 
-Without arguments: the battle setup. With a recording: its replay.
+Without arguments: the battle setup. With a recording (from --record or
+\"Record to\", or a website viewer track): its replay.
 Robots come from the robot folders set in the options (the gear), saved in
 $XDG_CONFIG_HOME/robocode-s/gui.json (~/.config/... by default; another file
 with ROBOCODES_GUI_CONFIG), and from the jars in ROBOCODES_ROBOT_JARS (a path list). The other paths come from

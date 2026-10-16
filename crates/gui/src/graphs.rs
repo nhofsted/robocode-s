@@ -92,7 +92,7 @@ impl History {
 }
 
 /// The graphs, `height` tall, below the robot list: energy and CPU for the first `shown`
-/// turns of `history`.
+/// turns of `history`. Without `cpu` (a viewer track: one round, no CPU times), energy only.
 pub fn graphs(
     ui: &mut egui::Ui,
     robots: &[v1::RobotStatics],
@@ -100,6 +100,7 @@ pub fn graphs(
     history: &History,
     shown: usize,
     height: f32,
+    cpu: bool,
 ) {
     let colors: Vec<Color32> = robots
         .iter()
@@ -116,10 +117,17 @@ pub fn graphs(
     let mut battle = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     // Each graph: a heading line and the plot.
     let s = ui.spacing().item_spacing.y;
-    let plot = ((height - 2.0 * (18.0 + 4.0 + 3.0 * s) - 8.0) / 2.0).max(40.0);
+    let plot = if cpu {
+        ((height - 2.0 * (18.0 + 4.0 + 3.0 * s) - 8.0) / 2.0).max(40.0)
+    } else {
+        (height - (18.0 + 4.0 + 3.0 * s)).max(40.0)
+    };
 
     let range = history.range(shown, battle);
     heading(ui, "ENERGY", |ui| {
+        if !cpu {
+            return;
+        }
         for (label, value) in [("Battle", true), ("Round", false)] {
             let text = RichText::new(label).size(11.0);
             if ui
@@ -147,6 +155,9 @@ pub fn graphs(
         unit: "",
     };
     energy.show(ui, robots, &colors, plot);
+    if !cpu {
+        return;
+    }
 
     ui.add_space(8.0);
     let budget = history.budget;

@@ -815,7 +815,7 @@ impl App {
                 ui.label("Recording");
                 ui.add(
                     egui::TextEdit::singleline(&mut app.open_path)
-                        .hint_text("a file from --record or \"Record to\"")
+                        .hint_text("from --record, \"Record to\" or the website")
                         .desired_width((ui.available_width() - 90.0).clamp(120.0, 480.0)),
                 );
                 if browse_button(ui, "Choose a recording") {
@@ -826,6 +826,13 @@ impl App {
                     app.open_replay(path);
                 }
             });
+            ui.label(
+                RichText::new(
+                    "A full recording replays exactly, with debug paint and output. A website \
+                     replay (one round) shows what its viewer draws. Or drop a file here.",
+                )
+                .weak(),
+            );
             if let Some(e) = &app.replay_error {
                 ui.colored_label(Color32::LIGHT_RED, e);
             }
@@ -1052,6 +1059,7 @@ impl App {
             &live.history,
             live.history.len(),
             &mut self.selected,
+            true,
         );
         let output = &live.output;
         let toggled = screen::output_panel(
@@ -1097,7 +1105,7 @@ impl App {
                 let changed = screen::speed_and_readouts(
                     ui,
                     &mut tps,
-                    &live.seed.to_string(),
+                    Some(&live.seed.to_string()),
                     |ui| {
                         if ended {
                             let button = egui::Button::new(RichText::new("New battle").strong())
@@ -1457,6 +1465,12 @@ impl eframe::App for App {
             Tab::Options => self.options_page(root),
         }
         self.file_dialog(ctx);
+        // A file dropped on the window opens as a replay.
+        let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
+        if let Some(path) = dropped {
+            self.open_path = path.display().to_string();
+            self.open_replay(path);
+        }
         self.screenshot_step(ctx);
     }
 }
