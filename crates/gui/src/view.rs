@@ -42,6 +42,101 @@ const BULLET: Color32 = Color32::from_gray(220);
 /// How far the radar sees (`Rules.RADAR_SCAN_RADIUS`).
 const RADAR_RANGE: f64 = 1200.0;
 
+/// The most the view zooms in, relative to the whole battlefield fitting.
+pub const MAX_ZOOM: f32 = 16.0;
+
+/// Zoom and pan: how much of the battlefield the view shows, kept per battle or replay.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera {
+    /// 1: the whole battlefield fits; up to [`MAX_ZOOM`].
+    pub zoom: f32,
+    /// The battlefield point (y up) at the centre of the view; `None`: the field's centre.
+    pub center: Option<(f64, f64)>,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            center: None,
+        }
+    }
+}
+
+impl Camera {
+    /// The whole battlefield shows.
+    pub fn fitted(&self) -> bool {
+        self.zoom <= 1.0
+    }
+
+    /// The centre the view shows for a `width`×`height` field at `scale` (screen pixels
+    /// per unit) in `available`: the camera's, moved so that the field fills the view
+    /// along each axis where it is larger than the view, and centred where it is smaller.
+    fn clamped_center(&self, available: Rect, width: f64, height: f64, scale: f32) -> (f64, f64) {
+        let (x, y) = self.center.unwrap_or((width / 2.0, height / 2.0));
+        let clamp = |v: f64, extent: f64, screen: f32| {
+            let half = f64::from(screen / 2.0 / scale);
+            if extent > 2.0 * half {
+                v.clamp(half, extent - half)
+            } else {
+                extent / 2.0
+            }
+        };
+        (
+            clamp(x, width, available.width()),
+            clamp(y, height, available.height()),
+        )
+    }
+
+    /// Zooms by `factor`, keeping the battlefield point under `pointer` where it is.
+    pub fn zoom_at(
+        &mut self,
+        factor: f32,
+        pointer: Pos2,
+        available: Rect,
+        width: f64,
+        height: f64,
+    ) {
+        let (before, _) = Transform::view(available, width, height, self);
+        let zoom = (self.zoom * factor).clamp(1.0, MAX_ZOOM);
+        if before.scale == 0.0 || !zoom.is_finite() {
+            return;
+        }
+        let (x, y) = before.field(pointer);
+        let scale = before.scale / self.zoom.clamp(1.0, MAX_ZOOM) * zoom;
+        let offset = pointer - available.center();
+        self.zoom = zoom;
+        self.center = Some((
+            x - f64::from(offset.x / scale),
+            y + f64::from(offset.y / scale),
+        ));
+        self.clamp(available, width, height);
+    }
+
+    /// Moves the battlefield by `delta` screen pixels.
+    pub fn pan(&mut self, delta: Vec2, available: Rect, width: f64, height: f64) {
+        let (t, _) = Transform::view(available, width, height, self);
+        if t.scale == 0.0 {
+            return;
+        }
+        let (x, y) = self.clamped_center(available, width, height, t.scale);
+        self.center = Some((
+            x - f64::from(delta.x / t.scale),
+            y + f64::from(delta.y / t.scale),
+        ));
+        self.clamp(available, width, height);
+    }
+
+    /// Keeps the centre where the view can show it, so the field can't be lost.
+    fn clamp(&mut self, available: Rect, width: f64, height: f64) {
+        let (fit, _) = Transform::fit(available, width, height);
+        if fit.scale > 0.0 {
+            let scale = fit.scale * self.zoom;
+            self.center = Some(self.clamped_center(available, width, height, scale));
+        }
+    }
+}
+
 /// Maps battlefield coordinates into a screen rectangle, keeping the aspect ratio.
 #[derive(Clone, Copy)]
 pub struct Transform {
@@ -79,6 +174,29 @@ impl Transform {
         )
     }
 
+    /// The battlefield as `camera` shows it in `available`: zoomed relative to
+    /// [`Self::fit`] and moved to the camera's centre. The rectangle is the whole field's,
+    /// which may reach past `available`.
+    pub fn view(available: Rect, width: f64, height: f64, camera: &Camera) -> (Self, Rect) {
+        let (fit, rect) = Self::fit(available, width, height);
+        if fit.scale == 0.0 || camera.fitted() {
+            return (fit, rect);
+        }
+        let scale = fit.scale * camera.zoom.min(MAX_ZOOM);
+        let (x, y) = camera.clamped_center(available, width, height, scale);
+        let c = available.center();
+        let origin = pos2(c.x - x as f32 * scale, c.y - (height - y) as f32 * scale);
+        let size = vec2(width as f32 * scale, height as f32 * scale);
+        (
+            Self {
+                origin,
+                scale,
+                height,
+            },
+            Rect::from_min_size(origin, size),
+        )
+    }
+
     pub fn point(&self, x: f64, y: f64) -> Pos2 {
         pos2(
             self.origin.x + x as f32 * self.scale,
@@ -90,14 +208,21 @@ impl Transform {
         d as f32 * self.scale
     }
 
+    /// The battlefield point at a screen position (y up), unrounded; needs scale > 0.
+    fn field(&self, p: Pos2) -> (f64, f64) {
+        (
+            f64::from((p.x - self.origin.x) / self.scale),
+            self.height - f64::from((p.y - self.origin.y) / self.scale),
+        )
+    }
+
     /// The battlefield point at a screen position (y up), as classic's
     /// `InteractiveHandler` rounds it: `(int) (v + 0.5)`. None at scale 0.
     pub fn field_point(&self, p: Pos2) -> Option<(i32, i32)> {
         if self.scale == 0.0 {
             return None;
         }
-        let x = f64::from((p.x - self.origin.x) / self.scale);
-        let y = self.height - f64::from((p.y - self.origin.y) / self.scale);
+        let (x, y) = self.field(p);
         Some(((x + 0.5) as i32, (y + 0.5) as i32))
     }
 }
@@ -223,8 +348,86 @@ fn scan_arcs(
     }
 }
 
-/// Draws one turn into `available`; returns the battlefield's screen rectangle.
-/// `previous` is the turn before, for the scan arcs.
+/// What zooms and pans the view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Navigation {
+    /// Robots may read the mouse (a live battle: interactive robots): Ctrl+wheel zooms
+    /// and Ctrl+drag pans; the plain wheel and drags are theirs.
+    Modified,
+    /// Nothing else reads the mouse (a replay): the plain wheel and drags too, and a
+    /// double-click fits the field again.
+    Free,
+}
+
+/// Zooms (around the pointer) and pans `camera` from this frame's input over
+/// `available`, and shows a button to fit the whole field again while zoomed in.
+pub fn navigate(
+    ui: &mut egui::Ui,
+    camera: &mut Camera,
+    (width, height): (f64, f64),
+    available: Rect,
+    navigation: Navigation,
+) {
+    let id = ui.id().with("battlefield-camera");
+    let response = ui.interact(available, id, egui::Sense::click_and_drag());
+    let free = navigation == Navigation::Free;
+    let (zoom, scroll, ctrl) =
+        ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta.y, i.modifiers.command));
+    if let Some(pointer) = response.hover_pos() {
+        // Ctrl+wheel (and a touchpad's pinch) comes as zoom, not scroll.
+        let mut factor = zoom;
+        if free {
+            factor *= (scroll / 200.0).exp();
+        }
+        if factor != 1.0 {
+            camera.zoom_at(factor, pointer, available, width, height);
+        }
+    }
+    if response.dragged() && (free || ctrl) {
+        camera.pan(response.drag_delta(), available, width, height);
+    }
+    if free && response.double_clicked() {
+        *camera = Camera::default();
+    }
+    if camera.fitted() {
+        return;
+    }
+    let mut fit = false;
+    egui::Area::new(ui.id().with("battlefield-fit"))
+        .order(egui::Order::Middle)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(available.right_top() + vec2(-8.0, 8.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_black_alpha(170))
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(6, 2))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{:.0}%", camera.zoom * 100.0))
+                                .monospace()
+                                .color(Color32::from_gray(200)),
+                        );
+                        let hint = if free {
+                            "Fit the battlefield (or double-click it). The wheel zooms, a drag pans."
+                        } else {
+                            "Fit the battlefield. Ctrl+wheel zooms, Ctrl+drag pans."
+                        };
+                        let button = crate::icons::button(ui, 24.0, hint, false, |p, c, color| {
+                            crate::icons::fit(p, c, 8.0, color)
+                        });
+                        fit = button.clicked();
+                    });
+                });
+        });
+    if fit {
+        *camera = Camera::default();
+    }
+}
+
+/// Draws one turn into `available` as `camera` shows it; returns the transform and the
+/// battlefield's visible screen rectangle. `previous` is the turn before, for the scan arcs.
 pub fn draw(
     ui: &mut egui::Ui,
     sprites: &mut Sprites,
@@ -232,12 +435,14 @@ pub fn draw(
     style: Style,
     (previous, snapshot): (Option<&v1::TurnSnapshot>, Option<&v1::TurnSnapshot>),
     available: Rect,
-) -> Rect {
-    let (t, rect) = Transform::fit(available, field.width, field.height);
+    camera: &Camera,
+) -> (Transform, Rect) {
+    let (t, whole) = Transform::view(available, field.width, field.height, camera);
+    let rect = whole.intersect(available);
     let painter = ui.painter_at(available);
     painter.rect_filled(available, 0.0, Color32::BLACK);
     if t.scale == 0.0 {
-        return rect;
+        return (t, rect);
     }
     if style.ground {
         ground(&painter, sprites, t, field);
@@ -249,7 +454,7 @@ pub fn draw(
         rates(ui, &painter, rect, snapshot);
     }
     let Some(snapshot) = snapshot else {
-        return rect;
+        return (t, rect);
     };
     if style.sentry_border
         && field.sentry_border > 0.0
@@ -318,7 +523,7 @@ pub fn draw(
     for b in &snapshot.bullets {
         bullet(&painter, sprites, t, field, style, snapshot, b);
     }
-    rect
+    (t, rect)
 }
 
 /// The sentry border: a translucent red band along the walls, as wide as the border
@@ -606,6 +811,53 @@ mod tests {
         assert_eq!(t.field_point(t.point(123.0, 456.0)), Some((123, 456)));
         let (none, _) = Transform::fit(Rect::NOTHING, 800.0, 600.0);
         assert_eq!(none.field_point(pos2(1.0, 1.0)), None);
+    }
+
+    #[test]
+    fn zoom_keeps_the_point_under_the_pointer() {
+        let available = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
+        let mut camera = Camera::default();
+        let pointer = pos2(200.0, 150.0);
+        let (t, _) = Transform::view(available, 800.0, 600.0, &camera);
+        let before = t.field(pointer);
+        camera.zoom_at(2.0, pointer, available, 800.0, 600.0);
+        let (t, rect) = Transform::view(available, 800.0, 600.0, &camera);
+        assert_eq!(t.scale, 2.0);
+        assert_eq!(rect.size(), vec2(1600.0, 1200.0));
+        let after = t.field(pointer);
+        assert!((before.0 - after.0).abs() < 1e-3 && (before.1 - after.1).abs() < 1e-3);
+        // Interactive robots get the same point.
+        assert_eq!(t.field_point(t.point(250.0, 400.0)), Some((250, 400)));
+        // Zooming out all the way fits again; no further than that.
+        camera.zoom_at(0.01, pointer, available, 800.0, 600.0);
+        assert!(camera.fitted());
+        assert_eq!(
+            Transform::view(available, 800.0, 600.0, &camera).0.scale,
+            1.0
+        );
+        camera.zoom_at(1000.0, pointer, available, 800.0, 600.0);
+        assert_eq!(camera.zoom, MAX_ZOOM);
+    }
+
+    #[test]
+    fn pan_cannot_lose_the_field() {
+        let available = Rect::from_min_size(pos2(10.0, 20.0), vec2(1000.0, 600.0));
+        let mut camera = Camera {
+            zoom: 2.0,
+            center: None,
+        };
+        // Scale 2: the view shows 500×300 of the 800×600 field.
+        camera.pan(vec2(-100.0, 40.0), available, 800.0, 600.0);
+        assert_eq!(camera.center, Some((450.0, 320.0)));
+        camera.pan(vec2(1e6, -1e6), available, 800.0, 600.0);
+        assert_eq!(camera.center, Some((250.0, 150.0)));
+        let (t, rect) = Transform::view(available, 800.0, 600.0, &camera);
+        assert!(rect.contains_rect(available));
+        assert_eq!(t.point(0.0, 0.0), available.left_bottom());
+        // Wider than the field at this zoom: centred across.
+        let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(3000.0, 600.0));
+        camera.pan(vec2(500.0, 0.0), wide, 800.0, 600.0);
+        assert_eq!(camera.center.unwrap().0, 400.0);
     }
 
     #[test]

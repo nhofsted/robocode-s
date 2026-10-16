@@ -6,6 +6,7 @@
 use crate::graphs::History;
 use crate::input::Interaction;
 use crate::screen::{self, DebugProperties};
+use crate::view::Camera;
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
@@ -50,6 +51,8 @@ pub struct Live {
     pub outcome: Option<Result<BattleOutcome, String>>,
     /// Mouse and keyboard on the battlefield, for interactive robots.
     pub interaction: Interaction,
+    /// The battlefield view's zoom and pan.
+    pub camera: Camera,
 }
 
 impl Live {
@@ -97,6 +100,7 @@ impl Live {
             stopping: false,
             outcome: None,
             interaction: Interaction::default(),
+            camera: Camera::default(),
         }
         .with_initial_speed()
     }

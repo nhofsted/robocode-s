@@ -213,6 +213,8 @@ pub struct App {
     kill_at: Option<(i64, usize)>,
     /// `--input-at`, by turn, until sent.
     input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
+    /// How battles and replays first show the battlefield (`--zoom`; fitted by default).
+    camera: view::Camera,
     open_path: String,
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
@@ -284,6 +286,8 @@ pub struct Launch {
     /// Mouse and keyboard events to send at turns of the first round, as the battlefield
     /// would (`--input-at`, for screenshots and testing).
     pub input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
+    /// How battles and replays first show the battlefield (`--zoom`, for screenshots).
+    pub camera: view::Camera,
 }
 
 impl App {
@@ -312,6 +316,7 @@ impl App {
             screenshot,
             kill_at: launch.kill_at,
             input_at: launch.input_at,
+            camera: launch.camera,
             open_path: String::new(),
             available: None,
             listing: None,
@@ -654,6 +659,7 @@ impl App {
                         .map(|r| r.statics.name.clone())
                         .collect();
                     let mut live = Live::start(ctx, host, battle);
+                    live.camera = self.camera;
                     live.seed = starting.seed;
                     live.set_speed(starting.turns_per_second);
                     if starting.paint {
@@ -683,9 +689,10 @@ impl App {
     fn open_replay(&mut self, path: PathBuf) {
         self.tab = Tab::Replay;
         match ReplayView::open(&path) {
-            Ok(view) => {
+            Ok(mut view) => {
                 self.selected = 0;
                 self.replay_error = None;
+                view.camera = self.camera;
                 self.replay = Some(Box::new(view));
             }
             Err(e) => self.replay_error = Some(format!("{}: {e}", path.display())),
@@ -1434,16 +1441,19 @@ impl App {
                     sentry_border: live.sentry_border,
                 };
                 let available = ui.max_rect();
-                view::draw(
+                let size = (live.width, live.height);
+                let navigation = view::Navigation::Modified;
+                view::navigate(ui, &mut live.camera, size, available, navigation);
+                let (t, rect) = view::draw(
                     ui,
                     &mut self.sprites,
                     &field,
                     style,
                     (live.previous.as_ref(), live.latest.as_ref()),
                     available,
+                    &live.camera,
                 );
                 if live.outcome.is_none() && !live.stopping {
-                    let (t, rect) = view::Transform::fit(available, live.width, live.height);
                     let layer = ui.layer_id();
                     for event in live.interaction.events(ui.ctx(), layer, rect, &t) {
                         live.input(event);

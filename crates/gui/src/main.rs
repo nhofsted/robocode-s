@@ -42,6 +42,8 @@ for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
 system's frame).
 
+  --zoom Z[,X,Y]     battles and replays start zoomed in Z times (1 to 16), centred
+                     on battlefield point X,Y (y up; default the field's centre)
   --tab NAME         open a tab at start: start, replay or options
   --browse FIELD     open the file dialog of a field at start: record, replay,
                      folder (the options' robot folder) or battle (a .battle file
@@ -75,6 +77,23 @@ fn parse_size(text: &str) -> Option<[f32; 2]> {
     (w >= 1.0 && h >= 1.0 && w.is_finite() && h.is_finite()).then_some([w, h])
 }
 
+/// `--zoom`: `Z` or `Z,X,Y` (the battlefield point at the view's centre).
+fn parse_zoom(text: &str) -> Option<view::Camera> {
+    let parts: Vec<f64> = text
+        .split(',')
+        .map(|p| p.trim().parse().ok().filter(|v: &f64| v.is_finite()))
+        .collect::<Option<_>>()?;
+    let (zoom, center) = match parts[..] {
+        [z] => (z, None),
+        [z, x, y] => (z, Some((x, y))),
+        _ => return None,
+    };
+    (zoom >= 1.0).then_some(view::Camera {
+        zoom: zoom.min(f64::from(view::MAX_ZOOM)) as f32,
+        center,
+    })
+}
+
 fn main() -> ExitCode {
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
@@ -84,6 +103,7 @@ fn main() -> ExitCode {
     let mut browse = None;
     let mut kill_at = None;
     let mut input_at = Vec::new();
+    let mut camera = view::Camera::default();
     let mut size = [1200.0, 860.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -121,6 +141,16 @@ fn main() -> ExitCode {
                         return ExitCode::from(2);
                     }
                 }
+            }
+            "--zoom" => {
+                let text = value();
+                let Some(c) = parse_zoom(&text) else {
+                    eprint!(
+                        "--zoom wants Z or Z,X,Y, like 3 or 3,100,500, not {text:?}\n\n{USAGE}"
+                    );
+                    return ExitCode::from(2);
+                };
+                camera = c;
             }
             "--tab" => {
                 let name = value();
@@ -193,6 +223,7 @@ fn main() -> ExitCode {
                 browse,
                 kill_at,
                 input_at,
+                camera,
             };
             Ok(Box::new(App::new(
                 cc,
@@ -215,7 +246,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_size;
+    use super::{parse_size, parse_zoom};
 
     #[test]
     fn sizes() {
@@ -224,5 +255,17 @@ mod tests {
         assert_eq!(parse_size("800"), None);
         assert_eq!(parse_size("0x600"), None);
         assert_eq!(parse_size("ax600"), None);
+    }
+
+    #[test]
+    fn zooms() {
+        let c = parse_zoom("3").unwrap();
+        assert_eq!((c.zoom, c.center), (3.0, None));
+        let c = parse_zoom("2.5, 100,500").unwrap();
+        assert_eq!((c.zoom, c.center), (2.5, Some((100.0, 500.0))));
+        assert_eq!(parse_zoom("99").unwrap().zoom, 16.0);
+        assert_eq!(parse_zoom("0.5"), None);
+        assert_eq!(parse_zoom("2,1"), None);
+        assert_eq!(parse_zoom("x"), None);
     }
 }

@@ -12,7 +12,7 @@ use crate::icons;
 use crate::screen::{self, DebugProperties};
 use crate::sprites::Sprites;
 use crate::track;
-use crate::view::{self, Field, Style};
+use crate::view::{self, Camera, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
 use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
@@ -58,6 +58,8 @@ pub struct ReplayView {
     cleared: Vec<Option<usize>>,
     /// The results window was closed at the last turn; it shows again there after a seek.
     results_closed: bool,
+    /// The battlefield view's zoom and pan.
+    pub camera: Camera,
 }
 
 enum Source {
@@ -152,6 +154,7 @@ impl ReplayView {
             turns_per_second: 30,
             last_tick: None,
             results_closed: false,
+            camera: Camera::default(),
         };
         view.seek(0);
         Ok(view)
@@ -186,6 +189,7 @@ impl ReplayView {
             turns_per_second: 30,
             last_tick: None,
             results_closed: false,
+            camera: Camera::default(),
         };
         view.seek(0);
         view
@@ -464,7 +468,11 @@ impl ReplayView {
                     sentry_border: self.sentry_border,
                 };
                 let turns = (self.previous.as_ref(), shown.as_ref());
-                view::draw(ui, sprites, &field, style, turns, ui.max_rect());
+                let available = ui.max_rect();
+                let size = (self.width, self.height);
+                let navigation = view::Navigation::Free;
+                view::navigate(ui, &mut self.camera, size, available, navigation);
+                view::draw(ui, sprites, &field, style, turns, available, &self.camera);
             });
         // A track has no scores, so no results.
         let at_end = full && self.turns > 0 && self.position + 1 >= self.turns;
