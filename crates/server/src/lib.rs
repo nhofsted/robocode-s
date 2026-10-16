@@ -127,6 +127,8 @@ struct Link {
     debug_properties: Vec<v1::DebugProperty>,
     io_robot: bool,
     events: Vec<Event>,
+    /// Observers' mouse and keyboard events for the next `Tick` (interactive robots).
+    input: Vec<v1::Event>,
     bullet_updates: Vec<v1::BulletStatus>,
     team_messages: Vec<v1::TeamMessage>,
 }
@@ -274,6 +276,8 @@ struct BattleLoop<'a> {
     abort: bool,
     /// Robots an observer killed; they die before the next step.
     kills: Vec<usize>,
+    /// Observers' mouse and keyboard events, delivered with the next step's events.
+    input: Vec<v1::InputEvent>,
 }
 
 impl<'a> BattleLoop<'a> {
@@ -316,6 +320,7 @@ impl<'a> BattleLoop<'a> {
             turns_per_second: 0,
             abort: false,
             kills: Vec::new(),
+            input: Vec::new(),
         })
     }
 
@@ -372,11 +377,13 @@ impl<'a> BattleLoop<'a> {
     fn run_round(&mut self) {
         // A kill from the last round's end doesn't reach into this one.
         self.kills.clear();
+        self.input.clear();
         self.engine.input(Entry::StartRound(true));
         let round = self.battle().round;
         for i in 0..self.links.len() {
             let link = &mut self.links[i];
             link.events.clear();
+            link.input.clear();
             link.bullet_updates.clear();
             link.team_messages.clear();
             link.awaiting = None;
@@ -417,6 +424,9 @@ impl<'a> BattleLoop<'a> {
                     self.engine.input(Entry::Kill(i as i32));
                 }
             }
+            for input in std::mem::take(&mut self.input) {
+                self.queue_input(input);
+            }
             self.engine.input(Entry::Step(true));
             self.deliver();
             // As classic (`runTurn` ends with `wakeupRobots`, then `finalizeTurn` publishes):
@@ -434,6 +444,22 @@ impl<'a> BattleLoop<'a> {
         }
         let result = recording::round_result(self.battle());
         self.broadcast(server_message::Msg::RoundResult(result));
+    }
+
+    /// Records an observer's mouse or keyboard event and queues it for every running
+    /// interactive robot, as classic's `SendInteractiveEventCommand` (`addEvent` adds only
+    /// to running robots). It arrives with the next step's events.
+    fn queue_input(&mut self, input: v1::InputEvent) {
+        self.engine.input(Entry::Input(input));
+        let event = v1::Event {
+            kind: Some(v1::event::Kind::Input(input)),
+        };
+        for i in 0..self.links.len() {
+            let interactive = self.statics[i].r#type.is_some_and(|t| t.interactive);
+            if interactive && self.links[i].active && self.battle().robots[i].is_running() {
+                self.links[i].input.push(event.clone());
+            }
+        }
     }
 
     fn battle(&self) -> &Battle {
@@ -540,11 +566,12 @@ impl<'a> BattleLoop<'a> {
         }
         link.awaiting = None;
         link.final_execute = false;
-        link.output.push_str(&execute.output);
         link.paint = execute.paint;
         link.cpu_nanos = link.cpu_nanos.saturating_add(execute.cpu_nanos);
-        // Only for observers and recordings (which take them with the next snapshot).
+        // Only for observers and recordings (which take them with the next snapshot);
+        // without either, nothing takes them and they would pile up.
         if !self.observers.is_empty() || self.engine.is_recording() {
+            link.output.push_str(&execute.output);
             link.debug_properties.extend(execute.debug_properties);
         }
         let robot = i as i32;
@@ -572,6 +599,7 @@ impl<'a> BattleLoop<'a> {
         if skipped >= 1 {
             let link = &mut self.links[i];
             link.events.retain(convert::is_critical);
+            link.input.clear();
             if alive {
                 for turn in execute.turn + 1..=time {
                     link.events.push(Event::SkippedTurn { turn });
@@ -601,6 +629,25 @@ impl<'a> BattleLoop<'a> {
                     .filter(|&i| i < self.links.len())
                 {
                     self.kills.push(i);
+                }
+            }
+            Some(v1::observer_control::Control::Input(input)) => {
+                // At most one move and one drag a turn: a newer one replaces the last.
+                let coalesced = |e: &v1::InputEvent| match &e.kind {
+                    Some(v1::input_event::Kind::Mouse(m)) => matches!(
+                        m.action(),
+                        v1::MouseAction::MouseMoved | v1::MouseAction::MouseDragged
+                    )
+                    .then(|| m.action()),
+                    _ => None,
+                };
+                if let Some(action) = coalesced(&input)
+                    && let Some(last) = self.input.last_mut()
+                    && coalesced(last) == Some(action)
+                {
+                    *last = input;
+                } else {
+                    self.input.push(input);
                 }
             }
             Some(v1::observer_control::Control::Paint(toggle)) => {
@@ -654,9 +701,9 @@ impl<'a> BattleLoop<'a> {
                 status: Some(status),
                 commands: Some(commands),
                 events: link
-                    .events
+                    .input
                     .drain(..)
-                    .map(|e| convert::event(&e, &name))
+                    .chain(link.events.drain(..).map(|e| convert::event(&e, &name)))
                     .collect(),
                 team_messages: std::mem::take(&mut link.team_messages),
                 bullet_updates: std::mem::take(&mut link.bullet_updates),

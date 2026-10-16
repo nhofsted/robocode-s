@@ -91,7 +91,9 @@ impl Driver {
                     self.battle.kill_robot(i);
                 }
             }
-            Entry::Header(_) | Entry::Snapshot(_) => {}
+            // Robots get observers' mouse and keyboard events from the server; the engine
+            // never sees them, and what robots do about them comes as their commands.
+            Entry::Header(_) | Entry::Snapshot(_) | Entry::Input(_) => {}
         }
     }
 

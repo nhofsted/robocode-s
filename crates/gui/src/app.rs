@@ -211,6 +211,8 @@ pub struct App {
     screenshot: Option<Screenshot>,
     /// `--kill-at`, until done.
     kill_at: Option<(i64, usize)>,
+    /// `--input-at`, by turn, until sent.
+    input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
     open_path: String,
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
@@ -279,6 +281,9 @@ pub struct Launch {
     /// Kill a robot at a turn of the first round, as its kill button would (`--kill-at`,
     /// for screenshots and testing): (turn, robot index).
     pub kill_at: Option<(i64, usize)>,
+    /// Mouse and keyboard events to send at turns of the first round, as the battlefield
+    /// would (`--input-at`, for screenshots and testing).
+    pub input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
 }
 
 impl App {
@@ -306,6 +311,7 @@ impl App {
             replay_error: None,
             screenshot,
             kill_at: launch.kill_at,
+            input_at: launch.input_at,
             open_path: String::new(),
             available: None,
             listing: None,
@@ -1427,14 +1433,22 @@ impl App {
                     robots: &live.robots,
                     sentry_border: live.sentry_border,
                 };
+                let available = ui.max_rect();
                 view::draw(
                     ui,
                     &mut self.sprites,
                     &field,
                     style,
                     (live.previous.as_ref(), live.latest.as_ref()),
-                    ui.max_rect(),
+                    available,
                 );
+                if live.outcome.is_none() && !live.stopping {
+                    let (t, rect) = view::Transform::fit(available, live.width, live.height);
+                    let layer = ui.layer_id();
+                    for event in live.interaction.events(ui.ctx(), layer, rect, &t) {
+                        live.input(event);
+                    }
+                }
             });
         match &live.outcome {
             Some(Ok(outcome)) => {
@@ -1799,6 +1813,20 @@ impl eframe::App for App {
                 live.kill(robot);
                 self.selected = robot;
                 self.kill_at = None;
+            }
+            if let Some(s) = &live.latest
+                && s.round == 0
+            {
+                let (due, later) = std::mem::take(&mut self.input_at)
+                    .into_iter()
+                    .partition(|(turn, _)| *turn <= s.turn);
+                self.input_at = later;
+                for event in due
+                    .into_iter()
+                    .flat_map(|(_, events): (i64, Vec<_>)| events)
+                {
+                    live.input(event);
+                }
             }
         }
         match self.tab {

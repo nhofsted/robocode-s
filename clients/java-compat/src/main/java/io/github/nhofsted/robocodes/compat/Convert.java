@@ -11,6 +11,7 @@ import net.sf.robocode.peer.BulletStatus;
 import net.sf.robocode.peer.ExecCommands;
 import net.sf.robocode.peer.TeamMessage;
 import net.sf.robocode.security.HiddenAccess;
+import net.sf.robocode.security.SafeComponent;
 import robocode.BattleEndedEvent;
 import robocode.BattleResults;
 import robocode.Bullet;
@@ -22,6 +23,17 @@ import robocode.Event;
 import robocode.HitByBulletEvent;
 import robocode.HitRobotEvent;
 import robocode.HitWallEvent;
+import robocode.KeyPressedEvent;
+import robocode.KeyReleasedEvent;
+import robocode.KeyTypedEvent;
+import robocode.MouseClickedEvent;
+import robocode.MouseDraggedEvent;
+import robocode.MouseEnteredEvent;
+import robocode.MouseExitedEvent;
+import robocode.MouseMovedEvent;
+import robocode.MousePressedEvent;
+import robocode.MouseReleasedEvent;
+import robocode.MouseWheelMovedEvent;
 import robocode.RobotDeathEvent;
 import robocode.RobotStatus;
 import robocode.RoundEndedEvent;
@@ -29,6 +41,9 @@ import robocode.ScannedRobotEvent;
 import robocode.SkippedTurnEvent;
 import robocode.WinEvent;
 
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -151,7 +166,10 @@ final class Convert {
     static List<Event> events(Tick tick) {
         List<Event> events = new ArrayList<>();
         for (io.github.nhofsted.robocodes.protocol.v1.Event e : tick.getEventsList()) {
-            events.add(event(e));
+            Event event = event(e);
+            if (event != null) {
+                events.add(event);
+            }
         }
         return events;
     }
@@ -159,6 +177,72 @@ final class Convert {
     private static Bullet bullet(io.github.nhofsted.robocodes.protocol.v1.Bullet b) {
         return new Bullet(b.getHeading(), b.getX(), b.getY(), b.getPower(), name(b.getOwner()),
                 b.hasVictim() ? name(b.getVictim()) : null, b.getActive(), b.getBulletId());
+    }
+
+    /**
+     * An observer's mouse or keyboard event as classic's interactive event, wrapping a
+     * java.awt event as classic's own deserializers do (on {@link SafeComponent}, in
+     * battlefield coordinates). Null for one that java.awt refuses (an invalid key or
+     * button) or of an unknown kind.
+     */
+    static Event input(io.github.nhofsted.robocodes.protocol.v1.InputEvent e) {
+        try {
+            if (e.hasMouse()) {
+                var m = e.getMouse();
+                int id = switch (m.getAction()) {
+                    case MOUSE_CLICKED -> MouseEvent.MOUSE_CLICKED;
+                    case MOUSE_PRESSED -> MouseEvent.MOUSE_PRESSED;
+                    case MOUSE_RELEASED -> MouseEvent.MOUSE_RELEASED;
+                    case MOUSE_MOVED -> MouseEvent.MOUSE_MOVED;
+                    case MOUSE_ENTERED -> MouseEvent.MOUSE_ENTERED;
+                    case MOUSE_EXITED -> MouseEvent.MOUSE_EXITED;
+                    case MOUSE_DRAGGED -> MouseEvent.MOUSE_DRAGGED;
+                    case MOUSE_WHEEL_MOVED -> MouseEvent.MOUSE_WHEEL;
+                    default -> 0;
+                };
+                if (id == MouseEvent.MOUSE_WHEEL) {
+                    return new MouseWheelMovedEvent(new MouseWheelEvent(SafeComponent.getSafeEventComponent(), id,
+                            m.getWhen(), m.getModifiers(), m.getX(), m.getY(), m.getClickCount(), false,
+                            m.getScrollType(), m.getScrollAmount(), m.getWheelRotation()));
+                }
+                if (id == 0) {
+                    return null;
+                }
+                MouseEvent source = new MouseEvent(SafeComponent.getSafeEventComponent(), id, m.getWhen(),
+                        m.getModifiers(), m.getX(), m.getY(), m.getClickCount(), false, m.getButton());
+                return switch (id) {
+                    case MouseEvent.MOUSE_CLICKED -> new MouseClickedEvent(source);
+                    case MouseEvent.MOUSE_PRESSED -> new MousePressedEvent(source);
+                    case MouseEvent.MOUSE_RELEASED -> new MouseReleasedEvent(source);
+                    case MouseEvent.MOUSE_ENTERED -> new MouseEnteredEvent(source);
+                    case MouseEvent.MOUSE_EXITED -> new MouseExitedEvent(source);
+                    case MouseEvent.MOUSE_DRAGGED -> new MouseDraggedEvent(source);
+                    default -> new MouseMovedEvent(source);
+                };
+            }
+            if (e.hasKey()) {
+                var k = e.getKey();
+                int id = switch (k.getAction()) {
+                    case KEY_PRESSED -> KeyEvent.KEY_PRESSED;
+                    case KEY_RELEASED -> KeyEvent.KEY_RELEASED;
+                    case KEY_TYPED -> KeyEvent.KEY_TYPED;
+                    default -> 0;
+                };
+                if (id == 0) {
+                    return null;
+                }
+                KeyEvent source = new KeyEvent(SafeComponent.getSafeEventComponent(), id, k.getWhen(), k.getModifiers(),
+                        k.getKeyCode(), (char) k.getKeyChar(), k.getKeyLocation());
+                return switch (id) {
+                    case KeyEvent.KEY_PRESSED -> new KeyPressedEvent(source);
+                    case KeyEvent.KEY_RELEASED -> new KeyReleasedEvent(source);
+                    default -> new KeyTypedEvent(source);
+                };
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Not a valid java.awt event: the robot doesn't get it.
+        }
+        return null;
     }
 
     static Event event(io.github.nhofsted.robocodes.protocol.v1.Event e) {
@@ -197,6 +281,7 @@ final class Convert {
                         r.getSeconds(), r.getThirds()));
             }
             case SKIPPED_TURN -> new SkippedTurnEvent(e.getSkippedTurn().getTurn());
+            case INPUT -> input(e.getInput());
             case KIND_NOT_SET -> throw new IllegalArgumentException("event without kind");
         };
     }

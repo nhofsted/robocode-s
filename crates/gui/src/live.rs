@@ -4,6 +4,7 @@
 //! (`runner::local`), observed by the GUI.
 
 use crate::graphs::History;
+use crate::input::Interaction;
 use crate::screen::{self, DebugProperties};
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
@@ -47,6 +48,8 @@ pub struct Live {
     pub stopping: bool,
     /// The end of the battle with its results, or why it failed.
     pub outcome: Option<Result<BattleOutcome, String>>,
+    /// Mouse and keyboard on the battlefield, for interactive robots.
+    pub interaction: Interaction,
 }
 
 impl Live {
@@ -93,6 +96,7 @@ impl Live {
             turns_per_second: 30,
             stopping: false,
             outcome: None,
+            interaction: Interaction::default(),
         }
         .with_initial_speed()
     }
@@ -173,6 +177,14 @@ impl Live {
     pub fn kill(&self, robot: usize) {
         if self.outcome.is_none() && !self.stopping {
             self.control(v1::observer_control::Control::Kill(robot as i32));
+        }
+    }
+
+    /// A mouse or keyboard event on the battlefield: interactive robots get it with the
+    /// next turn.
+    pub fn input(&self, event: v1::InputEvent) {
+        if self.outcome.is_none() && !self.stopping {
+            self.control(v1::observer_control::Control::Input(event));
         }
     }
 

@@ -708,6 +708,8 @@ pub fn proto_event_json(e: &v1::Event) -> Value {
                    "score": (r.score.unwrap_or_default() + 0.5) as i64, "survival": (r.survival.unwrap_or_default() + 0.5) as i64, "firsts": r.firsts})
         }
         Kind::SkippedTurn(s) => json!({"type": "SkippedTurnEvent", "skippedTurn": s.turn}),
+        // Only observers make these; the oracle's battles have none.
+        Kind::Input(_) => json!({"type": "InteractiveEvent"}),
     }
 }
 
