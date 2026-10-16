@@ -209,6 +209,8 @@ pub struct App {
     error: Option<String>,
     replay_error: Option<String>,
     screenshot: Option<Screenshot>,
+    /// `--kill-at`, until done.
+    kill_at: Option<(i64, usize)>,
     open_path: String,
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
@@ -274,6 +276,9 @@ pub struct Launch {
     pub tab: Option<Tab>,
     /// The field whose file dialog opens at start (`--browse`).
     pub browse: Option<Browse>,
+    /// Kill a robot at a turn of the first round, as its kill button would (`--kill-at`,
+    /// for screenshots and testing): (turn, robot index).
+    pub kill_at: Option<(i64, usize)>,
 }
 
 impl App {
@@ -300,6 +305,7 @@ impl App {
             error: None,
             replay_error: None,
             screenshot,
+            kill_at: launch.kill_at,
             open_path: String::new(),
             available: None,
             listing: None,
@@ -1324,7 +1330,7 @@ impl App {
             &mut self.selected,
             true,
         );
-        let output = &live.output;
+        let (output, properties) = (&live.output, &live.properties);
         let event = screen::output_panel(
             root,
             "output",
@@ -1333,6 +1339,8 @@ impl App {
             &mut self.selected,
             &live.paint,
             |i| Cow::Borrowed(output.get(i).map_or("", String::as_str)),
+            |i| properties.get(i).map_or_else(Cow::default, Cow::Borrowed),
+            live.outcome.is_none() && !live.stopping,
         );
         let mut save = None;
         match event {
@@ -1348,6 +1356,7 @@ impl App {
                     out.clear();
                 }
             }
+            Some(screen::OutputEvent::Kill(i)) => live.kill(i),
             None => {}
         }
         screen::controls_panel(root, "controls", |ui| {
@@ -1783,6 +1792,14 @@ impl eframe::App for App {
         // A battle keeps running in its tab while another one is open.
         if let Some(live) = &mut self.live {
             live.poll();
+            if let (Some((turn, robot)), Some(s)) = (self.kill_at, &live.latest)
+                && robot < live.robots.len()
+                && (s.round, s.turn) >= (0, turn)
+            {
+                live.kill(robot);
+                self.selected = robot;
+                self.kill_at = None;
+            }
         }
         match self.tab {
             Tab::Start if self.starting.is_some() => self.loading_page(root),

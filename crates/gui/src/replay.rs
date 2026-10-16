@@ -9,7 +9,7 @@
 
 use crate::graphs::History;
 use crate::icons;
-use crate::screen;
+use crate::screen::{self, DebugProperties};
 use crate::sprites::Sprites;
 use crate::track;
 use crate::view::{self, Field, Style};
@@ -39,6 +39,8 @@ pub struct ReplayView {
     history: History,
     /// Console output: (turn index, robot, text).
     output: Vec<(usize, usize, String)>,
+    /// Debug property changes: (turn index, robot, changes).
+    properties: Vec<(usize, usize, Vec<v1::DebugProperty>)>,
     turns: usize,
     unverified: usize,
     results: Vec<v1::Results>,
@@ -93,6 +95,7 @@ impl ReplayView {
         let recording = Recording::read(path).map_err(|e| e.to_string())?;
         let mut replay = recording.replay();
         let (mut keyframes, mut round_starts, mut output) = (Vec::new(), Vec::new(), Vec::new());
+        let mut properties = Vec::new();
         let mut history = History::new(recording.header.robots.len());
         let (mut turns, mut unverified, mut round) = (0usize, 0usize, -1);
         loop {
@@ -109,6 +112,9 @@ impl ReplayView {
             for (i, r) in snapshot.robots.iter().enumerate() {
                 if !r.output.is_empty() {
                     output.push((turns, i, r.output.clone()));
+                }
+                if !r.debug_properties.is_empty() {
+                    properties.push((turns, i, r.debug_properties.clone()));
                 }
             }
             history.push(&snapshot);
@@ -135,6 +141,7 @@ impl ReplayView {
             round_starts,
             history,
             output,
+            properties,
             turns,
             unverified,
             results,
@@ -169,6 +176,7 @@ impl ReplayView {
             round_starts: vec![0],
             history,
             output: Vec::new(),
+            properties: Vec::new(),
             unverified: 0,
             results: Vec::new(),
             position: 0,
@@ -286,7 +294,7 @@ impl ReplayView {
         );
         // A track has no console output or debug paint.
         if full {
-            let output = &self.output;
+            let (output, properties) = (&self.output, &self.properties);
             let position = self.position;
             let cleared = &self.cleared;
             let event = screen::output_panel(
@@ -308,6 +316,19 @@ impl ReplayView {
                         .collect();
                     Cow::Owned(text)
                 },
+                |i| {
+                    // As they were at the shown turn.
+                    let mut shown = DebugProperties::new();
+                    for (_, _, changes) in properties
+                        .iter()
+                        .take_while(|(turn, _, _)| *turn <= position)
+                        .filter(|(_, robot, _)| *robot == i)
+                    {
+                        screen::apply_debug_properties(&mut shown, changes);
+                    }
+                    Cow::Owned(shown)
+                },
+                false,
             );
             match event {
                 Some(screen::OutputEvent::TogglePaint(i)) => {
@@ -316,6 +337,8 @@ impl ReplayView {
                 Some(screen::OutputEvent::Save(i, text)) => {
                     *save = Some(screen::output_save(&self.robots[i], text));
                 }
+                // A replay can't change what happened.
+                Some(screen::OutputEvent::Kill(_)) => {}
                 Some(screen::OutputEvent::Clear(i)) => {
                     if let Some(c) = self.cleared.get_mut(i) {
                         *c = Some(position);

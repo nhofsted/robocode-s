@@ -229,6 +229,15 @@ message Execute {
   bool stopped = 7;
   // The robot misbehaved and is disabled (classic's punishBadBehavior).
   bool disable = 8;
+  // Debug properties the robot set since the last Execute (setDebugProperty), in order.
+  repeated DebugProperty debug_properties = 9;
+}
+
+// A robot's debug property (classic's setDebugProperty): shown in its console. An empty
+// value (classic's null or "") removes the property.
+message DebugProperty {
+  string key = 1;
+  string value = 2;
 }
 
 message Tick {
@@ -565,6 +574,10 @@ message RobotSnapshot {
   uint64 cpu_nanos = 15;
   // The turn's CPU budget (Tick.budget_nanos); 0 in deterministic mode, which has none.
   uint64 budget_nanos = 16;
+  // Debug properties set this turn, in order (Execute.debug_properties): changes, as in
+  // classic's snapshot; an observer keeps the current values. Not battle state: not part
+  // of a recording's snapshot hash.
+  repeated DebugProperty debug_properties = 17;
 }
 
 enum BulletState {
@@ -606,6 +619,10 @@ message ObserverControl {
     // pauses or pacing, no further rounds start, and the battle ends with the results so
     // far (the aborted round counts up to the abort).
     bool abort = 5;
+    // Kill a robot (classic's "Kill robot" in its console), by robot index: before the
+    // next step it dies as if destroyed (energy 0, an explosion), as classic's
+    // KillRobotCommand. Ignored for robots already dead.
+    int32 kill = 6;
   }
 }
 
@@ -622,7 +639,7 @@ message PaintToggle {
 // a header, then every input the server gave the engine, in order. Replaying them into
 // a new engine reproduces the battle exactly. A snapshot entry marks each point where
 // the server published a TurnSnapshot, with what the engine doesn't know: console
-// output and debug paint.
+// output, debug paint, CPU times and debug properties.
 
 message RecordingEntry {
   oneof entry {
@@ -640,6 +657,8 @@ message RecordingEntry {
     RecordedSnapshot snapshot = 10;
     // An observer stopped the battle (ObserverControl.abort), before the next step.
     bool abort = 11;
+    // An observer killed a robot (ObserverControl.kill), before the next step. Robot index.
+    int32 kill = 12;
   }
 }
 
@@ -663,13 +682,21 @@ message RecordedSnapshot {
   repeated string output = 1;
   // Debug paint, for robots that painted.
   repeated RobotPaint paint = 2;
-  // FNV-1a hash of the snapshot without output, paint and CPU times, to verify a replay.
+  // FNV-1a hash of the snapshot without output, paint, CPU times and debug properties,
+  // to verify a replay.
   fixed64 check = 3;
   // Per robot, by index: CPU time in this snapshot (RobotSnapshot.cpu_nanos). Empty in
   // recordings made before it was recorded.
   repeated uint64 cpu_nanos = 4;
   // The turn budget (RobotSnapshot.budget_nanos).
   uint64 budget_nanos = 5;
+  // Debug properties set, for robots that set any (RobotSnapshot.debug_properties).
+  repeated RobotDebugProperties debug_properties = 6;
+}
+
+message RobotDebugProperties {
+  int32 robot = 1;
+  repeated DebugProperty properties = 2;
 }
 
 message RobotPaint {

@@ -86,6 +86,11 @@ impl Driver {
                 }
             }
             Entry::Abort(_) => self.battle.abort(),
+            Entry::Kill(i) => {
+                if let Some(i) = self.valid(*i) {
+                    self.battle.kill_robot(i);
+                }
+            }
             Entry::Header(_) | Entry::Snapshot(_) => {}
         }
     }

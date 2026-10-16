@@ -238,6 +238,25 @@ pub fn clear(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32)
     ));
 }
 
+/// Kill (a robot): crosshairs, a ring with four ticks reaching in and a dot at the centre.
+pub fn crosshairs(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let ring = radius * 0.7;
+    painter.circle_stroke(center, ring, stroke);
+    for d in [
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, -1.0),
+    ] {
+        painter.line_segment(
+            [center + d * radius * 1.1, center + d * ring * 0.45],
+            stroke,
+        );
+    }
+    painter.circle_filled(center, 1.2, color);
+}
+
 /// A square, borderless button showing an icon; brighter when hovered, dimmed when the
 /// `ui` is disabled.
 pub fn button(
