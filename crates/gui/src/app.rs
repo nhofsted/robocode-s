@@ -602,6 +602,10 @@ impl App {
             RichText::new(&robot.description).weak()
         };
         ui.add(egui::Label::new(description).wrap());
+        let facts = robot_facts(robot);
+        if !facts.is_empty() {
+            ui.label(RichText::new(facts).weak());
+        }
     }
 
     /// Starts the battle in the setup: the loading screen while the robots are described
@@ -2102,6 +2106,21 @@ impl App {
     }
 }
 
+/// What Tank Royale shows of a bot besides its description: its programming language,
+/// platform and game version (classic's `.properties` have no country).
+fn robot_facts(robot: &Listed) -> String {
+    [
+        ("Language", &robot.language),
+        ("Platform", &robot.platform),
+        ("Robocode", &robot.robocode_version),
+    ]
+    .iter()
+    .filter(|(_, v)| !v.is_empty())
+    .map(|(k, v)| format!("{k} {v}"))
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
 /// The seed field: empty for a random seed, or a Java `long` as the battle screen, the
 /// results and `robocode-s` show it (negative too).
 fn parse_seed(text: &str) -> Result<Option<i64>, String> {
@@ -2119,7 +2138,18 @@ fn parse_seed(text: &str) -> Result<Option<i64>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GAME_TYPES, Setup, battle_file, parse_robots, parse_seed};
+    use super::{GAME_TYPES, Listed, Setup, battle_file, parse_robots, parse_seed, robot_facts};
+
+    #[test]
+    fn robot_facts_leave_out_what_is_unknown() {
+        let robot = Listed {
+            language: "Java".into(),
+            platform: "JVM 21.0.4".into(),
+            ..Default::default()
+        };
+        assert_eq!(robot_facts(&robot), "Language Java · Platform JVM 21.0.4");
+        assert_eq!(robot_facts(&Listed::default()), "");
+    }
 
     #[test]
     fn a_shown_seed_can_be_typed_back() {

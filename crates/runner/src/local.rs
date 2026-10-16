@@ -55,6 +55,14 @@ pub struct Listed {
     pub version: String,
     pub description: String,
     pub webpage: String,
+    /// The Robocode version it was built for (`robocode.version`, as Tank Royale shows a
+    /// bot's game version).
+    pub robocode_version: String,
+    /// The programming language, as Tank Royale shows it: classic's robots are JVM
+    /// classes, "Java" (Kotlin, Scala, ... compile to the same; classic doesn't record it).
+    pub language: String,
+    /// What it runs on: the robot host's JVM (`JVM 21.0.4`).
+    pub platform: String,
 }
 
 /// Every robot and team in `jars` (jars and class folders), as classic's repository
@@ -67,8 +75,14 @@ pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec
 }
 
 /// Parses the robot host's `--describe` list: per robot its name, whether it is a team,
-/// then its author, version, description and web page.
+/// then its author, version, description, web page and Robocode version; and the platform
+/// they all run on.
 fn parse_list(text: &str) -> Vec<Listed> {
+    let platform = text
+        .lines()
+        .find_map(|l| l.strip_prefix("platform\t"))
+        .unwrap_or("")
+        .to_string();
     text.lines()
         .filter_map(|l| l.strip_prefix("list\t"))
         .filter_map(|l| {
@@ -83,6 +97,9 @@ fn parse_list(text: &str) -> Vec<Listed> {
                 version: next(),
                 description: next(),
                 webpage: next(),
+                robocode_version: next(),
+                language: "Java".into(),
+                platform: platform.clone(),
             })
         })
         .collect()
@@ -533,14 +550,21 @@ mod tests {
 
     #[test]
     fn parses_the_list_with_details() {
-        let text = "noise\nlist\tsample.Fire\t0\tMathew Nelson\t1.0\tShoots\thttp://x\n\
+        let text = "noise\nplatform\tJVM 21.0.4\n\
+                    list\tsample.Fire\t0\tMathew Nelson\t1.0\tShoots\thttp://x\t1.9.3.4\n\
                     list\tsampleteam.MyFirstTeam\t1\nlist\told.Robot\t0\t\t\t\t\n";
         let list = parse_list(text);
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].author, "Mathew Nelson");
         assert_eq!(list[0].description, "Shoots");
         assert_eq!(list[0].webpage, "http://x");
+        assert_eq!(list[0].robocode_version, "1.9.3.4");
+        assert_eq!(
+            (list[0].language.as_str(), list[0].platform.as_str()),
+            ("Java", "JVM 21.0.4")
+        );
         assert!(list[1].team && list[1].author.is_empty());
+        assert!(list[2].robocode_version.is_empty());
         assert_eq!(list[2].name, "old.Robot");
     }
 
