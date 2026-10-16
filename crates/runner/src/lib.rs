@@ -33,7 +33,7 @@ pub struct RobotLaunch {
     pub token: String,
     /// Classic robot name to look up in the jars, e.g. `sample.Fire` or `jk.mega.DrussGT 3.1.16`.
     pub robot: String,
-    /// Jars containing the robot.
+    /// Jars or class folders containing the robot.
     pub jars: Vec<PathBuf>,
     /// Working directory (classic's robocode home: robot data files live here).
     pub home: PathBuf,

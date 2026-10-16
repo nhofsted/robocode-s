@@ -33,7 +33,9 @@ Battle:
   --turn-timeout MS      classic mode: time per turn (default 50)
 
 Robots and runtime:
-  --jar PATH             robot jar; repeatable (default: $ROBOCODES_ROBOT_JARS,
+  --jar PATH             robot jar, or a class folder (an IDE's output, read in
+                         place: robots there are named with classic's `*`, e.g.
+                         `my.Robot*`); repeatable (default: $ROBOCODES_ROBOT_JARS,
                          else the sample robots of a built source tree)
   --memory MB            heap per robot JVM (default 512)
   --data DIR             data directory: JRE, battle files ($ROBOCODES_DATA,
