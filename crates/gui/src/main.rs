@@ -13,6 +13,7 @@ mod replay;
 mod screen;
 mod settings;
 mod shell;
+mod sound;
 mod sprites;
 mod track;
 mod view;

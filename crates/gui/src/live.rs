@@ -6,6 +6,7 @@
 use crate::graphs::History;
 use crate::input::Interaction;
 use crate::screen::{self, DebugProperties};
+use crate::sound::{self, Cue};
 use crate::view::Camera;
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
@@ -17,6 +18,8 @@ use std::thread;
 
 /// How much console output is kept per robot.
 const OUTPUT_LIMIT: usize = 64 * 1024;
+/// How many sound effects wait to be played at most (when nothing plays them).
+const CUES_LIMIT: usize = 256;
 
 enum Update {
     Message(Box<server_message::Msg>),
@@ -53,6 +56,8 @@ pub struct Live {
     pub interaction: Interaction,
     /// The battlefield view's zoom and pan.
     pub camera: Camera,
+    /// The sound effects of the turns that arrived, until played (see `sound`).
+    pub cues: Vec<Cue>,
 }
 
 impl Live {
@@ -101,6 +106,7 @@ impl Live {
             outcome: None,
             interaction: Interaction::default(),
             camera: Camera::default(),
+            cues: Vec::new(),
         }
         .with_initial_speed()
     }
@@ -137,6 +143,9 @@ impl Live {
                         screen::apply_debug_properties(properties, &r.debug_properties);
                     }
                     self.history.push(&s);
+                    if self.cues.len() < CUES_LIMIT {
+                        self.cues.extend(sound::cues(&s, self.width));
+                    }
                     self.previous = self.latest.replace(s);
                 }
                 Ok(_) => {}

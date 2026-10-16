@@ -10,6 +10,7 @@
 use crate::graphs::History;
 use crate::icons;
 use crate::screen::{self, DebugProperties};
+use crate::sound;
 use crate::sprites::Sprites;
 use crate::track;
 use crate::view::{self, Camera, Field, Style};
@@ -60,6 +61,8 @@ pub struct ReplayView {
     results_closed: bool,
     /// The battlefield view's zoom and pan.
     pub camera: Camera,
+    /// The sound effects of the turns played, until played (see `sound`).
+    pub cues: Vec<sound::Cue>,
 }
 
 enum Source {
@@ -155,6 +158,7 @@ impl ReplayView {
             last_tick: None,
             results_closed: false,
             camera: Camera::default(),
+            cues: Vec::new(),
         };
         view.seek(0);
         Ok(view)
@@ -190,6 +194,7 @@ impl ReplayView {
             last_tick: None,
             results_closed: false,
             camera: Camera::default(),
+            cues: Vec::new(),
         };
         view.seek(0);
         view
@@ -259,6 +264,12 @@ impl ReplayView {
             let target = (self.position + steps).min(self.turns - 1);
             if target == self.position + 1 {
                 self.seek(target);
+                // Sound plays at a watchable speed only, a turn at a time.
+                if (1..=sound::MAX_TPS).contains(&self.turns_per_second)
+                    && let Some(s) = &self.current
+                {
+                    self.cues.extend(sound::cues(s, self.width));
+                }
             } else {
                 // Larger jumps: replay forward from here.
                 while self.position < target {
