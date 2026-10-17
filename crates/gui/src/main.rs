@@ -45,7 +45,7 @@ The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
+system's frame, and on Windows). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
 resizes handed to the system to stderr. ROBOCODES_PERF_LOG=1 logs the renderer
 and the frame rate and frame times once a second (=frames: every frame) to stderr.
 
