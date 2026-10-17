@@ -2662,6 +2662,7 @@ dependencies = [
  "robocode-s-server",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

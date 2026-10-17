@@ -3,8 +3,13 @@
 //! `robocode-s-gui`: battle setup, a live viewer with debug paint, and replays
 //! (design §10).
 
+// No console window on Windows; started from a terminal, it writes there (`console`).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod backdrop;
+#[cfg(windows)]
+mod console;
 mod files;
 mod graphs;
 mod icons;
@@ -105,6 +110,8 @@ fn parse_zoom(text: &str) -> Option<view::Camera> {
 }
 
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    console::attach();
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);

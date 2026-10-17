@@ -33,3 +33,7 @@ pulseaudio = "0.3.2"
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 cpal = "0.18.2"
+
+# The terminal a release build was started from (`src/console.rs`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console"] }
