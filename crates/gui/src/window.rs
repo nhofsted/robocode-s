@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Our own window frame (title bar, buttons, resize edges) where the system's crashes,
-//! and the window's minimum size (see [`keep_min_size`]).
+//! Our own window frame (title bar, buttons, resize edges): where the system's crashes,
+//! and on Windows, for a window like Steam's; and the window's minimum size (see
+//! [`keep_min_size`]).
 //!
 //! On WSLg the compositor (Weston 9 with its pixman renderer) draws no decorations, so
 //! winit draws its own frame from a `wl_shm` pool that it grows as the window gets wider.
 //! Weston segfaults in pixman when that pool is resized while it holds the old buffer,
 //! which takes the app down with it: dragging the window wider crashed it (#28). Without
 //! winit's frame there is no pool to resize; egui draws the frame instead.
+//!
+//! On Windows winit's undecorated window keeps its caption and sizing styles and only
+//! hides the non-client area (`WM_NCCALCSIZE`), so the system still snaps it (Win+arrows,
+//! dragging to a screen edge) and gives it a drop shadow (egui-winit asks for one when
+//! the window has no decorations); maximized, it covers the work area, not the taskbar.
+//! Moves and resizes run the system's own loops (`WM_NCLBUTTONDOWN`), which hold the
+//! window at its minimum size.
 
 use eframe::egui::{self, Color32, CursorIcon, Id, PointerButton, Sense, Stroke, vec2};
 use egui::viewport::{ResizeDirection, ViewportCommand};
@@ -20,18 +28,25 @@ const BUTTON_WIDTH: f32 = 44.0;
 /// Height of the top bar: the title bar with our frame, the app's top bar without it.
 pub const BAR_HEIGHT: f32 = 40.0;
 
-/// Whether to draw our own frame: on WSLg under Wayland, unless `ROBOCODES_OWN_FRAME`
-/// says otherwise (`1` or `0`).
+/// Whether to draw our own frame: on Windows, and on WSLg under Wayland, unless
+/// `ROBOCODES_OWN_FRAME` says otherwise (`1` or `0`).
 pub fn wanted() -> bool {
     match std::env::var("ROBOCODES_OWN_FRAME").as_deref() {
         Ok("1") => true,
         Ok("0") => false,
         _ => {
-            std::env::var_os("WAYLAND_DISPLAY").is_some()
-                && std::path::Path::new("/mnt/wslg").is_dir()
+            let wslg = std::env::var_os("WAYLAND_DISPLAY").is_some()
+                && std::path::Path::new("/mnt/wslg").is_dir();
+            cfg!(windows) || wslg
         }
     }
 }
+
+/// Whether the window system tells us when a move or resize we handed it is over. On
+/// Windows winit posts the button's release when the system's move loop ends
+/// (`WM_EXITSIZEMOVE`); a made-up one ([`release_after_grab`]) would end egui's drag
+/// while the loop still runs.
+const RELEASES_AFTER_GRAB: bool = cfg!(windows);
 
 /// Draws the frame around the window's content; call it before the other panels. The
 /// title bar holds `content` (the app's top bar) left of the window buttons; its empty
@@ -91,9 +106,14 @@ fn grab_id() -> Id {
 /// pointer, so the button's release never reaches us (winit only reports the pointer
 /// leaving, which egui doesn't take as a release): egui would think the button still
 /// down, keep the edge or title bar dragged, with its cursor, until Escape.
-/// [`release_after_grab`] makes up the release.
+/// [`release_after_grab`] makes up the release (not on Windows, see
+/// [`RELEASES_AFTER_GRAB`]).
 fn hand_over(ctx: &egui::Context, command: ViewportCommand) {
     log(&format!("{command:?}: the compositor takes the pointer"));
+    if RELEASES_AFTER_GRAB {
+        ctx.send_viewport_cmd(command);
+        return;
+    }
     ctx.data_mut(|d| {
         d.insert_temp(grab_id(), true);
         if matches!(command, ViewportCommand::BeginResize(_)) {

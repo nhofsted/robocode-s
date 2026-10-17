@@ -408,6 +408,15 @@ impl App {
         screenshot: Option<Screenshot>,
         own_frame: bool,
     ) -> Self {
+        // Dark whatever the system's theme: egui would follow a light Windows or macOS
+        // theme (white text fields, and the title on the dark top bar near invisible),
+        // and the app's colours (the top bar, the floor) are made for the dark one.
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
+        if !own_frame {
+            // The system's title bar too, where it has a dark one (Windows, GTK).
+            cc.egui_ctx
+                .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
+        }
         let env_jars = crate::settings::env_jars();
         env.jars = settings.robot_paths(&env_jars);
         let perf = crate::perf::Perf::from_env();

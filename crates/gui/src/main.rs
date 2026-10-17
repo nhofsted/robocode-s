@@ -3,8 +3,13 @@
 //! `robocode-s-gui`: battle setup, a live viewer with debug paint, and replays
 //! (design §10).
 
+// No console window on Windows; started from a terminal, it writes there (`console`).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod backdrop;
+#[cfg(windows)]
+mod console;
 mod files;
 mod graphs;
 mod icons;
@@ -45,7 +50,7 @@ The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
+system's frame, and on Windows). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
 resizes handed to the system to stderr. ROBOCODES_PERF_LOG=1 logs the renderer
 and the frame rate and frame times once a second (=frames: every frame) to stderr.
 
@@ -105,6 +110,8 @@ fn parse_zoom(text: &str) -> Option<view::Camera> {
 }
 
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    console::attach();
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);
