@@ -27,5 +27,5 @@ For JVM robots this is done by a Java agent (`clients/java-determinism`) that re
 
 - Oracle recordings with top bots are byte-identical across runs, including 10-robot melees.
 - The numbers robots draw differ from what classic would draw on an old JVM. Classic never had a reproducible answer there, so nothing authentic is lost; physics and rules are untouched.
-- Deterministic mode must run robot JVMs with the agent and with `-XX:-InlineMathNatives`, so robots' own trigonometry is identical on every platform and volunteers' results can be cross-checked.
+- Deterministic mode must run robot JVMs with the agent and with the inexact math intrinsics disabled (design §4.3), so robots' own trigonometry is identical on every platform and volunteers' results can be cross-checked.
 - Robots that read the clock to budget their work can still be nondeterministic. That's a known limit.

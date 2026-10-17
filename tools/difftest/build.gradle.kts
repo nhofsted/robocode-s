@@ -44,7 +44,7 @@ val oracleJvmArgs = listOf(
     "--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED",
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
     "-XX:+UnlockDiagnosticVMOptions",
-    "-XX:-InlineMathNatives",
+    "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow",
     "-Ddebug=true",
 )
 
@@ -128,7 +128,8 @@ tasks.register<JavaExec>("geometryVectors") {
     description = "Regenerates crates/geom/tests/data/geometry.txt from the running JDK."
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.github.nhofsted.robocodes.difftest.GeometryVectors"
-    jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-InlineMathNatives")
+    jvmArgs("-XX:+UnlockDiagnosticVMOptions",
+        "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow")
     val output = layout.settingsDirectory.file("crates/geom/tests/data/geometry.txt")
     outputs.file(output)
     args(output.asFile.path)

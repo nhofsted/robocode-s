@@ -27,7 +27,7 @@ The classic sample robots are always available.
 Same seed and robots give a **byte-identical** recording. This is verified by `OracleTest`, and by hand for top RoboRumble bots (BeepBoop vs DrussGT; a melee with Neuromancer, Shadow, Diamond, Nullstride and others). Four things make this work:
 
 1. **`-Ddebug=true`:** classic waits for every robot each turn (up to 10 minutes), so there are no timing-dependent skipped turns.
-2. **`-XX:-InlineMathNatives`:** HotSpot's `Math.sin/cos/tan` intrinsics differ from `StrictMath` for about 3% of inputs on x86-64. Without them, classic computes with `StrictMath` (fdlibm) semantics, which is the definition of "bit-exact" in ADR 0003.
+2. **`-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow`:** HotSpot's `Math.sin/cos/tan/exp/log/log10/pow` intrinsics differ from `StrictMath` for 3–15% of inputs on x86-64. Without them, classic computes with `StrictMath` (fdlibm) semantics, which is the definition of "bit-exact" in ADR 0003.
 3. **`RANDOMSEED`:** seeds classic's own randomness (start positions, robot order each turn).
 4. **The determinism agent (`clients/java-determinism`):** classic cannot seed robots' own `Math.random()` on modern JVMs, and never seeded `new Random()`. The agent gives each robot its own stream, derived from the battle seed and the robot's name (ADR 0009). robocode-s runners use the same derivation, so robots draw the same numbers in both systems.
 
