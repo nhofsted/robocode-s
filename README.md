@@ -45,6 +45,14 @@ The window has tabs: Start Battle (the setup, then the live battle), Watch Battl
 
 On Windows (and under WSLg) the app draws its own window frame, as Steam does: the top bar is the title bar (drag it to move the window, double-click it to maximize), with the minimize, maximize and close buttons on the right; the window keeps the system's drop shadow and snapping (Win+arrows, dragging it to a screen edge). `ROBOCODES_OWN_FRAME=0` gives the system's frame instead. The app is dark whatever the system's theme. A release build opens no console window; started from a terminal (Command Prompt, PowerShell) it writes `--help`, its errors and the `ROBOCODES_*_LOG` diagnostics there, though the prompt comes back at once (`start /wait robocode-s-gui.exe ...` waits for it; a debug build is a console program).
 
+The app's icon is classic Robocode's, as the website's favicon (`crates/gui/assets/README.md`): the window has it at run time (taskbar, Alt+Tab, X11), and the Windows program has it as its file icon (Explorer, Start menu) with its version information. Wayland desktops, WSLg among them, take a window's icon from the `.desktop` file named by its app id, `robocode-s`; to have it there, install `crates/gui/robocode-s.desktop` and the icon for your user (with `Path=` set to the folder to start in, see below, if the program isn't started from the repository):
+
+```sh
+install -Dm644 crates/gui/robocode-s.desktop ~/.local/share/applications/robocode-s.desktop
+install -Dm644 web/static/favicon-256.png ~/.local/share/icons/hicolor/256x256/apps/robocode-s.png
+# and robocode-s-gui on the PATH (Exec=robocode-s-gui), e.g. ~/.cargo/bin via cargo install --path crates/gui
+```
+
 To build the Windows program from Linux or WSL, with the `x86_64-pc-windows-gnu` target and MinGW-w64 (`rustup target add x86_64-pc-windows-gnu`, `apt install mingw-w64`):
 
 ```sh
