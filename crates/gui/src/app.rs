@@ -212,6 +212,8 @@ pub struct App {
     live: Option<Box<Live>>,
     /// The battle being started: the Start Battle tab shows the loading screen.
     starting: Option<Starting>,
+    /// The setup of the last battle started, for Restart.
+    launched: Option<Setup>,
     /// The recording in the Replay Battle tab; a file field when there is none.
     replay: Option<Box<ReplayView>>,
     selected: usize,
@@ -327,6 +329,7 @@ impl App {
             tab: Tab::Start,
             live: None,
             starting: None,
+            launched: None,
             replay: None,
             selected: 0,
             error: None,
@@ -641,12 +644,11 @@ impl App {
                 return;
             }
         };
-        self.launch(ctx, seed);
+        self.launch(ctx, self.setup.clone(), seed);
     }
 
-    /// Starts the battle in the setup with `seed` (see [`App::start`]).
-    fn launch(&mut self, ctx: &egui::Context, seed: i64) {
-        let s = &self.setup;
+    /// Starts the battle of setup `s` with `seed` (see [`App::start`]).
+    fn launch(&mut self, ctx: &egui::Context, s: Setup, seed: i64) {
         let config = ServerConfig {
             rules: s.battle_rules(),
             seed,
@@ -672,6 +674,7 @@ impl App {
             error: None,
             watching: None,
         });
+        self.launched = Some(s);
         self.error = None;
         self.live = None;
         self.battles += 1;
@@ -2038,12 +2041,16 @@ impl eframe::App for App {
                         Some(live) if !new_seed => live.seed,
                         _ => random_seed(),
                     };
+                    // The battle as it was started (the options may have changed the
+                    // setup's defaults since).
+                    let mut setup = self.launched.clone().unwrap_or_else(|| self.setup.clone());
                     // The battle's recording stays: the new one goes to a new file.
-                    let record = self.setup.record.trim();
+                    let record = setup.record.trim();
                     if !record.is_empty() {
-                        self.setup.record = next_free(Path::new(record)).display().to_string();
+                        setup.record = next_free(Path::new(record)).display().to_string();
+                        self.setup.record.clone_from(&setup.record);
                     }
-                    self.launch(ctx, seed);
+                    self.launch(ctx, setup, seed);
                 }
             },
             Tab::Start => self.start_page(root),
