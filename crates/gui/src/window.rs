@@ -94,7 +94,12 @@ fn grab_id() -> Id {
 /// [`release_after_grab`] makes up the release.
 fn hand_over(ctx: &egui::Context, command: ViewportCommand) {
     log(&format!("{command:?}: the compositor takes the pointer"));
-    ctx.data_mut(|d| d.insert_temp(grab_id(), true));
+    ctx.data_mut(|d| {
+        d.insert_temp(grab_id(), true);
+        if matches!(command, ViewportCommand::BeginResize(_)) {
+            d.insert_temp(resize_id(), Resize { ended: None });
+        }
+    });
     ctx.send_viewport_cmd(command);
 }
 
@@ -112,6 +117,23 @@ pub fn release_after_grab(ctx: &egui::Context, raw_input: &mut egui::RawInput) {
     }
     let grabbed = ctx.data_mut(|d| d.remove_temp::<bool>(grab_id()));
     if grabbed != Some(true) {
+        // The pointer is back: the compositor let go of it, so a resize is over. (The
+        // frame that makes up the release is skipped: what it brings may be from before
+        // the compositor took the pointer.)
+        let back = raw_input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerMoved(_)
+                    | egui::Event::PointerButton { .. }
+                    | egui::Event::PointerGone
+            )
+        });
+        let resize = ctx.data_mut(|d| d.get_temp::<Resize>(resize_id()));
+        if back && let Some(Resize { ended: None }) = resize {
+            log("the pointer is back: the resize is over");
+            let now = raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time));
+            ctx.data_mut(|d| d.insert_temp(resize_id(), Resize { ended: Some(now) }));
+        }
         return;
     }
     let pos = ctx
@@ -130,6 +152,23 @@ pub fn release_after_grab(ctx: &egui::Context, raw_input: &mut egui::RawInput) {
 /// enough not to fight a resize in progress.
 const SETTLE: f64 = 0.4;
 
+/// Where [`hand_over`] notes a resize it gave the compositor.
+fn resize_id() -> Id {
+    Id::new("window-resize")
+}
+
+/// A resize the compositor does for us (see [`hand_over`]).
+#[derive(Clone, Copy, Default)]
+struct Resize {
+    /// When (the UI's time) the pointer came back, which ends it.
+    ended: Option<f64>,
+}
+
+/// How long after a resize [`keep_min_size`] still takes the window being too small as
+/// the resize's doing, and grows it at once. The compositor's last word on a resize, a
+/// configure without the resizing state, comes with the pointer's return.
+const AFTER_RESIZE: f64 = 0.5;
+
 /// What [`keep_min_size`] remembers between frames.
 #[derive(Clone, Copy, Default)]
 struct SizeWatch {
@@ -137,16 +176,30 @@ struct SizeWatch {
     /// Since when (the UI's time) the window has been `size`.
     since: f64,
     /// The too small size it last grew the window from, so as not to ask again and again
-    /// when the window doesn't grow; cleared once the window is big enough.
+    /// when the window doesn't grow; cleared once the window has another size.
     asked: Option<egui::Vec2>,
+    /// Whether it has asked winit to hold resizes at the minimum (see [`keep_min_size`]).
+    hinted: bool,
 }
 
 /// Keeps the window at least `min` points big where the window system doesn't. The
 /// minimum goes to the compositor too (`xdg_toplevel.set_min_size` on Wayland), but
 /// sizes the app asks for aren't held to it, nor are the user's resizes by every
-/// compositor. Once a too small window has kept its size for a moment (so not in the
-/// middle of a resize), this asks for the minimum. A maximized, fullscreen or minimized
-/// window is left alone. Call it every frame.
+/// compositor: WSLg's Weston ignores the minimum in its resize grab and configures the
+/// window down to a few pixels as the pointer goes, and winit takes the configured size
+/// as it is. Call it every frame.
+///
+/// - During such a resize winit holds the window at the minimum itself, once it has
+///   resize increments (asked for here, on Wayland; 1 point, so no steps): it measures
+///   an interactive resize's size from the minimum, and doesn't go below it. So the
+///   window never draws a frame below the minimum while the user drags.
+/// - The configure that ends the resize (without the resizing state) still has the
+///   small size the compositor made of the drag. Right after a resize we handed over
+///   (see [`hand_over`]), a too small window grows back to the minimum at once.
+/// - Otherwise, once a too small window has kept its size for a moment (so not in the
+///   middle of a resize the window system does on its own), this asks for the minimum.
+///
+/// A maximized, fullscreen or minimized window is left alone.
 pub fn keep_min_size(ctx: &egui::Context, min: egui::Vec2) {
     let id = Id::new("window-min-size");
     let (size, now, pinned) = ctx.input(|i| {
@@ -157,9 +210,27 @@ pub fn keep_min_size(ctx: &egui::Context, min: egui::Vec2) {
     let mut watch = ctx
         .data_mut(|d| d.get_temp::<SizeWatch>(id))
         .unwrap_or_default();
+    if !watch.hinted {
+        watch.hinted = true;
+        // Elsewhere winit's increments could show as the window's size in steps.
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            log("resize increments of 1 point, to hold resizes at the minimum");
+            let one = egui::Vec2::splat(1.0);
+            ctx.send_viewport_cmd(ViewportCommand::ResizeIncrements(Some(one)));
+        }
+    }
+    let resize = ctx.data_mut(|d| d.get_temp::<Resize>(resize_id()));
+    let resizing = match resize {
+        Some(Resize { ended: Some(ended) }) if now - ended >= AFTER_RESIZE => {
+            ctx.data_mut(|d| d.remove_temp::<Resize>(resize_id()));
+            false
+        }
+        Some(_) => true,
+        None => false,
+    };
     if watch.size != size {
         log(&format!(
-            "window {:.0}x{:.0} points (minimum {:.0}x{:.0}){}",
+            "window {:.0}x{:.0} points (minimum {:.0}x{:.0}){}{}",
             size.x,
             size.y,
             min.x,
@@ -168,22 +239,28 @@ pub fn keep_min_size(ctx: &egui::Context, min: egui::Vec2) {
                 ", maximized, fullscreen or minimized"
             } else {
                 ""
+            },
+            match resize {
+                Some(Resize { ended: None }) => ", resizing",
+                Some(_) if resizing => ", just resized",
+                _ => "",
             }
         ));
         watch.size = size;
         watch.since = now;
+        watch.asked = None;
     }
     // Half a point of slack for the rounding to whole pixels.
     let small = size.x < min.x - 0.5 || size.y < min.y - 0.5;
-    if !small {
-        watch.asked = None;
-    } else if !pinned && watch.asked != Some(size) {
+    if small && !pinned && watch.asked != Some(size) {
         let still = now - watch.since;
-        if still >= SETTLE {
+        if resizing || still >= SETTLE {
             let grown = size.max(min);
             log(&format!(
-                "window below the minimum: asking for {:.0}x{:.0}",
-                grown.x, grown.y
+                "window below the minimum{}: asking for {:.0}x{:.0}",
+                if resizing { " after a resize" } else { "" },
+                grown.x,
+                grown.y
             ));
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(grown));
             watch.asked = Some(size);
