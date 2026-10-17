@@ -230,6 +230,8 @@ pub struct App {
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
+    /// List the robots again once the running listing is done.
+    relist: bool,
     /// The robot whose details show below the robot lists: the last one clicked.
     details: Option<String>,
     filter: String,
@@ -337,6 +339,7 @@ impl App {
             open_path: String::new(),
             available: None,
             listing: None,
+            relist: false,
             details: None,
             filter: String::new(),
             picked: None,
@@ -418,8 +421,14 @@ impl App {
         }
     }
 
-    /// Lists the robots in the jars on a background thread (it starts a JVM).
+    /// Lists the robots in the jars on a background thread (it starts a JVM). One listing
+    /// at a time: they share their home, which the robot host empties first, so a second
+    /// one at once fails. Asked again while one runs, it lists again once that one is done.
     fn list_robots(&mut self, ctx: &egui::Context) {
+        if self.listing.is_some() {
+            self.relist = true;
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         let env = self.env.clone();
         let ctx = ctx.clone();
@@ -434,13 +443,18 @@ impl App {
         self.listing = Some(rx);
     }
 
-    /// Takes the robot list once it is there.
-    fn poll_listing(&mut self) {
+    /// Takes the robot list once it is there (or lists again, if the folders changed
+    /// meanwhile).
+    fn poll_listing(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.listing
             && let Ok(result) = rx.try_recv()
         {
-            self.available = Some(result);
             self.listing = None;
+            if std::mem::take(&mut self.relist) {
+                self.list_robots(ctx);
+            } else {
+                self.available = Some(result);
+            }
         }
     }
 
@@ -1959,7 +1973,7 @@ impl eframe::App for App {
             self.refresh(ctx);
         }
         shell::footer(root);
-        self.poll_listing();
+        self.poll_listing(ctx);
         self.poll_starting(ctx);
         let style = self.style();
         // A battle keeps running in its tab while another one is open.
