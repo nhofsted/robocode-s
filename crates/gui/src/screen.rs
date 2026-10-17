@@ -804,6 +804,9 @@ pub fn results_window(
                 let measured = id.with("table-width");
                 let wanted = ui.data(|d| d.get_temp::<f32>(measured)).unwrap_or(600.0);
                 let room = ui.ctx().content_rect().width() - 80.0 - WINNER - GAP;
+                // A solid scrollbar, not egui's floating one that shows only on hover: the
+                // columns cut off at the edge are easy to miss.
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
                 let shown = egui::ScrollArea::horizontal()
                     .min_scrolled_width(wanted.min(room).max(120.0))
                     .show(ui, |ui| table(ui, &rows));
