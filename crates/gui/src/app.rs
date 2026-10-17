@@ -22,7 +22,7 @@ use robocode_s_runner::local::{
 };
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 
 /// The battle setup form.
@@ -2029,6 +2029,11 @@ impl eframe::App for App {
                         Some(live) if !new_seed => live.seed,
                         _ => random_seed(),
                     };
+                    // The battle's recording stays: the new one goes to a new file.
+                    let record = self.setup.record.trim();
+                    if !record.is_empty() {
+                        self.setup.record = next_free(Path::new(record)).display().to_string();
+                    }
                     self.launch(ctx, seed);
                 }
             },
@@ -2175,6 +2180,27 @@ impl App {
     }
 }
 
+/// A recording's path for a restarted battle, so that it doesn't overwrite the last one:
+/// `battle.rec` becomes `battle-2.rec` (`battle-3.rec`, ... when that one is there too).
+fn next_free(path: &Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    // `battle-2` counts on from 2 rather than becoming `battle-2-2`.
+    let base = match stem.rsplit_once('-') {
+        Some((base, n)) if !base.is_empty() && n.parse::<u32>().is_ok() => base,
+        _ => stem.as_str(),
+    };
+    let extension = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    (2u32..)
+        .map(|n| path.with_file_name(format!("{base}-{n}{extension}")))
+        .find(|p| !p.exists())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 /// What Tank Royale shows of a bot besides its description: its programming language,
 /// platform and game version (classic's `.properties` have no country).
 fn robot_facts(robot: &Listed) -> String {
@@ -2207,7 +2233,28 @@ fn parse_seed(text: &str) -> Result<Option<i64>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GAME_TYPES, Listed, Setup, battle_file, parse_robots, parse_seed, robot_facts};
+    use super::{
+        GAME_TYPES, Listed, Setup, battle_file, next_free, parse_robots, parse_seed, robot_facts,
+    };
+
+    #[test]
+    fn a_restart_records_to_a_new_file() {
+        let dir = std::env::temp_dir().join(format!("robocode-s-gui-next-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("battle.rec");
+        std::fs::write(&first, "").unwrap();
+        assert_eq!(next_free(&first), dir.join("battle-2.rec"));
+        std::fs::write(dir.join("battle-2.rec"), "").unwrap();
+        assert_eq!(next_free(&first), dir.join("battle-3.rec"));
+        assert_eq!(
+            next_free(&dir.join("battle-2.rec")),
+            dir.join("battle-3.rec")
+        );
+        assert_eq!(next_free(&dir.join("my-bots")), dir.join("my-bots-2"));
+        assert_eq!(next_free(&dir.join("-7.rec")), dir.join("-7-2.rec"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn robot_facts_leave_out_what_is_unknown() {
