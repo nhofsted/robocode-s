@@ -10,6 +10,7 @@ mod graphs;
 mod icons;
 mod input;
 mod live;
+mod pace;
 mod perf;
 mod replay;
 mod screen;

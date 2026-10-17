@@ -89,7 +89,7 @@ impl Live {
             let repaint = ctx.clone();
             let result = run_local_battle(&host, &battle, Some(controls_rx), |msg| {
                 let _ = tx.send(Update::Message(Box::new(msg.clone())));
-                repaint.request_repaint();
+                crate::pace::next_frame(&repaint);
             });
             let _ = updates_tx.send(Update::Done(result.map(|o| o.outcome)));
             ctx.request_repaint();
@@ -121,7 +121,7 @@ impl Live {
                     if tx.send(Update::Message(Box::new(msg.clone()))).is_err() {
                         let _ = handle.shutdown(Shutdown::Both);
                     }
-                    repaint.request_repaint();
+                    crate::pace::next_frame(&repaint);
                 })
             });
             let _ = updates_tx.send(Update::Done(result));

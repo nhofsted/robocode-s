@@ -1574,6 +1574,19 @@ impl App {
                     ui.label("Speed");
                     ui.checkbox(&mut s.rates, "Show the turns and frames per second");
                     ui.end_row();
+                    ui.label("Frame rate");
+                    ui.horizontal(|ui| {
+                        for fps in crate::pace::RATES {
+                            ui.radio_value(&mut s.frame_rate, fps, crate::pace::label(fps));
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "The most frames a second for what moves: the background, \
+                         battles, replays. Display: as many as the screen shows. A battle \
+                         draws a frame per turn, so at most as many as its turns a second.",
+                    );
+                    ui.end_row();
                     ui.label("Sound");
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut s.sound, "Gunshots, hits and explosions")
@@ -2119,7 +2132,7 @@ fn contestants_row(ui: &mut egui::Ui, sprites: &mut Sprites, names: &[String], t
             );
         }
     }
-    ui.ctx().request_repaint();
+    crate::pace::next_frame(ui.ctx());
 }
 
 /// The robot jars and class folders in `paths`, e.g. `3 jars and 1 class folder`.
@@ -2175,6 +2188,7 @@ impl eframe::App for App {
         if let Some(perf) = &mut self.perf {
             perf.begin();
         }
+        crate::pace::begin(ctx, self.settings.frame_rate);
         crate::window::keep_min_size(ctx, self.min_size);
         let tab = self.tab;
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);

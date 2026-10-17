@@ -3,13 +3,13 @@
 //! The background of the pages: classic's floor, darkened, with a few tanks wandering,
 //! sweeping their radars and firing, as on the website's home page (a port of
 //! `web/src/lib/components/Battlefield.svelte`). Not the engine, just a calm backdrop: slow,
-//! at most 30 frames a second, and still when there are no margins to show it in.
+//! at the options' frame rate (see [`crate::pace`]), and still when there are no margins
+//! to show it in.
 
 use crate::sprites::{Part, Rgb, Sprites};
 use crate::view::sprite;
 use eframe::egui::{self, Color32, Mesh, Pos2, Rect, Vec2, pos2, vec2};
 use std::f32::consts::TAU;
-use std::time::Duration;
 
 const COLORS: [[Rgb; 3]; 5] = [
     [[63, 138, 79], [159, 212, 168], [255, 215, 94]],
@@ -266,7 +266,7 @@ impl Backdrop {
                 .map_or(1.0, |t| ((now - t) * 60.0) as f32)
                 .min(3.0);
             self.step(real * PACE, real);
-            ctx.request_repaint_after(Duration::from_millis(33));
+            crate::pace::next_frame(&ctx);
         }
         self.last = Some(now);
         self.draw(&ctx, &painter, sprites, rect.min.to_vec2());
