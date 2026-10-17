@@ -3,6 +3,7 @@
  */
 package io.github.nhofsted.robocodes.compat;
 
+import io.github.nhofsted.robocodes.determinism.RobotRandomness;
 import io.github.nhofsted.robocodes.protocol.v1.ClientMessage;
 import io.github.nhofsted.robocodes.protocol.v1.DebugProperty;
 import io.github.nhofsted.robocodes.protocol.v1.Execute;
@@ -43,6 +44,12 @@ final class RemotePeer implements IRobotPeer {
     private final OutputStream out;
     private final BlockingQueue<Object> inbox = new LinkedBlockingQueue<>();
     private final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+    /**
+     * Deterministic mode: a robot's CPU time is its counted work as virtual time (ADR 0014),
+     * the same on every machine, rather than this JVM's (slower there, without math
+     * intrinsics).
+     */
+    private final boolean countedWork = RobotRandomness.isMeteringWork();
 
     private volatile boolean running;
     // Robot thread state, reset each round.
@@ -231,6 +238,9 @@ final class RemotePeer implements IRobotPeer {
     }
 
     private long cpu() {
+        if (countedWork) {
+            return RobotRandomness.countedWorkNanos();
+        }
         return threads.isCurrentThreadCpuTimeSupported() ? threads.getCurrentThreadCpuTime() : 0;
     }
 
