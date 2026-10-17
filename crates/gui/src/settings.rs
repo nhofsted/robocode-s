@@ -34,7 +34,8 @@ pub struct Settings {
     pub width: i32,
     pub height: i32,
     pub rules: Rules,
-    /// The last battle watched (Watch a battle): its address. Its token is not saved.
+    /// The last battle watched (Watch Battle, Remote Server): its address. Its token is
+    /// not saved.
     pub watch: String,
     /// The energy and CPU graphs show the whole battle rather than the round.
     pub graphs_battle: bool,

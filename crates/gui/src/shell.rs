@@ -26,29 +26,29 @@ const FOOTER_HEIGHT: f32 = 22.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Start,
-    Replay,
+    Watch,
     Rumble,
     Options,
 }
 
 impl Tab {
     /// The tabs in the top bar; [`Tab::Options`] is behind the gear.
-    const BAR: [Tab; 3] = [Tab::Start, Tab::Replay, Tab::Rumble];
+    const BAR: [Tab; 3] = [Tab::Start, Tab::Watch, Tab::Rumble];
 
     fn label(self) -> &'static str {
         match self {
             Tab::Start => "Start Battle",
-            Tab::Replay => "Replay Battle",
+            Tab::Watch => "Watch Battle",
             Tab::Rumble => "Run Rumble",
             Tab::Options => "Options",
         }
     }
 
-    /// `--tab`: a tab by name.
+    /// `--tab`: a tab by name (`replay`, the Watch Battle tab's old name, still works).
     pub fn parse(name: &str) -> Option<Tab> {
         match name {
             "start" => Some(Tab::Start),
-            "replay" => Some(Tab::Replay),
+            "watch" | "replay" => Some(Tab::Watch),
             "options" => Some(Tab::Options),
             _ => None,
         }
@@ -225,6 +225,14 @@ pub fn page<T>(
 mod tests {
     use super::*;
     use egui::pos2;
+
+    #[test]
+    fn tabs_by_name_with_the_old_replay_name() {
+        assert_eq!(Tab::parse("watch"), Some(Tab::Watch));
+        assert_eq!(Tab::parse("replay"), Some(Tab::Watch));
+        assert_eq!(Tab::parse("start"), Some(Tab::Start));
+        assert_eq!(Tab::parse("rumble"), None);
+    }
 
     #[test]
     fn the_column_is_centred_with_adaptive_margins() {
