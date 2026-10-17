@@ -303,23 +303,41 @@ impl Backdrop {
     }
 }
 
-/// Classic's floor: one of its tiles per 64-pixel cell, from a fixed seed (as in the
-/// battlefield view), anchored at the top left.
+/// Classic's floor: one of its tiles per 64-pixel cell, anchored at the top left.
 fn floor(painter: &egui::Painter, sprites: &Sprites, rect: Rect) {
-    const CELL: f32 = 64.0;
-    let mut seed: u32 = 20010101;
-    let cols = (rect.width() / CELL).ceil().max(0.0) as usize;
-    let rows = (rect.height() / CELL).ceil().max(0.0) as usize;
     let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-    for row in 0..rows {
-        for col in 0..cols {
-            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
-            let tile = ((f64::from(seed) / 4294967296.0) * 4.0).round() as usize;
-            let min = rect.min + vec2(col as f32, row as f32) * CELL;
-            let cell = Rect::from_min_size(min, Vec2::splat(CELL));
-            painter.image(sprites.ground[tile].id(), cell, uv, Color32::WHITE);
-        }
+    for (cell, tile) in floor_cells(rect) {
+        painter.image(sprites.ground[tile].id(), cell, uv, Color32::WHITE);
     }
+}
+
+/// The floor's cells covering `rect`, and the tile of each: picked by the cell's column
+/// and row alone, so that a cell keeps its tile as the window is resized.
+fn floor_cells(rect: Rect) -> impl Iterator<Item = (Rect, usize)> {
+    const CELL: f32 = 64.0;
+    let cols = (rect.width() / CELL).ceil().max(0.0) as u32;
+    let rows = (rect.height() / CELL).ceil().max(0.0) as u32;
+    (0..rows).flat_map(move |row| {
+        (0..cols).map(move |col| {
+            let min = rect.min + vec2(col as f32, row as f32) * CELL;
+            (
+                Rect::from_min_size(min, Vec2::splat(CELL)),
+                tile_at(col, row),
+            )
+        })
+    })
+}
+
+/// One of the five ground tiles for a cell, from a hash of its position: the middle
+/// three as often as each other, the first and last half as often (as classic's
+/// rounding of a random number does).
+fn tile_at(col: u32, row: u32) -> usize {
+    // SplitMix64's finalizer, on the cell's position and a fixed seed.
+    let mut x = ((u64::from(row) << 32) | u64::from(col)) ^ 20010101;
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);
+    x ^= x >> 31;
+    ((x >> 11) as f64 / (1u64 << 53) as f64 * 4.0).round() as usize
 }
 
 /// The radar's beam: a narrow fan, fading out with distance.
@@ -351,6 +369,25 @@ mod tests {
         assert!(angle_to(o, pos2(100.0, 0.0)).abs() < 1e-6);
         assert!((angle_to(o, pos2(200.0, 100.0)) - PI / 2.0).abs() < 1e-6);
         assert!((ahead(PI / 2.0) - vec2(1.0, 0.0)).length() < 1e-6);
+    }
+
+    #[test]
+    fn floor_tiles_stay_put_when_resized() {
+        let tiles = |w: f32, h: f32| -> Vec<(Rect, usize)> {
+            floor_cells(Rect::from_min_size(pos2(5.0, 40.0), vec2(w, h))).collect()
+        };
+        let small = tiles(300.0, 200.0);
+        let large = tiles(1250.0, 900.0);
+        assert_eq!(small.len(), 5 * 4);
+        for cell in &small {
+            assert!(large.contains(cell), "{cell:?}");
+        }
+        // All five tiles show up.
+        let mut seen = [false; 5];
+        for (_, tile) in &large {
+            seen[*tile] = true;
+        }
+        assert_eq!(seen, [true; 5]);
     }
 
     #[test]
