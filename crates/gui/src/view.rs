@@ -610,8 +610,10 @@ fn rates(ui: &egui::Ui, painter: &egui::Painter, rect: Rect, snapshot: Option<&v
     });
     r.frames += 1;
     let turn = snapshot.map(|s| (s.round, s.turn));
-    if turn.is_some() && turn != r.last {
-        r.turns += 1;
+    if let Some(shown) = turn
+        && turn != r.last
+    {
+        r.turns += turns_since(r.last, shown);
         r.last = turn;
     }
     let elapsed = now - r.since;
@@ -634,6 +636,18 @@ fn rates(ui: &egui::Ui, painter: &egui::Painter, rect: Rect, snapshot: Option<&v
     // Keep measuring while nothing else repaints.
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(250));
+}
+
+/// The turns from `last` to `now` that a frame shows at once: a fast battle runs many
+/// turns a frame, and counting only the turn on screen would put the turn rate at the frame
+/// rate at most. Into another round (or back), it counts one.
+fn turns_since(last: Option<(i32, i64)>, now: (i32, i64)) -> u32 {
+    match last {
+        Some((round, turn)) if round == now.0 && now.1 > turn => {
+            u32::try_from(now.1 - turn).unwrap_or(u32::MAX)
+        }
+        _ => 1,
+    }
 }
 
 fn ground(painter: &egui::Painter, sprites: &Sprites, t: Transform, field: &Field) {
@@ -831,6 +845,15 @@ fn outline(t: Transform, shape: &v1::Shape) -> Vec<(Vec<Pos2>, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_turn_rate_counts_every_turn_a_frame_skips() {
+        assert_eq!(turns_since(None, (0, 5)), 1);
+        assert_eq!(turns_since(Some((0, 5)), (0, 6)), 1);
+        assert_eq!(turns_since(Some((0, 5)), (0, 22)), 17);
+        assert_eq!(turns_since(Some((0, 900)), (1, 3)), 1);
+        assert_eq!(turns_since(Some((0, 900)), (0, 10)), 1);
+    }
 
     #[test]
     fn fit_keeps_the_aspect_ratio() {
