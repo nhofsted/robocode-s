@@ -2012,7 +2012,7 @@ impl eframe::App for App {
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
         }
-        self.play_sounds();
+        self.play_sounds(ctx);
         self.file_dialog(ctx);
         self.save_error_window(ctx);
         // A file dropped on the window opens as a replay.
@@ -2028,7 +2028,7 @@ impl eframe::App for App {
 impl App {
     /// Plays the sound effects of the battle on screen, when sound is on and it runs at a
     /// watchable speed; the rest are dropped.
-    fn play_sounds(&mut self) {
+    fn play_sounds(&mut self, ctx: &egui::Context) {
         let live = self.live.as_mut().map(|live| {
             let tps = live.turns_per_second;
             (std::mem::take(&mut live.cues), tps)
@@ -2040,7 +2040,10 @@ impl App {
         if !self.settings.sound {
             return;
         }
-        self.sound.prepare();
+        if self.sound.prepare() {
+            // Look for the output thread's answer again soon.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let cues = match self.tab {
             Tab::Start if self.starting.is_none() => match live {
                 Some((cues, tps)) if (1..=sound::MAX_TPS).contains(&tps) => cues,

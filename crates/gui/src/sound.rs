@@ -8,11 +8,13 @@
 //! The effects are mixed here and played through one output stream: PulseAudio's own
 //! protocol on Linux (the `pulseaudio` crate, pure Rust: PulseAudio and PipeWire serve
 //! it, and WSLg too; no ALSA headers needed to build), cpal elsewhere (WASAPI, Core
-//! Audio). The device opens when the first sound plays; when it can't, the GUI stays
-//! silent and says why once.
+//! Audio). The device opens (on a thread of its own) when sound is first on; when it
+//! can't, the GUI stays silent and says why once.
 
 use robocode_s_protocol::v1;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// The turns per second above which battles are silent: faster, the effects only blur.
 pub const MAX_TPS: u32 = 100;
@@ -278,27 +280,47 @@ impl Mixer {
     }
 }
 
-/// The sound output: opened on first use, kept open.
+/// The sound output: opened on first use (on a thread of its own, so a sound server that
+/// is slow to answer never holds up the GUI), kept open.
 #[derive(Default)]
 pub struct Sound {
-    output: Option<Result<Output, String>>,
+    state: State,
+}
+
+#[derive(Default)]
+enum State {
+    /// Not tried yet.
+    #[default]
+    Closed,
+    /// The output thread is opening it, until the deadline.
+    Opening {
+        opened: Receiver<Opened>,
+        stop: Sender<()>,
+        deadline: Instant,
+    },
+    Open(Output),
+    /// Why there is no sound.
+    Failed(String),
 }
 
 /// An open output: the mixer it plays.
 struct Output {
     mixer: Arc<Mutex<Mixer>>,
     /// Dropped: the output thread closes the stream.
-    _stop: std::sync::mpsc::Sender<()>,
+    _stop: Sender<()>,
 }
+
+/// How long opening the output may take.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl Sound {
     /// Plays the cues at `volume` (0 to 1); at most each effect's voices of each, the
-    /// latest. Opens the output first.
+    /// latest. Opens the output first; until it is open, cues are dropped.
     pub fn play(&mut self, cues: &[Cue], volume: f32) {
         if cues.is_empty() {
             return;
         }
-        let Ok(output) = self.open() else {
+        let Some(output) = self.open() else {
             return;
         };
         let Ok(mut mixer) = output.mixer.lock() else {
@@ -314,45 +336,83 @@ impl Sound {
         }
     }
 
-    /// Opens the output, the first time; says on stderr what it opened, or why not.
-    fn open(&mut self) -> &Result<Output, String> {
-        self.output.get_or_insert_with(|| {
-            let opened = open();
-            match &opened {
-                Ok((_, name)) => eprintln!("robocode-s-gui: sound through {name}"),
-                Err(e) => eprintln!("robocode-s-gui: no sound: {e}"),
+    /// The output once it is open: starts opening it the first time, and takes the
+    /// output thread's answer without waiting for it. Says on stderr what it opened, or
+    /// why not.
+    fn open(&mut self) -> Option<&Output> {
+        if matches!(self.state, State::Closed) {
+            self.state = match start() {
+                Ok((opened, stop)) => State::Opening {
+                    opened,
+                    stop,
+                    deadline: Instant::now() + OPEN_TIMEOUT,
+                },
+                Err(e) => State::Failed(e),
+            };
+        }
+        if let State::Opening {
+            opened, deadline, ..
+        } = &self.state
+        {
+            let answer = match opened.try_recv() {
+                Ok(answer) => Some(answer),
+                Err(TryRecvError::Empty) if Instant::now() < *deadline => None,
+                Err(TryRecvError::Empty) => {
+                    Some(Err("the audio output didn't open in time".to_string()))
+                }
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("the audio output thread ended".to_string()))
+                }
+            };
+            if let Some(answer) = answer {
+                let State::Opening { stop, .. } = std::mem::take(&mut self.state) else {
+                    unreachable!()
+                };
+                self.state = match answer {
+                    Ok((mixer, name)) => {
+                        eprintln!("robocode-s-gui: sound through {name}");
+                        State::Open(Output { mixer, _stop: stop })
+                    }
+                    Err(e) => {
+                        eprintln!("robocode-s-gui: no sound: {e}");
+                        State::Failed(e)
+                    }
+                };
             }
-            opened.map(|(output, _)| output)
-        })
+        }
+        match &self.state {
+            State::Open(output) => Some(output),
+            _ => None,
+        }
     }
 
-    /// Opens the output now (sound was switched on), so a failure shows in the options.
-    pub fn prepare(&mut self) {
+    /// Starts opening the output now (sound was switched on), so a failure shows in the
+    /// options. True while it is still opening (to look again soon).
+    pub fn prepare(&mut self) -> bool {
         let _ = self.open();
+        matches!(self.state, State::Opening { .. })
     }
 
     /// Why there is no sound, once it was tried.
     pub fn error(&self) -> Option<&str> {
-        match &self.output {
-            Some(Err(e)) => Some(e),
+        match &self.state {
+            State::Failed(e) => Some(e),
             _ => None,
         }
     }
 }
 
-/// Opens the output on a thread of its own, which keeps it until the [`Output`] drops.
-/// Returns it and a description of the device.
-fn open() -> Result<(Output, String), String> {
-    let (stop, stopped) = std::sync::mpsc::channel::<()>();
-    let (ready, opened) = std::sync::mpsc::channel();
+/// Starts the output thread, which opens the output and keeps it until the stop sender
+/// drops. Returns where its answer comes (the mixer and a description of the device, or
+/// why not) and the stop sender.
+fn start() -> Result<(Receiver<Opened>, Sender<()>), String> {
+    let (stop, stopped) = mpsc::channel::<()>();
+    let (ready, opened) = mpsc::channel();
     std::thread::Builder::new()
         .name("sound".into())
         .spawn(move || backend::run(ready, stopped))
         .map_err(|e| e.to_string())?;
-    let (mixer, name) = opened
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|_| "the audio output didn't open in time".to_string())??;
-    Ok((Output { mixer, _stop: stop }, name))
+    Ok((opened, stop))
 }
 
 /// What the output thread reports: the mixer and the device's name, or why not.
@@ -650,6 +710,34 @@ mod tests {
         // explode.wav is 8-bit at 8 kHz, the others 16-bit.
         assert_eq!(decode_wav(Effect::RobotDeath.wav()).unwrap().rate, 8000);
         assert!(decode_wav(b"RIFF\0\0\0\0WAVE").is_err());
+    }
+
+    #[test]
+    fn an_output_that_does_not_answer_never_holds_the_gui_up() {
+        // An output thread that never answers, as a sound server that accepts and then
+        // says nothing.
+        let (_ready, opened) = mpsc::channel();
+        let (stop, _stopped) = mpsc::channel();
+        let mut sound = Sound {
+            state: State::Opening {
+                opened,
+                stop,
+                deadline: Instant::now() + Duration::from_millis(200),
+            },
+        };
+        let cue = Cue {
+            effect: Effect::Gunshot,
+            volume: 1.0,
+            pan: 0.0,
+        };
+        let begin = Instant::now();
+        sound.play(&[cue], 1.0);
+        assert!(sound.prepare(), "still opening");
+        assert!(begin.elapsed() < Duration::from_millis(100), "no waiting");
+        assert_eq!(sound.error(), None);
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(!sound.prepare());
+        assert!(sound.error().unwrap().contains("in time"));
     }
 
     #[test]
