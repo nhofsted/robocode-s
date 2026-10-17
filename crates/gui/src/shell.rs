@@ -188,9 +188,10 @@ fn column(area: Rect) -> Rect {
     )
 }
 
-/// A page: the backdrop fills the rest of the window, and `content` goes in a centred
-/// column that is as tall as it needs (scrolling when the window is too short). `state` is
-/// what both draw from (the app), handed to each in turn.
+/// A page: the backdrop fills the rest of the window and stays put, and `content` goes in a
+/// centred column that is as tall as it needs. When the window is too short the whole page
+/// scrolls over the backdrop, with the scroll bar at the window's edge. `state` is what
+/// both draw from (the app), handed to each in turn.
 pub fn page<T>(
     root: &mut egui::Ui,
     state: &mut T,
@@ -204,20 +205,31 @@ pub fn page<T>(
             let column = column(area);
             let (backdrop, sprites) = scenery(state);
             backdrop.show(ui, sprites, area, column);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
-                egui::Frame::NONE
-                    .fill(PANEL)
-                    .stroke(Stroke::new(1.0, LINE))
-                    .corner_radius(4.0)
-                    .inner_margin(PADDING)
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, true])
-                            .max_height(column.height() - 2.0 * f32::from(PADDING))
-                            .show(ui, |ui| content(state, ui));
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    let mut place = ui.available_rect_before_wrap();
+                    place.min.y += MARGIN;
+                    place.set_left(column.left());
+                    place.set_right(column.right());
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(place), |ui| {
+                        egui::Frame::NONE
+                            .fill(PANEL)
+                            .stroke(Stroke::new(1.0, LINE))
+                            .corner_radius(4.0)
+                            .inner_margin(PADDING)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                // What is too wide for the column stays inside its panel.
+                                let mut clip = ui.clip_rect();
+                                clip.set_left(ui.max_rect().left());
+                                clip.set_right(ui.max_rect().right());
+                                ui.set_clip_rect(clip);
+                                content(state, ui);
+                            });
                     });
-            });
+                    ui.add_space(MARGIN);
+                });
         });
 }
 

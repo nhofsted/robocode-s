@@ -578,7 +578,7 @@ impl App {
         const GAP: f32 = 24.0;
         let width = ((ui.available_width() - GAP) / 2.0).max(160.0);
         // The lists take what the window has left over the rest of the page, within limits.
-        let lists = (ui.ctx().content_rect().height() - 530.0).clamp(96.0, 300.0);
+        let lists = (ui.ctx().content_rect().height() - 485.0).clamp(96.0, 300.0);
         let column = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.allocate_ui_with_layout(
                 egui::vec2(width, 0.0),
@@ -648,7 +648,7 @@ impl App {
                     }
                 });
             });
-            ui.add_space(GAP);
+            ui.add_space(GAP - ui.spacing().item_spacing.x);
             column(ui, &mut |ui| {
                 let robots = &mut self.setup.robots;
                 let height = field_height;
@@ -895,84 +895,32 @@ impl App {
             let mut browse = None;
             let mut save_battle = false;
             let s = &mut app.setup;
-            egui::Grid::new("setup")
-                .num_columns(2)
-                .min_col_width(LABELS)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label("Game type");
-                    ui.horizontal(|ui| {
-                        let mut custom = true;
-                        for game in &GAME_TYPES {
-                            let on = game.matches(s);
-                            custom &= !on;
-                            if ui
-                                .selectable_label(on, game.name)
-                                .on_hover_text(game.hint)
-                                .clicked()
-                            {
-                                game.apply(s);
-                            }
-                        }
-                        ui.add_enabled(false, egui::Button::selectable(custom, "Custom"))
-                            .on_disabled_hover_text("Rules of your own: change any below");
+            // The options in two columns, lined up with the robot lists, when they fit.
+            const GAP: f32 = 24.0;
+            let width = (ui.available_width() - GAP) / 2.0;
+            if width >= 400.0 {
+                ui.horizontal_top(|ui| {
+                    let layout = egui::Layout::top_down(egui::Align::Min);
+                    ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+                        ui.set_width(width);
+                        options_grid(ui, "setup-game", |ui| {
+                            game_rows(ui, s, &mut browse, &mut save_battle);
+                        });
                     });
-                    ui.end_row();
-                    ui.label("Rounds");
-                    ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
-                    ui.end_row();
-                    ui.label("Battlefield size");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut s.width).range(400..=5000));
-                        ui.label("×");
-                        ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
+                    ui.add_space(GAP - ui.spacing().item_spacing.x);
+                    ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+                        ui.set_width(width);
+                        options_grid(ui, "setup-rules", |ui| {
+                            rules_and_output_rows(ui, s, &mut browse);
+                        });
                     });
-                    ui.end_row();
-                    rules_rows(ui, &mut s.rules);
-                    ui.label("Seed");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut s.seed)
-                            .hint_text("random")
-                            .desired_width(160.0),
-                    );
-                    ui.end_row();
-                    ui.label("Mode");
-                    ui.horizontal(|ui| {
-                        ui.radio_value(&mut s.classic, false, "Deterministic");
-                        ui.radio_value(&mut s.classic, true, "Classic timing");
-                    });
-                    ui.end_row();
-                    ui.label("Record to");
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut s.record)
-                                .hint_text("a file (optional)")
-                                .desired_width((ui.available_width() - 40.0).clamp(120.0, 360.0)),
-                        );
-                        if browse_button(ui, "Choose the file to record to") {
-                            browse = Some(Browse::Record);
-                        }
-                    });
-                    ui.end_row();
-                    ui.label("Debug paint");
-                    ui.checkbox(&mut s.paint, "On for every robot");
-                    ui.end_row();
-                    ui.label("Battle file");
-                    ui.horizontal(|ui| {
-                        if ui
-                            .button("Open…")
-                            .on_hover_text("The robots and rules from a classic .battle file")
-                            .clicked()
-                        {
-                            browse = Some(Browse::OpenBattle);
-                        }
-                        save_battle = ui
-                            .button("Save…")
-                            .on_hover_text("The robots and rules as a classic .battle file")
-                            .clicked();
-                    });
-                    ui.end_row();
                 });
+            } else {
+                options_grid(ui, "setup", |ui| {
+                    game_rows(ui, s, &mut browse, &mut save_battle);
+                    rules_and_output_rows(ui, s, &mut browse);
+                });
+            }
             if let Some(field) = browse {
                 app.browse(field);
             }
@@ -1919,6 +1867,102 @@ impl App {
 
 /// The width of the label column on the options page.
 const LABELS: f32 = 150.0;
+
+/// A two-column grid of options: the labels, then their fields.
+fn options_grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
+    egui::Grid::new(id)
+        .num_columns(2)
+        .min_col_width(LABELS)
+        .spacing([12.0, 8.0])
+        .show(ui, rows);
+}
+
+/// Start Battle's rows for the game: its type, rounds, battlefield, seed and mode, and the
+/// `.battle` file buttons (Open sets `browse`, Save sets `save_battle`).
+fn game_rows(
+    ui: &mut egui::Ui,
+    s: &mut Setup,
+    browse: &mut Option<Browse>,
+    save_battle: &mut bool,
+) {
+    ui.label("Game type");
+    ui.horizontal(|ui| {
+        let mut custom = true;
+        for game in &GAME_TYPES {
+            let on = game.matches(s);
+            custom &= !on;
+            if ui
+                .selectable_label(on, game.name)
+                .on_hover_text(game.hint)
+                .clicked()
+            {
+                game.apply(s);
+            }
+        }
+        ui.add_enabled(false, egui::Button::selectable(custom, "Custom"))
+            .on_disabled_hover_text("Rules of your own: change any below");
+    });
+    ui.end_row();
+    ui.label("Rounds");
+    ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
+    ui.end_row();
+    ui.label("Battlefield size");
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut s.width).range(400..=5000));
+        ui.label("×");
+        ui.add(egui::DragValue::new(&mut s.height).range(400..=5000));
+    });
+    ui.end_row();
+    ui.label("Seed");
+    ui.add(
+        egui::TextEdit::singleline(&mut s.seed)
+            .hint_text("random")
+            .desired_width(160.0),
+    );
+    ui.end_row();
+    ui.label("Mode");
+    ui.horizontal(|ui| {
+        ui.radio_value(&mut s.classic, false, "Deterministic");
+        ui.radio_value(&mut s.classic, true, "Classic timing");
+    });
+    ui.end_row();
+    ui.label("Battle file");
+    ui.horizontal(|ui| {
+        if ui
+            .button("Open…")
+            .on_hover_text("The robots and rules from a classic .battle file")
+            .clicked()
+        {
+            *browse = Some(Browse::OpenBattle);
+        }
+        *save_battle = ui
+            .button("Save…")
+            .on_hover_text("The robots and rules as a classic .battle file")
+            .clicked();
+    });
+    ui.end_row();
+}
+
+/// Start Battle's rows for the rules (see [`rules_rows`]), debug paint and the recording
+/// (its folder button sets `browse`).
+fn rules_and_output_rows(ui: &mut egui::Ui, s: &mut Setup, browse: &mut Option<Browse>) {
+    rules_rows(ui, &mut s.rules);
+    ui.label("Debug paint");
+    ui.checkbox(&mut s.paint, "On for every robot");
+    ui.end_row();
+    ui.label("Record to");
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut s.record)
+                .hint_text("a file (optional)")
+                .desired_width((ui.available_width() - 40.0).clamp(120.0, 360.0)),
+        );
+        if browse_button(ui, "Choose the file to record to") {
+            *browse = Some(Browse::Record);
+        }
+    });
+    ui.end_row();
+}
 
 /// A section heading on a page: a title over a line, with space above unless it comes
 /// first.
