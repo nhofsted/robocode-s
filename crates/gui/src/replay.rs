@@ -2,7 +2,8 @@
 
 //! Playing a recording back (design §11): the engine re-runs the recorded inputs.
 //! Opening a recording runs it once and keeps a keyframe (a clone of the replay) every
-//! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many.
+//! [`KEYFRAME`] turns, so any turn can be shown by replaying at most that many. That run
+//! takes a while for a long battle, so it happens on a thread of its own ([`Opening`]).
 //!
 //! It also plays the website's lossy viewer tracks (see [`crate::track`]): one round, every
 //! turn decoded up front, without scores, CPU times, debug paint or console output.
@@ -19,7 +20,10 @@ use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
 use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Instant;
 
 const KEYFRAME: usize = 200;
@@ -87,9 +91,66 @@ fn next_snapshot(replay: &mut Replay) -> Option<(v1::TurnSnapshot, bool)> {
     })
 }
 
+/// A recording being opened on a thread of its own: its progress, and the view once it is
+/// there. Dropping it cancels the opening.
+pub struct Opening {
+    pub path: PathBuf,
+    /// How far the replay got, in millionths.
+    progress: Arc<AtomicU32>,
+    cancel: Arc<AtomicBool>,
+    done: Receiver<Result<ReplayView, String>>,
+}
+
+impl Opening {
+    pub fn start(ctx: &egui::Context, path: PathBuf) -> Self {
+        let progress = Arc::new(AtomicU32::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, done) = mpsc::channel();
+        {
+            let (path, progress, cancel) = (path.clone(), progress.clone(), cancel.clone());
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let report = |fraction: f64| {
+                    progress.store((fraction * 1e6) as u32, Ordering::Relaxed);
+                };
+                let view = ReplayView::open(&path, &report, &cancel);
+                let _ = tx.send(view);
+                ctx.request_repaint();
+            });
+        }
+        Self {
+            path,
+            progress,
+            cancel,
+            done,
+        }
+    }
+
+    /// How far it got, from 0 to 1.
+    pub fn progress(&self) -> f32 {
+        self.progress.load(Ordering::Relaxed) as f32 / 1e6
+    }
+
+    /// The view or why it couldn't be opened, once that is known.
+    pub fn poll(&self) -> Option<Result<ReplayView, String>> {
+        match self.done.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err("the replay stopped".into())),
+        }
+    }
+}
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
 impl ReplayView {
     /// Opens a full recording or a viewer track, told apart by their first bytes.
-    pub fn open(path: &Path) -> Result<Self, String> {
+    /// `progress` hears how far the replay got (0 to 1); a `cancel` stops it.
+    pub fn open(path: &Path, progress: &dyn Fn(f64), cancel: &AtomicBool) -> Result<Self, String> {
         let mut head = [0u8; 2];
         let read = std::fs::File::open(path)
             .and_then(|mut f| std::io::Read::read(&mut f, &mut head))
@@ -104,9 +165,14 @@ impl ReplayView {
         let mut properties = Vec::new();
         let mut history = History::new(recording.header.robots.len());
         let (mut turns, mut unverified, mut round) = (0usize, 0usize, -1);
+        let entries = recording.entries.len().max(1);
         loop {
             if turns % KEYFRAME == 0 {
                 keyframes.push(replay.clone());
+                if cancel.load(Ordering::Relaxed) {
+                    return Err("cancelled".into());
+                }
+                progress(replay.position() as f64 / entries as f64);
             }
             let Some((snapshot, verified)) = next_snapshot(&mut replay) else {
                 break;
@@ -533,4 +599,45 @@ impl ReplayView {
 fn title(path: &Path) -> String {
     path.file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use robocode_s_server::recording::{FORMAT, Recorder};
+
+    /// A recording of a battle that never started: just its header.
+    fn header_only(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("{name}-{}.rsr", std::process::id()));
+        let header = v1::RecordingHeader {
+            format: FORMAT,
+            ..Default::default()
+        };
+        Recorder::create(&path, header).unwrap().finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn a_cancelled_opening_stops() {
+        let path = header_only("robocodes-cancelled-replay");
+        let opened = ReplayView::open(&path, &|_| {}, &AtomicBool::new(true));
+        assert_eq!(opened.err().as_deref(), Some("cancelled"));
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn opening_runs_in_the_background_and_reports_errors() {
+        let ctx = egui::Context::default();
+        let missing = std::env::temp_dir().join("robocodes-no-such-replay.rsr");
+        let opening = Opening::start(&ctx, missing);
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let result = loop {
+            if let Some(result) = opening.poll() {
+                break result;
+            }
+            assert!(Instant::now() < deadline, "the opening ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(result.is_err());
+    }
 }
