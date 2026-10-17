@@ -34,6 +34,10 @@ pub struct Settings {
     pub width: i32,
     pub height: i32,
     pub rules: Rules,
+    /// The last battle watched (Watch a battle): its address. Its token is not saved.
+    pub watch: String,
+    /// The energy and CPU graphs show the whole battle rather than the round.
+    pub graphs_battle: bool,
 }
 
 /// The battle rules besides the rounds and the battlefield size (classic's `BattleRules`).
@@ -79,6 +83,8 @@ impl Default for Settings {
             width: 800,
             height: 600,
             rules: Rules::default(),
+            watch: "localhost:7654".into(),
+            graphs_battle: false,
         }
     }
 }
@@ -129,7 +135,12 @@ impl Settings {
             std::fs::create_dir_all(dir).map_err(fail)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, text + "\n").map_err(fail)
+        // Written aside and then moved over the file, so that a crash while writing never
+        // leaves half a file (which would load as the defaults).
+        let mut aside = path.clone().into_os_string();
+        aside.push(".tmp");
+        std::fs::write(&aside, text + "\n").map_err(fail)?;
+        std::fs::rename(&aside, &path).map_err(fail)
     }
 
     /// Where the robots are: per robot folder its `.jar` files, then the folder itself if
@@ -278,6 +289,8 @@ mod tests {
                 hide_enemy_names: true,
                 sentry_border: 150,
             },
+            watch: "server:7654".into(),
+            graphs_battle: true,
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);

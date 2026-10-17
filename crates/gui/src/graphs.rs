@@ -91,6 +91,21 @@ impl History {
     }
 }
 
+/// Where the graphs' Round/Battle choice is kept: one for battles and replays alike.
+fn whole_battle_id() -> egui::Id {
+    egui::Id::new("graphs-battle")
+}
+
+/// The graphs show the whole battle rather than the round (the option's choice).
+pub fn whole_battle(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(whole_battle_id()))
+        .unwrap_or(false)
+}
+
+pub fn set_whole_battle(ctx: &egui::Context, battle: bool) {
+    ctx.data_mut(|d| d.insert_temp(whole_battle_id(), battle));
+}
+
 /// The graphs, `height` tall, below the robot list: energy and CPU for the first `shown`
 /// turns of `history`. Without `cpu` (a viewer track: one round, no CPU times), energy only.
 pub fn graphs(
@@ -113,8 +128,7 @@ pub fn graphs(
             visible(Color32::from_rgb(r, g, b))
         })
         .collect();
-    let id = ui.id().with("graphs-battle");
-    let mut battle = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let mut battle = whole_battle(ui.ctx());
     // Each graph: a heading line and the plot.
     let s = ui.spacing().item_spacing.y;
     let plot = if cpu {
@@ -143,7 +157,7 @@ pub fn graphs(
             }
         }
     });
-    ui.data_mut(|d| d.insert_temp(id, battle));
+    set_whole_battle(ui.ctx(), battle);
     let energy = Plot {
         history,
         values: &history.energy,

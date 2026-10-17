@@ -59,7 +59,7 @@ impl Setup {
             paint: false,
             turns_per_second: 30,
             rules: settings.rules,
-            watch: "localhost:7654".into(),
+            watch: settings.watch.clone(),
             watch_token: String::new(),
         }
     }
@@ -246,6 +246,9 @@ pub struct App {
     folder_contents: Vec<Option<Contents>>,
     new_folder: String,
     settings_error: Option<String>,
+    /// The options changed and aren't saved yet: since when (the UI's time). They are
+    /// saved once they have been still for a moment, not on every frame of a drag.
+    settings_unsaved: Option<f64>,
     /// The battles started, so each one's results window opens centred.
     battles: u64,
     /// The file dialog behind the fields' folder buttons (drawn by egui: WSLg has no
@@ -344,6 +347,7 @@ impl App {
             env_jars,
             new_folder: String::new(),
             settings_error: None,
+            settings_unsaved: None,
             battles: 0,
             files: FileDialog::new()
                 .id("file-dialog")
@@ -352,6 +356,7 @@ impl App {
             saving: None,
             save_error: None,
         };
+        crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
         app.scan_folders();
         app.list_robots(&cc.egui_ctx);
         if let Some(path) = launch.replay {
@@ -666,6 +671,10 @@ impl App {
         if address.is_empty() {
             self.error = Some("Give the address of the battle to watch.".into());
             return;
+        }
+        if self.settings.watch != address {
+            self.settings.watch = address.clone();
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
         }
         let mut live = Live::watch(ctx, address.clone(), self.setup.watch_token.clone());
         live.camera = self.camera;
@@ -1433,7 +1442,7 @@ impl App {
     /// Saves the options and applies them: new robot folders are scanned, and new
     /// defaults go into the battle setup.
     fn settings_changed(&mut self, ctx: &egui::Context, before: &Settings) {
-        self.settings_error = self.settings.save().err();
+        self.settings_unsaved = Some(ctx.input(|i| i.time));
         let (s, setup) = (&self.settings, &mut self.setup);
         if s.classic != before.classic {
             setup.classic = s.classic;
@@ -2021,11 +2030,40 @@ impl eframe::App for App {
             self.open_path = path.display().to_string();
             self.open_replay(path);
         }
+        self.save_settings(ctx);
         self.screenshot_step(ctx);
+    }
+
+    fn on_exit(&mut self) {
+        if self.settings_unsaved.is_some() {
+            let _ = self.settings.save();
+        }
     }
 }
 
 impl App {
+    /// Saves the options once they have been still for a moment and nothing is being
+    /// dragged; takes the graphs' Round/Battle choice into them first.
+    fn save_settings(&mut self, ctx: &egui::Context) {
+        let battle = crate::graphs::whole_battle(ctx);
+        if battle != self.settings.graphs_battle {
+            self.settings.graphs_battle = battle;
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
+        let Some(since) = self.settings_unsaved else {
+            return;
+        };
+        const STILL: f64 = 0.5;
+        let (now, down) = ctx.input(|i| (i.time, i.pointer.any_down()));
+        if now - since >= STILL && !down {
+            self.settings_error = self.settings.save().err();
+            self.settings_unsaved = None;
+        } else {
+            let wait = (STILL - (now - since)).max(0.05);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+
     /// Plays the sound effects of the battle on screen, when sound is on and it runs at a
     /// watchable speed; the rest are dropped.
     fn play_sounds(&mut self, ctx: &egui::Context) {
