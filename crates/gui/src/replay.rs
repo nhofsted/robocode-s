@@ -321,7 +321,7 @@ impl ReplayView {
                 &self.paint_visible,
                 |i| {
                     let from = cleared.get(i).copied().flatten();
-                    let text: String = output
+                    let mut text: String = output
                         .iter()
                         .take_while(|(turn, _, _)| *turn <= position)
                         .filter(|(turn, robot, _)| {
@@ -329,6 +329,8 @@ impl ReplayView {
                         })
                         .map(|(_, _, t)| t.as_str())
                         .collect();
+                    // As much as a live battle shows.
+                    screen::keep_output_tail(&mut text);
                     Cow::Owned(text)
                 },
                 |i| {

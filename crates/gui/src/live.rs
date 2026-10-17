@@ -20,8 +20,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-/// How much console output is kept per robot.
-const OUTPUT_LIMIT: usize = 64 * 1024;
 /// How many sound effects wait to be played at most (when nothing plays them).
 const CUES_LIMIT: usize = 256;
 
@@ -190,13 +188,7 @@ impl Live {
                     for (out, r) in self.output.iter_mut().zip(&s.robots) {
                         if !r.output.is_empty() {
                             out.push_str(&r.output);
-                            if out.len() > OUTPUT_LIMIT {
-                                let cut = out.len() - OUTPUT_LIMIT;
-                                let cut = (cut..out.len())
-                                    .find(|&i| out.is_char_boundary(i))
-                                    .unwrap_or(out.len());
-                                out.drain(..cut);
-                            }
+                            screen::keep_output_tail(out);
                         }
                     }
                     for (properties, r) in self.properties.iter_mut().zip(&s.robots) {
