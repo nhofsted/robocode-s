@@ -87,7 +87,8 @@ impl Watcher {
                     let message = v1::ClientMessage {
                         msg: Some(client_message::Msg::ObserverControl(control)),
                     };
-                    if write_message(&mut writer, &message).is_err() {
+                    if let Err(e) = write_message(&mut writer, &message) {
+                        crate::log_perf(format_args!("window can't send controls anymore: {e}"));
                         break;
                     }
                 }
