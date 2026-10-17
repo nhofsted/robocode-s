@@ -86,11 +86,12 @@ public final class RobotRandomness {
      * changes what time-reading robots do.
      */
     /**
-     * Virtual time per counted instruction, in picoseconds. Calibrated on 2026-10-13 against
-     * classic 1.11.1 on OpenJDK 21 (x86-64, WSL2): robots doing over 100 000 counted
-     * instructions per turn take 820-1010 ps each (#15, ADR 0014).
+     * Virtual time per counted instruction, in picoseconds. Calibrated on 2026-10-17 against
+     * classic 1.11.1 on OpenJDK 21 (x86-64, WSL2) with only the inexact math intrinsics
+     * disabled: robots doing over 1 000 000 counted instructions per turn take 45-209 ps
+     * each, median 159 (#15, ADR 0014).
      */
-    public static final long PICOS_PER_INSTRUCTION = 900;
+    public static final long PICOS_PER_INSTRUCTION = 160;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
     /** Value of the virtual {@code nanoTime()} before the robot did anything. */
