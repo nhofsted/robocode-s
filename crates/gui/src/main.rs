@@ -43,7 +43,8 @@ The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame).
+system's frame). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
+resizes handed to the system to stderr.
 
   --watch HOST:PORT  watch the battle on that server as an observer (one run with
                      `robocode-s battle --observe PORT`), as Start Battle's Watch
@@ -240,6 +241,7 @@ fn main() -> ExitCode {
                 kill_at,
                 input_at,
                 camera,
+                min_size: min_size.into(),
             };
             Ok(Box::new(App::new(
                 cc,

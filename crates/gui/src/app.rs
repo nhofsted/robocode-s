@@ -244,6 +244,8 @@ pub struct App {
     picked_selected: Option<usize>,
     /// Draw the window frame ourselves (see [`crate::window`]).
     own_frame: bool,
+    /// The smallest the window gets, in points.
+    min_size: egui::Vec2,
     /// The options, saved on every change.
     settings: Settings,
     /// Robot jars and class folders from `ROBOCODES_ROBOT_JARS`, besides the robot folders.
@@ -310,6 +312,8 @@ pub struct Launch {
     pub input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
     /// How battles and replays first show the battlefield (`--zoom`, for screenshots).
     pub camera: view::Camera,
+    /// The smallest the window gets, in points (see [`crate::window::keep_min_size`]).
+    pub min_size: egui::Vec2,
 }
 
 impl App {
@@ -351,6 +355,7 @@ impl App {
             picked: None,
             picked_selected: None,
             own_frame,
+            min_size: launch.min_size,
             folder_contents: Vec::new(),
             settings,
             env_jars,
@@ -2059,6 +2064,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        crate::window::keep_min_size(ctx, self.min_size);
         let tab = self.tab;
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
         if self.tab == Tab::Start && tab != Tab::Start {
