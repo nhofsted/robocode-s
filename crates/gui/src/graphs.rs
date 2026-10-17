@@ -186,8 +186,9 @@ pub fn graphs(
                 "CPU time each robot used per turn (averaged over a few turns), against \
                  its turn budget (dashed)"
             } else {
-                "CPU time each robot used per turn (averaged over a few turns); \
-                 deterministic mode has no time budget"
+                "Work each robot did per turn (averaged over a few turns), counted and \
+                 converted to time as on the reference machine; deterministic mode has no \
+                 time budget"
             });
     });
     let cpu = Plot {

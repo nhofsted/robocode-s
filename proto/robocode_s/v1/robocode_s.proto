@@ -220,7 +220,8 @@ message Execute {
   string output = 3;
   // Debug painting, only while the server has enabled it (Tick.paint_enabled).
   repeated PaintOp paint = 4;
-  // CPU time the robot used for this turn, measured by the runner or library (ns).
+  // CPU time the robot used for this turn, measured by the runner or library (ns). In
+  // deterministic mode: its counted work as virtual time (ADR 0014).
   uint64 cpu_nanos = 5;
   // The robot's code crashed: classic drains its energy to 0 for good (drainEnergy).
   bool drain_energy = 6;
