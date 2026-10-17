@@ -109,7 +109,7 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         home: std::path::absolute(&launch.home)?,
         ..launch.clone()
     };
-    let mut child = Command::new(&host.java)
+    let mut child = no_window(&mut Command::new(&host.java))
         .args(jvm_args(&host, &launch))
         .env(TOKEN_ENV, &launch.token)
         .current_dir(&launch.home)
@@ -164,6 +164,18 @@ impl Drop for RobotProcess {
             let _ = self.child.wait();
         }
     }
+}
+
+/// Starts `command` without a console window of its own: on Windows a GUI program that
+/// starts `java.exe` would otherwise open one for every robot host.
+pub(crate) fn no_window(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// A relative executable path with a directory part becomes absolute; a bare name like

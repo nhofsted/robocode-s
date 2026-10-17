@@ -160,7 +160,7 @@ fn run_describe(
     // Java runs in `home`, so a relative path to it must become absolute first.
     let java = crate::absolute_if_path(&host.java).map_err(|e| e.to_string())?;
     let mut command = Command::new(&java);
-    command
+    crate::no_window(&mut command)
         .args(MODULE_OPENINGS)
         .arg("-cp")
         .arg(lib.join("*"))
