@@ -28,8 +28,8 @@ fn entry(name: &str, token: &str) -> RobotEntry {
     }
 }
 
-/// A robot that answers every turn with no commands.
-fn idle_robot(address: String, token: &'static str) -> thread::JoinHandle<()> {
+/// A robot that answers every turn with no commands; the last turn it got.
+fn idle_robot(address: String, token: &'static str) -> thread::JoinHandle<i64> {
     thread::spawn(move || {
         let mut s = TcpStream::connect(&address).unwrap();
         let hello = v1::ClientMessage {
@@ -41,12 +41,14 @@ fn idle_robot(address: String, token: &'static str) -> thread::JoinHandle<()> {
             })),
         };
         write_message(&mut s, &hello).unwrap();
+        let mut last = 0;
         while let Ok(Some(m)) = read_message::<v1::ServerMessage>(&mut s) {
             let turn = match m.msg {
                 Some(server_message::Msg::RoundStart(_)) => 0,
                 Some(server_message::Msg::Tick(t)) => t.turn,
                 _ => continue,
             };
+            last = last.max(turn);
             let execute = v1::ClientMessage {
                 msg: Some(client_message::Msg::Execute(v1::Execute {
                     turn,
@@ -56,6 +58,7 @@ fn idle_robot(address: String, token: &'static str) -> thread::JoinHandle<()> {
             };
             let _ = write_message(&mut s, &execute);
         }
+        last
     })
 }
 
@@ -396,6 +399,125 @@ fn a_faster_rate_applies_without_waiting_out_the_slow_turn() {
     );
     assert!(outcome.unwrap().aborted);
     server.join().unwrap().unwrap();
+    for r in robots {
+        r.join().unwrap();
+    }
+}
+
+/// The battle's observer and robots may be silent for longer than a connection has to
+/// say hello (10 s): the GUI on another tab sends no controls, robots in a paused battle
+/// no `Execute`. On Windows their readers kept the hello's timeout and ended, after which
+/// speed, pause and stop went nowhere while the turns still came.
+#[test]
+fn controls_apply_after_the_observer_and_robots_were_silent_for_long() {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 1,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            None,
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    let control = |c| v1::ObserverControl { control: Some(c) };
+    use v1::observer_control::Control;
+    let handle = watcher.handle().unwrap();
+    let mut waiting = None;
+    let outcome = watcher.run(Some(rx), |msg| {
+        let server_message::Msg::TurnSnapshot(s) = msg else {
+            return;
+        };
+        match s.turn {
+            2 if waiting.is_none() => {
+                let _ = tx.send(control(Control::Pause(true)));
+                // Nothing from the observer, nor from the paused robots, for 12 s; then
+                // on, as fast as it goes.
+                let (tx, handle) = (tx.clone(), handle.try_clone().unwrap());
+                waiting = Some(thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(12));
+                    let _ = tx.send(control(Control::TurnsPerSecond(0)));
+                    let _ = tx.send(control(Control::Pause(false)));
+                    // Unheard: give up.
+                    thread::sleep(Duration::from_secs(20));
+                    let _ = handle.shutdown(std::net::Shutdown::Both);
+                }));
+            }
+            50 => {
+                let _ = tx.send(control(Control::Abort(true)));
+            }
+            _ => {}
+        }
+    });
+    let outcome = outcome.expect("the battle went on and stopped as told");
+    assert!(outcome.aborted);
+    assert_eq!(outcome.rounds, 1);
+    server.join().unwrap().unwrap();
+    for r in robots {
+        let last = r.join().unwrap();
+        assert!(last >= 50, "a robot got turns up to {last} only");
+    }
+    drop(waiting);
+}
+
+/// The battle's own observer (the GUI's) losing its connection stops the battle: nobody
+/// would see or control it anymore.
+#[test]
+fn the_battle_stops_when_its_own_observer_is_gone() {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 3,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            None,
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    tx.send(v1::ObserverControl {
+        control: Some(v1::observer_control::Control::TurnsPerSecond(50)),
+    })
+    .unwrap();
+    let handle = watcher.handle().unwrap();
+    let watched = watcher.run(Some(rx), |msg| {
+        if let server_message::Msg::TurnSnapshot(s) = msg
+            && s.turn == 5
+        {
+            let _ = handle.shutdown(std::net::Shutdown::Both);
+        }
+    });
+    assert!(watched.is_err(), "the connection broke");
+    let outcome = server.join().unwrap().unwrap();
+    assert!(outcome.aborted);
+    assert_eq!(outcome.rounds, 1);
     for r in robots {
         r.join().unwrap();
     }

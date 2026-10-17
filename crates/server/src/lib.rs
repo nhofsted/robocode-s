@@ -262,16 +262,14 @@ fn observer_accept_loop(
 /// Reads an observer's `Hello` on an [`Observers`] listener: only observers, with the
 /// token.
 fn observer_handshake(
-    stream: TcpStream,
+    mut stream: TcpStream,
     token: &str,
     tx: &Sender<Incoming>,
     connected: &Arc<AtomicUsize>,
 ) -> io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut reader = stream.try_clone()?;
-    let hello = match read_message::<v1::ClientMessage>(&mut reader)? {
+    let hello = match read_hello(&mut stream)? {
         Some(v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(h)),
         }) => h,
@@ -292,8 +290,8 @@ fn observer_handshake(
         connected.fetch_sub(1, Ordering::SeqCst);
         return refuse(stream, "too many observers");
     }
-    stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(REMOTE_OBSERVER_WRITE_TIMEOUT))?;
+    let reader = reader_of(&stream)?;
     let (tx2, connected) = (tx.clone(), connected.clone());
     spawn_observer_reader(reader, tx.clone(), move || {
         connected.fetch_sub(1, Ordering::SeqCst);
@@ -341,7 +339,7 @@ fn accept_loop(
 /// Reads the `Hello` and hands the connection to the battle loop. Robots and observers
 /// alike show their token: the listener is on loopback, but any local process reaches it.
 fn handshake(
-    stream: TcpStream,
+    mut stream: TcpStream,
     tokens: &[String],
     observer_token: &str,
     taken: &mut [bool],
@@ -349,9 +347,7 @@ fn handshake(
 ) -> io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut reader = stream.try_clone()?;
-    let hello = match read_message::<v1::ClientMessage>(&mut reader)? {
+    let hello = match read_hello(&mut stream)? {
         Some(v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(h)),
         }) => h,
@@ -360,7 +356,7 @@ fn handshake(
     if hello.version.map(|v| v.major) != Some(PROTOCOL_VERSION.major) {
         return refuse(stream, "unsupported protocol version");
     }
-    stream.set_read_timeout(None)?;
+    let reader = reader_of(&stream)?;
     match v1::Role::try_from(hello.role) {
         Ok(v1::Role::Robot) => {
             // Every token is compared, in constant time each.
@@ -396,6 +392,32 @@ fn handshake(
     Ok(())
 }
 
+/// How long a new connection has to say `Hello`.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Reads a new connection's first message, the `Hello`, within [`HELLO_TIMEOUT`]; reads
+/// wait as long as it takes afterwards.
+fn read_hello(stream: &mut TcpStream) -> io::Result<Option<v1::ClientMessage>> {
+    stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
+    let hello = read_message::<v1::ClientMessage>(stream);
+    stream.set_read_timeout(None)?;
+    hello
+}
+
+/// A handle on `stream` for its reader thread, which waits as long as it takes for the
+/// next message.
+///
+/// On Windows a clone is a socket handle of its own (`WSADuplicateSocket`) with timeouts
+/// of its own: a reader cloned during the handshake kept its 10 s timeout, so it ended
+/// after 10 s without a message (a GUI on another tab sends no controls, robots in a
+/// paused battle no `Execute`). The battle went on, still sending snapshots, deaf to
+/// that observer's speed, pause and stop.
+fn reader_of(stream: &TcpStream) -> io::Result<TcpStream> {
+    let reader = stream.try_clone()?;
+    reader.set_read_timeout(None)?;
+    Ok(reader)
+}
+
 fn refuse(mut stream: TcpStream, message: &str) -> io::Result<()> {
     write_message(
         &mut stream,
@@ -416,7 +438,11 @@ fn spawn_robot_reader(robot: usize, mut reader: TcpStream, tx: Sender<Incoming>)
                     }
                 }
                 Ok(Some(_)) => {}
-                Ok(None) | Err(_) => {
+                ended => {
+                    log_perf(format_args!(
+                        "server drops robot {robot} because {}",
+                        why_ended(&ended)
+                    ));
                     let _ = tx.send(Incoming::RobotDisconnected { robot });
                     return;
                 }
@@ -426,31 +452,65 @@ fn spawn_robot_reader(robot: usize, mut reader: TcpStream, tx: Sender<Incoming>)
 }
 
 /// Forwards an observer's controls; `left` runs when its connection ends.
+///
+/// An observer whose controls can't be read anymore is cut off altogether (its
+/// connection shut down): one that still got the turns would look alive while its
+/// speed, pause and stop went nowhere.
 fn spawn_observer_reader(
     mut reader: TcpStream,
     tx: Sender<Incoming>,
     left: impl FnOnce() + Send + 'static,
 ) {
     thread::spawn(move || {
-        while let Ok(Some(message)) = read_message::<v1::ClientMessage>(&mut reader) {
-            if let Some(client_message::Msg::ObserverControl(c)) = message.msg
-                && tx.send(Incoming::Control(c)).is_err()
-            {
-                break;
+        let ended = loop {
+            match read_message::<v1::ClientMessage>(&mut reader) {
+                Ok(Some(message)) => {
+                    if let Some(client_message::Msg::ObserverControl(c)) = message.msg
+                        && tx.send(Incoming::Control(c)).is_err()
+                    {
+                        return;
+                    }
+                }
+                ended => break ended,
             }
-        }
+        };
+        log_perf(format_args!(
+            "server drops observer because {}",
+            why_ended(&ended)
+        ));
+        let _ = reader.shutdown(Shutdown::Both);
         left();
     });
+}
+
+/// Why a reader thread's connection ended, for the perf log.
+fn why_ended<T>(ended: &io::Result<Option<T>>) -> String {
+    match ended {
+        Ok(Some(_)) => "it sent a message it shouldn't".into(),
+        Ok(None) => "its connection was closed".into(),
+        Err(e) => format!("reading from it failed: {e}"),
+    }
+}
+
+/// Whether `ROBOCODES_PERF_LOG` is on (as the GUI's).
+fn perf_log_on() -> bool {
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LOG.get_or_init(|| {
+        std::env::var("ROBOCODES_PERF_LOG").is_ok_and(|v| !v.is_empty() && v != "0")
+    })
+}
+
+/// `ROBOCODES_PERF_LOG`: logs `what` to stderr, as `[perf] what`.
+pub fn log_perf(what: std::fmt::Arguments) {
+    if perf_log_on() {
+        eprintln!("[perf] {what}");
+    }
 }
 
 /// `ROBOCODES_PERF_LOG` (as the GUI's): logs the observers' controls (but their mouse
 /// and keyboard events) to stderr, `what` saying where.
 pub fn log_control(what: &str, control: &v1::ObserverControl) {
-    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let log = *LOG.get_or_init(|| {
-        std::env::var("ROBOCODES_PERF_LOG").is_ok_and(|v| !v.is_empty() && v != "0")
-    });
-    if log
+    if perf_log_on()
         && !matches!(
             control.control,
             Some(v1::observer_control::Control::Input(_))
@@ -798,9 +858,16 @@ impl<'a> BattleLoop<'a> {
             // An observer that paused the battle and left doesn't hold it up for the others
             // (such as the command line's own). Once the last one from elsewhere left, the
             // battle runs at full speed again, as it did before them.
+            //
+            // The battle's own observer (the GUI's or the command line's, which started
+            // it) leaving means its connection broke: nobody would see or control the
+            // battle anymore, so it stops.
             Incoming::ObserverLeft { remote } => {
                 self.paused = false;
                 self.steps = 0;
+                if !remote {
+                    self.abort = true;
+                }
                 if remote {
                     self.remote_observers = self.remote_observers.saturating_sub(1);
                     if self.remote_observers == 0 {
@@ -1149,7 +1216,10 @@ impl<'a> BattleLoop<'a> {
 
     fn send(&mut self, i: usize, msg: server_message::Msg) {
         if let Some(stream) = self.links[i].stream.as_mut() {
-            if write_message(stream, &server(msg)).is_err() {
+            if let Err(e) = write_message(stream, &server(msg)) {
+                log_perf(format_args!(
+                    "server drops robot {i} because writing to it failed: {e}"
+                ));
                 self.links[i].stream = None;
                 self.links[i].awaiting = None;
             }
@@ -1160,12 +1230,40 @@ impl<'a> BattleLoop<'a> {
         let message = server(msg);
         // A failed (or timed out) write leaves the stream mid-message: shut it down, which
         // also ends its reader thread and so tells the battle the observer left.
-        self.observers.retain_mut(|o| {
-            let ok = write_message(o, &message).is_ok();
-            if !ok {
-                let _ = o.shutdown(Shutdown::Both);
-            }
-            ok
-        });
+        self.observers
+            .retain_mut(|o| match write_message(o, &message) {
+                Ok(()) => true,
+                Err(e) => {
+                    log_perf(format_args!(
+                        "server drops observer because writing to it failed: {e}"
+                    ));
+                    let _ = o.shutdown(Shutdown::Both);
+                    false
+                }
+            });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn a_reader_waits_as_long_as_it_takes_after_the_hello() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let mut stream = listener.accept().unwrap().0;
+        let hello = v1::ClientMessage {
+            msg: Some(client_message::Msg::Hello(v1::Hello::default())),
+        };
+        write_message(&mut client, &hello).unwrap();
+        assert!(read_hello(&mut stream).unwrap().is_some());
+        assert_eq!(stream.read_timeout().unwrap(), None);
+        // On Windows a clone has timeouts of its own: one taken with the hello's still
+        // set kept it, and its reader ended after 10 s without a message.
+        stream.set_read_timeout(Some(HELLO_TIMEOUT)).unwrap();
+        let reader = reader_of(&stream).unwrap();
+        assert_eq!(reader.read_timeout().unwrap(), None);
     }
 }
