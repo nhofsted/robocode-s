@@ -16,6 +16,13 @@
 //! the window has no decorations); maximized, it covers the work area, not the taskbar.
 //! Moves and resizes run the system's own loops (`WM_NCLBUTTONDOWN`), which hold the
 //! window at its minimum size.
+//!
+//! winit gets that shadow by keeping the window's top pixel row out of the client area,
+//! and Windows 11 draws its 1px window border around the window, over that row too: a
+//! grey line above the top bar. [`hide_system_border`] turns the border off and colours
+//! the caption (without that the row stays a dark grey); the row then shows what is
+//! behind the window, like the shadow around it, so the frame is 0px, and the shadow and
+//! the rounded corners stay. Windows 10 draws no such border, and has neither colour.
 
 use eframe::egui::{self, Color32, CursorIcon, Id, PointerButton, Sense, Stroke, vec2};
 use egui::viewport::{ResizeDirection, ViewportCommand};
@@ -39,6 +46,50 @@ pub fn wanted() -> bool {
                 && std::path::Path::new("/mnt/wslg").is_dir();
             cfg!(windows) || wslg
         }
+    }
+}
+
+/// Hides the system's border of our own frame on Windows 11 (see the module's docs):
+/// none around the window, and the caption in `top`, the title bar's colour.
+#[cfg(windows)]
+pub fn hide_system_border(cc: &eframe::CreationContext, top: Color32) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_COLOR_NONE,
+    };
+    let Ok(handle) = cc.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    // A COLORREF: 0x00BBGGRR.
+    let caption = u32::from(top.r()) | (u32::from(top.g()) << 8) | (u32::from(top.b()) << 16);
+    dwm::set_color(hwnd, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE);
+    dwm::set_color(hwnd, DWMWA_CAPTION_COLOR, caption);
+}
+
+#[cfg(not(windows))]
+pub fn hide_system_border(_cc: &eframe::CreationContext, _top: Color32) {}
+
+#[cfg(windows)]
+mod dwm {
+    #![allow(unsafe_code)] // one Win32 call, with a window handle and a plain value
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
+
+    /// Sets a colour attribute; before Windows 11 that fails, harmlessly.
+    pub fn set_color(hwnd: HWND, attribute: DWMWINDOWATTRIBUTE, color: u32) {
+        // SAFETY: `hwnd` is our live window; the value is a u32 of the size given.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute as u32,
+                (&raw const color).cast(),
+                size_of::<u32>() as u32,
+            )
+        };
     }
 }
 

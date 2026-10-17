@@ -412,7 +412,9 @@ impl App {
         // theme (white text fields, and the title on the dark top bar near invisible),
         // and the app's colours (the top bar, the floor) are made for the dark one.
         cc.egui_ctx.set_theme(egui::Theme::Dark);
-        if !own_frame {
+        if own_frame {
+            crate::window::hide_system_border(cc, shell::BAR);
+        } else {
             // The system's title bar too, where it has a dark one (Windows, GTK).
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));

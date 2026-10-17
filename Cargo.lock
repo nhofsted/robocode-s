@@ -2655,6 +2655,7 @@ dependencies = [
  "egui-file-dialog",
  "image",
  "pulseaudio",
+ "raw-window-handle",
  "robocode-s-engine",
  "robocode-s-protocol",
  "robocode-s-replay",
