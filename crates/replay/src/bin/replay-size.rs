@@ -5,7 +5,7 @@
 //! cargo run --release -p robocode-s-replay --features json --bin replay-size -- recordings/*.jsonl.gz
 //!
 //! With `--write DIR` first, it also writes each round's track to `DIR/<name>-<round>.track`
-//! (one round per file, as the rumble stores them; the desktop GUI's Replay Battle opens them).
+//! (one round per file, as the rumble stores them; the desktop GUI's Watch Battle tab opens them).
 
 use robocode_s_replay::{LABELS, POS_SCALE, decode, encode_with_costs, recording};
 use std::path::Path;

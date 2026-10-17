@@ -33,7 +33,7 @@ usage: robocode-s-gui [recording]
        robocode-s-gui --watch HOST:PORT [--token TOKEN] [--tps N]
 
 Without arguments: the battle setup. With a recording (from --record or
-\"Record to\", or a website viewer track): its replay.
+\"Record to\", or a website viewer track): its replay, in the Watch Battle tab.
 Robots come from the robot folders set in the options (the gear), saved in
 $XDG_CONFIG_HOME/robocode-s/gui.json (~/.config/... by default; another file
 with ROBOCODES_GUI_CONFIG): their jars, and the folders themselves when they hold
@@ -43,14 +43,15 @@ The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame).
+system's frame). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
+resizes handed to the system to stderr.
 
   --watch HOST:PORT  watch the battle on that server as an observer (one run with
-                     `robocode-s battle --observe PORT`), as Start Battle's Watch
+                     `robocode-s battle --observe PORT`), in the Watch Battle tab
   --token TOKEN      with --watch: the observer token ($ROBOCODES_OBSERVE_TOKEN)
   --zoom Z[,X,Y]     battles and replays start zoomed in Z times (1 to 16), centred
                      on battlefield point X,Y (y up; default the field's centre)
-  --tab NAME         open a tab at start: start, replay or options
+  --tab NAME         open a tab at start: start, watch (or replay) or options
   --browse FIELD     open the file dialog of a field at start: record, replay,
                      folder (the options' robot folder) or battle (a .battle file
                      to open), on its tab
@@ -170,7 +171,7 @@ fn main() -> ExitCode {
             "--tab" => {
                 let name = value();
                 let Some(t) = Tab::parse(&name) else {
-                    eprint!("--tab wants start, replay or options, not {name:?}\n\n{USAGE}");
+                    eprint!("--tab wants start, watch or options, not {name:?}\n\n{USAGE}");
                     return ExitCode::from(2);
                 };
                 tab = Some(t);
@@ -179,7 +180,7 @@ fn main() -> ExitCode {
                 let name = value();
                 let (field, t) = match name.as_str() {
                     "record" => (Browse::Record, Tab::Start),
-                    "replay" => (Browse::Replay, Tab::Replay),
+                    "replay" => (Browse::Replay, Tab::Watch),
                     "folder" => (Browse::Folder, Tab::Options),
                     "battle" => (Browse::OpenBattle, Tab::Start),
                     _ => {
@@ -240,6 +241,7 @@ fn main() -> ExitCode {
                 kill_at,
                 input_at,
                 camera,
+                min_size: min_size.into(),
             };
             Ok(Box::new(App::new(
                 cc,

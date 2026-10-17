@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Our own window frame (title bar, buttons, resize edges) where the system's crashes.
+//! Our own window frame (title bar, buttons, resize edges) where the system's crashes,
+//! and the window's minimum size (see [`keep_min_size`]).
 //!
 //! On WSLg the compositor (Weston 9 with its pixman renderer) draws no decorations, so
 //! winit draws its own frame from a `wl_shm` pool that it grows as the window gets wider.
@@ -125,7 +126,76 @@ pub fn release_after_grab(ctx: &egui::Context, raw_input: &mut egui::RawInput) {
     });
 }
 
-/// Logs the hand-overs and pointer buttons to stderr when `ROBOCODES_FRAME_LOG` is set.
+/// How long the window's size has to stay put before [`keep_min_size`] grows it: long
+/// enough not to fight a resize in progress.
+const SETTLE: f64 = 0.4;
+
+/// What [`keep_min_size`] remembers between frames.
+#[derive(Clone, Copy, Default)]
+struct SizeWatch {
+    size: egui::Vec2,
+    /// Since when (the UI's time) the window has been `size`.
+    since: f64,
+    /// The too small size it last grew the window from, so as not to ask again and again
+    /// when the window doesn't grow; cleared once the window is big enough.
+    asked: Option<egui::Vec2>,
+}
+
+/// Keeps the window at least `min` points big where the window system doesn't. The
+/// minimum goes to the compositor too (`xdg_toplevel.set_min_size` on Wayland), but
+/// sizes the app asks for aren't held to it, nor are the user's resizes by every
+/// compositor. Once a too small window has kept its size for a moment (so not in the
+/// middle of a resize), this asks for the minimum. A maximized, fullscreen or minimized
+/// window is left alone. Call it every frame.
+pub fn keep_min_size(ctx: &egui::Context, min: egui::Vec2) {
+    let id = Id::new("window-min-size");
+    let (size, now, pinned) = ctx.input(|i| {
+        let v = i.viewport();
+        let pinned = [v.maximized, v.fullscreen, v.minimized].contains(&Some(true));
+        (i.content_rect().size(), i.time, pinned)
+    });
+    let mut watch = ctx
+        .data_mut(|d| d.get_temp::<SizeWatch>(id))
+        .unwrap_or_default();
+    if watch.size != size {
+        log(&format!(
+            "window {:.0}x{:.0} points (minimum {:.0}x{:.0}){}",
+            size.x,
+            size.y,
+            min.x,
+            min.y,
+            if pinned {
+                ", maximized, fullscreen or minimized"
+            } else {
+                ""
+            }
+        ));
+        watch.size = size;
+        watch.since = now;
+    }
+    // Half a point of slack for the rounding to whole pixels.
+    let small = size.x < min.x - 0.5 || size.y < min.y - 0.5;
+    if !small {
+        watch.asked = None;
+    } else if !pinned && watch.asked != Some(size) {
+        let still = now - watch.since;
+        if still >= SETTLE {
+            let grown = size.max(min);
+            log(&format!(
+                "window below the minimum: asking for {:.0}x{:.0}",
+                grown.x, grown.y
+            ));
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(grown));
+            watch.asked = Some(size);
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(SETTLE - still));
+        }
+    }
+    ctx.data_mut(|d| d.insert_temp(id, watch));
+}
+
+/// Logs the hand-overs, pointer buttons and window sizes to stderr when
+/// `ROBOCODES_FRAME_LOG` is set.
 fn log(message: &str) {
     if std::env::var_os("ROBOCODES_FRAME_LOG").is_some() {
         eprintln!("[frame] {message}");

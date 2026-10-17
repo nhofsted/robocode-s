@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! The application: the tabs (battle setup and a live battle, replays, options) in the
-//! shell (see [`crate::shell`]).
+//! The application: the tabs (battle setup and a live battle, watched battles and
+//! replays, options) in the shell (see [`crate::shell`]).
 
 use crate::backdrop::Backdrop;
 use crate::icons;
@@ -40,7 +40,8 @@ pub struct Setup {
     pub paint: bool,
     pub turns_per_second: u32,
     pub rules: Rules,
-    /// Watch a battle: the server's address (`host:port`) and observer token.
+    /// A battle to watch (Watch Battle, Remote Server): the server's address (`host:port`)
+    /// and observer token.
     pub watch: String,
     pub watch_token: String,
 }
@@ -176,6 +177,82 @@ struct Starting {
     watching: Option<String>,
 }
 
+/// A battle with what comes before it: the loading screen while it starts, then the
+/// battle screen.
+#[derive(Default)]
+struct Battle {
+    live: Option<Box<Live>>,
+    starting: Option<Starting>,
+}
+
+impl Battle {
+    /// Moves a starting battle along: once it is described the battle starts, and with its
+    /// first snapshot (or its end) the loading screen gives way to it. True when the
+    /// battle screen is new.
+    fn poll_starting(&mut self, ctx: &egui::Context, camera: view::Camera) -> bool {
+        let Some(starting) = &mut self.starting else {
+            return false;
+        };
+        let mut started = false;
+        if let Some(rx) = &starting.prepared
+            && let Ok(result) = rx.try_recv()
+        {
+            starting.prepared = None;
+            match result {
+                Ok((host, battle)) => {
+                    starting.contestants = battle
+                        .robots
+                        .iter()
+                        .map(|r| r.statics.name.clone())
+                        .collect();
+                    let mut live = Live::start(ctx, host, battle);
+                    live.camera = camera;
+                    live.seed = starting.seed;
+                    live.set_speed(starting.turns_per_second);
+                    if starting.paint {
+                        for i in 0..live.robots.len() {
+                            live.set_paint(i, true);
+                        }
+                    }
+                    self.live = Some(Box::new(live));
+                    started = true;
+                }
+                Err(e) => starting.error = Some(e),
+            }
+        }
+        if let Some(live) = &self.live {
+            // A watched battle's contestants and settings, once it is connected.
+            if starting.watching.is_some()
+                && starting.contestants.is_empty()
+                && !live.robots.is_empty()
+            {
+                starting.contestants = live.robots.iter().map(|r| r.name.clone()).collect();
+                starting.seed = live.seed;
+                starting.rounds = live.rounds;
+                starting.size = (live.width as i32, live.height as i32);
+                starting.classic = !live.deterministic;
+            }
+            match &live.outcome {
+                // It failed before its first turn: say so on the loading screen.
+                Some(Err(e)) if live.latest.is_none() => {
+                    starting.error = Some(e.clone());
+                    self.live = None;
+                }
+                _ if live.latest.is_some() || live.outcome.is_some() => self.starting = None,
+                _ => {}
+            }
+        }
+        started
+    }
+
+    /// Closes the battle: one that runs here stops (see `Live`'s drop), a watched one
+    /// goes on without us; robots still being described are left to finish, and dropped.
+    fn close(&mut self) {
+        self.starting = None;
+        self.live = None;
+    }
+}
+
 /// Saves a screenshot to a file once the condition holds, then quits (for checks).
 pub struct Screenshot {
     pub path: PathBuf,
@@ -208,19 +285,23 @@ pub struct App {
     env: Environment,
     setup: Setup,
     tab: Tab,
-    /// The battle in the Start Battle tab; the setup when there is none.
-    live: Option<Box<Live>>,
-    /// The battle being started: the Start Battle tab shows the loading screen.
-    starting: Option<Starting>,
+    /// The battle run here, in the Start Battle tab; the setup when there is none.
+    local: Battle,
     /// The setup of the last battle started, for Restart.
     launched: Option<Setup>,
-    /// The recording in the Replay Battle tab; a file field when there is none.
+    /// A battle on a server, watched in the Watch Battle tab. It and a replay take turns
+    /// there: the one opened last replaces the other.
+    remote: Battle,
+    /// The recording in the Watch Battle tab; with no battle watched either, the page to
+    /// open one.
     replay: Option<Box<ReplayView>>,
-    /// A recording being opened: the Replay Battle tab shows its progress.
+    /// A recording being opened: the Watch Battle tab shows its progress.
     opening: Option<Opening>,
     selected: usize,
     error: Option<String>,
+    /// Why the last recording couldn't be opened, or the last battle not watched.
     replay_error: Option<String>,
+    remote_error: Option<String>,
     screenshot: Option<Screenshot>,
     /// `--kill-at`, until done.
     kill_at: Option<(i64, usize)>,
@@ -244,6 +325,8 @@ pub struct App {
     picked_selected: Option<usize>,
     /// Draw the window frame ourselves (see [`crate::window`]).
     own_frame: bool,
+    /// The smallest the window gets, in points.
+    min_size: egui::Vec2,
     /// The options, saved on every change.
     settings: Settings,
     /// Robot jars and class folders from `ROBOCODES_ROBOT_JARS`, besides the robot folders.
@@ -271,7 +354,7 @@ pub struct App {
 pub enum Browse {
     /// Start Battle's "Record to": a file to save.
     Record,
-    /// Replay Battle's recording: a file to open.
+    /// Watch Battle's recording: a file to open.
     Replay,
     /// A robot folder for the options.
     Folder,
@@ -310,6 +393,8 @@ pub struct Launch {
     pub input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
     /// How battles and replays first show the battlefield (`--zoom`, for screenshots).
     pub camera: view::Camera,
+    /// The smallest the window gets, in points (see [`crate::window::keep_min_size`]).
+    pub min_size: egui::Vec2,
 }
 
 impl App {
@@ -329,13 +414,14 @@ impl App {
             env,
             setup: launch.setup,
             tab: Tab::Start,
-            live: None,
-            starting: None,
+            local: Battle::default(),
             launched: None,
+            remote: Battle::default(),
             replay: None,
             selected: 0,
             error: None,
             replay_error: None,
+            remote_error: None,
             opening: None,
             screenshot,
             kill_at: launch.kill_at,
@@ -351,6 +437,7 @@ impl App {
             picked: None,
             picked_selected: None,
             own_frame,
+            min_size: launch.min_size,
             folder_contents: Vec::new(),
             settings,
             env_jars,
@@ -368,10 +455,12 @@ impl App {
         crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
         app.scan_folders();
         app.list_robots(&cc.egui_ctx);
+        // A battle here and one watched (or a replay) have tabs of their own: both start.
+        if launch.start {
+            app.start(&cc.egui_ctx);
+        }
         if let Some(path) = launch.replay {
             app.open_replay(&cc.egui_ctx, path);
-        } else if launch.start {
-            app.start(&cc.egui_ctx);
         } else if launch.watch {
             app.watch(&cc.egui_ctx);
         }
@@ -665,7 +754,7 @@ impl App {
             let _ = tx.send(prepare(&env, &robots, config, 512));
             repaint.request_repaint();
         });
-        self.starting = Some(Starting {
+        self.local.starting = Some(Starting {
             contestants: s.robots.clone(),
             prepared: Some(rx),
             seed,
@@ -679,17 +768,19 @@ impl App {
         });
         self.launched = Some(s);
         self.error = None;
-        self.live = None;
+        self.local.live = None;
         self.battles += 1;
         self.tab = Tab::Start;
     }
 
-    /// Watches the battle at the setup's address as an observer: the loading screen until
-    /// it is connected and its first turn is there.
+    /// Watches the battle at the setup's address as an observer, in the Watch Battle tab:
+    /// the loading screen until it is connected and its first turn is there. It replaces
+    /// a replay there, as a replay opened later replaces it.
     fn watch(&mut self, ctx: &egui::Context) {
         let address = self.setup.watch.trim().to_string();
+        self.tab = Tab::Watch;
         if address.is_empty() {
-            self.error = Some("Give the address of the battle to watch.".into());
+            self.remote_error = Some("Give the address of the battle to watch.".into());
             return;
         }
         if self.settings.watch != address {
@@ -699,7 +790,7 @@ impl App {
         let mut live = Live::watch(ctx, address.clone(), self.setup.watch_token.clone());
         live.camera = self.camera;
         live.set_speed(self.setup.turns_per_second);
-        self.starting = Some(Starting {
+        self.remote.starting = Some(Starting {
             contestants: Vec::new(),
             prepared: None,
             seed: 0,
@@ -712,72 +803,29 @@ impl App {
             watching: Some(address),
         });
         self.selected = 0;
-        self.live = Some(Box::new(live));
-        self.error = None;
+        self.remote.live = Some(Box::new(live));
+        self.remote_error = None;
+        self.replay = None;
+        self.opening = None;
+        self.replay_error = None;
         self.battles += 1;
-        self.tab = Tab::Start;
     }
 
-    /// Moves a starting battle along: once it is described the battle starts, and with its
-    /// first snapshot (or its end) the loading screen gives way to it.
+    /// Moves the starting battles along (see [`Battle::poll_starting`]).
     fn poll_starting(&mut self, ctx: &egui::Context) {
-        let Some(starting) = &mut self.starting else {
-            return;
-        };
-        if let Some(rx) = &starting.prepared
-            && let Ok(result) = rx.try_recv()
-        {
-            starting.prepared = None;
-            match result {
-                Ok((host, battle)) => {
-                    starting.contestants = battle
-                        .robots
-                        .iter()
-                        .map(|r| r.statics.name.clone())
-                        .collect();
-                    let mut live = Live::start(ctx, host, battle);
-                    live.camera = self.camera;
-                    live.seed = starting.seed;
-                    live.set_speed(starting.turns_per_second);
-                    if starting.paint {
-                        for i in 0..live.robots.len() {
-                            live.set_paint(i, true);
-                        }
-                    }
-                    self.selected = 0;
-                    self.live = Some(Box::new(live));
-                }
-                Err(e) => starting.error = Some(e),
-            }
-        }
-        if let Some(live) = &self.live {
-            // A watched battle's contestants and settings, once it is connected.
-            if starting.watching.is_some()
-                && starting.contestants.is_empty()
-                && !live.robots.is_empty()
-            {
-                starting.contestants = live.robots.iter().map(|r| r.name.clone()).collect();
-                starting.seed = live.seed;
-                starting.rounds = live.rounds;
-                starting.size = (live.width as i32, live.height as i32);
-                starting.classic = !live.deterministic;
-            }
-            match &live.outcome {
-                // It failed before its first turn: say so on the loading screen.
-                Some(Err(e)) if live.latest.is_none() => {
-                    starting.error = Some(e.clone());
-                    self.live = None;
-                }
-                _ if live.latest.is_some() || live.outcome.is_some() => self.starting = None,
-                _ => {}
+        for battle in [&mut self.local, &mut self.remote] {
+            if battle.poll_starting(ctx, self.camera) {
+                self.selected = 0;
             }
         }
     }
 
-    /// Opens a recording in the Replay Battle tab, on a thread of its own (it is replayed
-    /// once, which takes a while for a long battle); one opening before cancels.
+    /// Opens a recording in the Watch Battle tab, on a thread of its own (it is replayed
+    /// once, which takes a while for a long battle); one opening before cancels. Once it
+    /// is open it replaces the replay or watched battle before; until then Cancel goes
+    /// back to that.
     fn open_replay(&mut self, ctx: &egui::Context, path: PathBuf) {
-        self.tab = Tab::Replay;
+        self.tab = Tab::Watch;
         self.replay_error = None;
         self.opening = Some(Opening::start(ctx, path));
     }
@@ -792,6 +840,9 @@ impl App {
             .take()
             .map(|o| o.path.clone())
             .unwrap_or_default();
+        // The Watch Battle page shows the new replay, or the error: not what was there.
+        self.remote.close();
+        self.remote_error = None;
         match result {
             Ok(mut view) => {
                 self.selected = 0;
@@ -799,7 +850,6 @@ impl App {
                 self.replay = Some(Box::new(view));
             }
             Err(e) => {
-                // The Replay Battle page shows the error, not an earlier replay.
                 self.replay = None;
                 self.replay_error = Some(format!("{}: {e}", path.display()));
             }
@@ -945,51 +995,18 @@ impl App {
                     });
                 });
             });
-
-            section(ui, "Watch a battle");
-            ui.label(
-                RichText::new(
-                    "A battle on a server, here or on another machine, run with \
-                     robocode-s battle --observe PORT.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Address");
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.setup.watch)
-                        .hint_text("host:port")
-                        .desired_width(180.0),
-                );
-                ui.add_space(8.0);
-                ui.label("Token");
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.setup.watch_token)
-                        .password(true)
-                        .hint_text("none")
-                        .desired_width(120.0),
-                )
-                .on_hover_text("The battle's --observe-token, if it has one");
-                ui.add_space(8.0);
-                if ui
-                    .add(egui::Button::new("Watch").min_size(egui::vec2(90.0, 0.0)))
-                    .on_hover_text("Connect to the battle as an observer")
-                    .clicked()
-                {
-                    app.watch(ctx);
-                }
-            });
         });
     }
 
-    /// The Start Battle tab while a battle starts: the contestants, and what is going on
-    /// with a way to cancel (or what went wrong, with the way back to the setup).
-    fn loading_page(&mut self, root: &mut egui::Ui) {
+    /// The Start Battle tab while a battle starts, or the Watch Battle tab while a watched
+    /// one connects (`remote`): the contestants, and what is going on with a way to cancel
+    /// (or what went wrong, with the way back to the tab's page).
+    fn loading_page(&mut self, root: &mut egui::Ui, remote: bool) {
         let time = root.input(|i| i.time) as f32;
         let mut back = false;
         self.page(root, |app, ui| {
-            let Some(starting) = &app.starting else {
+            let battle = if remote { &app.remote } else { &app.local };
+            let Some(starting) = &battle.starting else {
                 return;
             };
             let watching = starting.watching.as_deref();
@@ -1064,7 +1081,11 @@ impl App {
                                 });
                             });
                         ui.add_space(16.0);
-                        let button = egui::Button::new(RichText::new("Back to the setup").strong())
+                        let back_to = match watching {
+                            Some(_) => "Back",
+                            None => "Back to the setup",
+                        };
+                        let button = egui::Button::new(RichText::new(back_to).strong())
                             .min_size(egui::vec2(170.0, 32.0));
                         if ui.add(button).clicked() {
                             back = true;
@@ -1075,10 +1096,11 @@ impl App {
             });
         });
         if back {
-            // A battle that is already starting stops (see `Live`'s drop); robots still
-            // being described are left to finish, and dropped.
-            self.starting = None;
-            self.live = None;
+            if remote {
+                self.remote.close();
+            } else {
+                self.local.close();
+            }
         }
     }
 
@@ -1229,8 +1251,8 @@ impl App {
         }
     }
 
-    /// The Replay Battle tab while a recording opens: its progress, and Cancel, which
-    /// goes back to the replay before, if any.
+    /// The Watch Battle tab while a recording opens: its progress, and Cancel, which goes
+    /// back to the replay or watched battle before, if any.
     fn opening_page(&mut self, root: &mut egui::Ui) {
         let mut cancel = false;
         self.page(root, |app, ui| {
@@ -1273,35 +1295,113 @@ impl App {
         }
     }
 
-    /// The Replay Battle tab without a recording: which file to open.
-    fn replay_page(&mut self, root: &mut egui::Ui) {
+    /// The Watch Battle tab with neither a replay nor a watched battle: a recording to
+    /// open, or a battle on a server to watch.
+    fn watch_page(&mut self, root: &mut egui::Ui) {
+        let ctx = &root.ctx().clone();
         self.page(root, |app, ui| {
-            ui.heading("Replay Battle");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label("Recording");
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.open_path)
-                        .hint_text("from --record, \"Record to\" or the website")
-                        .desired_width((ui.available_width() - 90.0).clamp(120.0, 480.0)),
-                );
-                if browse_button(ui, "Choose a recording") {
-                    app.browse(Browse::Replay);
-                }
-                if ui.button("Open").clicked() && !app.open_path.trim().is_empty() {
-                    let path = PathBuf::from(app.open_path.trim());
-                    app.open_replay(ui.ctx(), path);
-                }
-            });
-            ui.label(
-                RichText::new(
-                    "A full recording replays exactly, with debug paint and output. A website \
-                     replay (one round) shows what its viewer draws. Or drop a file here.",
-                )
-                .weak(),
-            );
-            if let Some(e) = &app.replay_error {
-                ui.colored_label(Color32::LIGHT_RED, e);
+            section(ui, "From file");
+            let mut open = false;
+            egui::Grid::new("from-file")
+                .num_columns(2)
+                .min_col_width(LABELS)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Recording");
+                    ui.horizontal(|ui| {
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut app.open_path)
+                                .hint_text("from --record, \"Record to\" or the website")
+                                .desired_width((ui.available_width() - 90.0).clamp(120.0, 420.0)),
+                        );
+                        if browse_button(ui, "Choose a recording") {
+                            app.browse(Browse::Replay);
+                        }
+                        let enter =
+                            field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let ready = !app.open_path.trim().is_empty();
+                        let button = egui::Button::new("Open").min_size(egui::vec2(60.0, 0.0));
+                        open = (ui.add_enabled(ready, button).clicked() || enter) && ready;
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "A full recording (from --record or Start Battle's \"Record \
+                                 to\") replays exactly, with debug paint and output. A website \
+                                 replay (one round) shows what its viewer draws. Or drop a \
+                                 file on the window.",
+                            )
+                            .weak(),
+                        )
+                        .wrap(),
+                    );
+                    ui.end_row();
+                    if let Some(e) = &app.replay_error {
+                        ui.label("");
+                        ui.add(egui::Label::new(RichText::new(e).color(Color32::LIGHT_RED)).wrap());
+                        ui.end_row();
+                    }
+                });
+            if open {
+                let path = PathBuf::from(app.open_path.trim());
+                app.open_replay(ctx, path);
+            }
+
+            section(ui, "Remote server");
+            let mut watch = false;
+            egui::Grid::new("remote-server")
+                .num_columns(2)
+                .min_col_width(LABELS)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Address");
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut app.setup.watch)
+                            .hint_text("host:port")
+                            .desired_width(220.0),
+                    );
+                    watch |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.end_row();
+                    ui.label("Token");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.setup.watch_token)
+                            .password(true)
+                            .hint_text("none")
+                            .desired_width(220.0),
+                    )
+                    .on_hover_text("The battle's --observe-token, if it has one");
+                    ui.end_row();
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        let button = egui::Button::new("Watch").min_size(egui::vec2(90.0, 0.0));
+                        watch |= ui
+                            .add(button)
+                            .on_hover_text("Connect to the battle as an observer")
+                            .clicked();
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "A battle run with robocode-s battle --observe PORT, on this \
+                                 machine or another. Leaving it leaves the battle running.",
+                            )
+                            .weak(),
+                        )
+                        .wrap(),
+                    );
+                    ui.end_row();
+                    if let Some(e) = &app.remote_error {
+                        ui.label("");
+                        ui.colored_label(Color32::LIGHT_RED, e);
+                        ui.end_row();
+                    }
+                });
+            if watch {
+                app.watch(ctx);
             }
         });
     }
@@ -1553,14 +1653,19 @@ impl App {
         }
     }
 
-    /// The Start Battle tab with a battle (see [`screen`]): the battlefield, the controls
-    /// below it, the robots' output in tabs, and the robots on the right; at its end the
-    /// results.
-    fn live_ui(&mut self, root: &mut egui::Ui) -> Next {
+    /// The Start Battle tab with a battle, or the Watch Battle tab with a watched one
+    /// (`remote`; see [`screen`]): the battlefield, the controls below it, the robots'
+    /// output in tabs, and the robots on the right; at its end the results.
+    fn live_ui(&mut self, root: &mut egui::Ui, remote: bool) -> Next {
         let ctx = &root.ctx().clone();
         let mut next = Next::Stay;
         let style = self.style();
-        let Some(live) = &mut self.live else {
+        let battle = if remote {
+            &mut self.remote
+        } else {
+            &mut self.local
+        };
+        let Some(live) = &mut battle.live else {
             return Next::Setup;
         };
         let latest = live.latest.as_ref();
@@ -1650,7 +1755,8 @@ impl App {
                             ui.add_space(8.0);
                         }
                         if ended {
-                            let button = egui::Button::new(RichText::new("New battle").strong())
+                            let back = if watching { "Done" } else { "New battle" };
+                            let button = egui::Button::new(RichText::new(back).strong())
                                 .min_size(egui::vec2(0.0, 26.0));
                             if ui.add(button).clicked() {
                                 next = Next::Setup;
@@ -1721,7 +1827,7 @@ impl App {
                     if live.watching.is_some() {
                         if ui
                             .add(egui::Button::new(RichText::new("Done").strong()))
-                            .on_hover_text("Back to the setup.")
+                            .on_hover_text("Back to Watch Battle.")
                             .clicked()
                         {
                             next = Next::Setup;
@@ -2059,6 +2165,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        crate::window::keep_min_size(ctx, self.min_size);
         let tab = self.tab;
         shell::top_bar(root, self.own_frame, &mut self.sprites, &mut self.tab);
         if self.tab == Tab::Start && tab != Tab::Start {
@@ -2068,8 +2175,11 @@ impl eframe::App for App {
         self.poll_listing(ctx);
         self.poll_starting(ctx);
         let style = self.style();
-        // A battle keeps running in its tab while another one is open.
-        if let Some(live) = &mut self.live {
+        // A battle keeps running in its tab while another tab is open.
+        if let Some(live) = &mut self.remote.live {
+            live.poll();
+        }
+        if let Some(live) = &mut self.local.live {
             live.poll();
             if let (Some((turn, robot)), Some(s)) = (self.kill_at, &live.latest)
                 && robot < live.robots.len()
@@ -2096,15 +2206,15 @@ impl eframe::App for App {
         }
         self.poll_opening();
         match self.tab {
-            Tab::Start if self.starting.is_some() => self.loading_page(root),
-            Tab::Start if self.live.is_some() => match self.live_ui(root) {
+            Tab::Start if self.local.starting.is_some() => self.loading_page(root, false),
+            Tab::Start if self.local.live.is_some() => match self.live_ui(root, false) {
                 Next::Stay => {}
                 Next::Setup => {
-                    self.live = None;
+                    self.local.live = None;
                     self.refresh(ctx);
                 }
                 Next::Restart { new_seed } => {
-                    let seed = match &self.live {
+                    let seed = match &self.local.live {
                         Some(live) if !new_seed => live.seed,
                         _ => random_seed(),
                     };
@@ -2121,8 +2231,14 @@ impl eframe::App for App {
                 }
             },
             Tab::Start => self.start_page(root),
-            Tab::Replay if self.opening.is_some() => self.opening_page(root),
-            Tab::Replay => match &mut self.replay {
+            Tab::Watch if self.opening.is_some() => self.opening_page(root),
+            Tab::Watch if self.remote.starting.is_some() => self.loading_page(root, true),
+            // A watched battle offers no restart: it goes back to the Watch Battle page.
+            Tab::Watch if self.remote.live.is_some() => match self.live_ui(root, true) {
+                Next::Stay => {}
+                Next::Setup | Next::Restart { .. } => self.remote.close(),
+            },
+            Tab::Watch => match &mut self.replay {
                 Some(replay) => {
                     let mut save = None;
                     let sprites = &mut self.sprites;
@@ -2133,7 +2249,7 @@ impl eframe::App for App {
                         self.save(save);
                     }
                 }
-                None => self.replay_page(root),
+                None => self.watch_page(root),
             },
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
@@ -2184,10 +2300,13 @@ impl App {
     /// Plays the sound effects of the battle on screen, when sound is on and it runs at a
     /// watchable speed; the rest are dropped.
     fn play_sounds(&mut self, ctx: &egui::Context) {
-        let live = self.live.as_mut().map(|live| {
-            let tps = live.turns_per_second;
-            (std::mem::take(&mut live.cues), tps)
-        });
+        let take = |battle: &mut Battle| {
+            battle.live.as_mut().map(|live| {
+                let tps = live.turns_per_second;
+                (std::mem::take(&mut live.cues), tps)
+            })
+        };
+        let (local, remote) = (take(&mut self.local), take(&mut self.remote));
         let replay = self
             .replay
             .as_mut()
@@ -2199,12 +2318,22 @@ impl App {
             // Look for the output thread's answer again soon.
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        let cues = match self.tab {
-            Tab::Start if self.starting.is_none() => match live {
-                Some((cues, tps)) if (1..=sound::MAX_TPS).contains(&tps) => cues,
-                _ => return,
+        let live = match self.tab {
+            Tab::Start if self.local.starting.is_none() => local,
+            Tab::Watch if self.opening.is_some() => return,
+            Tab::Watch if self.remote.live.is_some() => match self.remote.starting {
+                None => remote,
+                Some(_) => return,
             },
-            Tab::Replay => replay.unwrap_or_default(),
+            Tab::Watch => {
+                self.sound
+                    .play(&replay.unwrap_or_default(), self.settings.volume);
+                return;
+            }
+            _ => return,
+        };
+        let cues = match live {
+            Some((cues, tps)) if (1..=sound::MAX_TPS).contains(&tps) => cues,
             _ => return,
         };
         self.sound.play(&cues, self.settings.volume);
@@ -2241,20 +2370,26 @@ impl App {
             return;
         }
         shot.frames += 1;
-        let ready = match (&self.starting, &self.live, self.tab) {
-            // A battle that couldn't start: its error, once laid out.
-            (Some(starting), _, Tab::Start) if starting.error.is_some() => shot.frames >= 3,
-            (Some(_), _, Tab::Start) => shot.loading && shot.frames >= shot.after,
+        // The battle on screen, if any: a replay being opened shows over a watched one.
+        let battle = match self.tab {
+            Tab::Start => Some(&self.local),
+            Tab::Watch if self.opening.is_none() => Some(&self.remote),
+            _ => None,
+        };
+        let ready = match battle.map(|b| (&b.starting, &b.live)) {
             // A replay being opened: once it is there (or its loading screen).
-            (_, _, Tab::Replay) if self.opening.is_some() => {
+            _ if self.tab == Tab::Watch && self.opening.is_some() => {
                 shot.loading && shot.frames >= shot.after
             }
+            // A battle that couldn't start: its error, once laid out.
+            Some((Some(starting), _)) if starting.error.is_some() => shot.frames >= 3,
+            Some((Some(_), _)) => shot.loading && shot.frames >= shot.after,
             // An ended battle: its results, once laid out.
-            (None, Some(live), Tab::Start) if live.outcome.is_some() => {
+            Some((None, Some(live))) if live.outcome.is_some() => {
                 shot.ended += 1;
                 shot.ended >= 30
             }
-            (None, Some(live), Tab::Start) => live
+            Some((None, Some(live))) => live
                 .latest
                 .as_ref()
                 .is_some_and(|s| s.turn >= shot.after || s.round > 0),

@@ -51,7 +51,7 @@ Output:
   --record FILE          record the battle (replay with `robocode-s replay FILE`)
   --paint                ask every robot for its debug painting (stored by --record)
 
-Watching (the GUI's Start Battle, Watch a battle):
+Watching (the GUI's Watch Battle tab, Remote Server):
   --observe ADDR         let observers watch on ADDR (PORT, or HOST:PORT; HOST
                          defaults to 127.0.0.1); the battle starts once the first
                          one connected. Observers control the battle as the GUI
