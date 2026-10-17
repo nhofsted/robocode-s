@@ -275,6 +275,7 @@ Native APIs for new robots, all generated from the same `.proto`:
 - A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output, debug paint, each robot's CPU time and the turn budget, and the debug properties robots set) and a 64-bit hash of the snapshot, so every replayed turn is verified. CPU times and debug properties are not battle state: the hash leaves them out (as output and paint), and a replay shows them. Recordings from before they were recorded replay with CPU times of 0 and no debug properties.
 - Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
 - `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
+- The file is created when the battle starts, so that a path that can't be written fails at once, and removed again when the battle is stopped before its first round (a cancelled start in the GUI): such a battle leaves no recording. A battle stopped later keeps one, up to the stop.
 - Rumble replays in the browser use a different, lossy format (§12.7, ADR 0017).
 - Classic `.br` recordings can be imported if feasible (low priority).
 

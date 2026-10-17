@@ -304,6 +304,29 @@ fn a_stop_before_the_robots_connect_ends_the_battle() {
 }
 
 #[test]
+fn a_battle_stopped_before_its_first_round_leaves_no_recording() {
+    let path = std::env::temp_dir().join(format!("robocodes-cancelled-{}.rec", std::process::id()));
+    let config = ServerConfig {
+        rules: small_rules(),
+        connect_timeout: Duration::from_secs(30),
+        record: Some(path.clone()),
+        ..Default::default()
+    };
+    let (address, server) = start(config, vec![entry("a.A", "a")]);
+    let mut observer = connect(&address, PROTOCOL_VERSION.major, v1::Role::Observer, "");
+    // The file is there while the battle starts (a bad path fails at once).
+    thread::sleep(Duration::from_millis(100));
+    assert!(path.exists());
+    control(&mut observer, v1::observer_control::Control::Abort(true));
+    let outcome = server.join().unwrap().unwrap();
+    assert_eq!(outcome.rounds, 0);
+    assert!(
+        !path.exists(),
+        "no recording of a battle that never started"
+    );
+}
+
+#[test]
 fn the_robots_listener_wants_the_tokens() {
     let config = ServerConfig {
         rules: small_rules(),

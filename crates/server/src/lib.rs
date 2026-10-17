@@ -57,7 +57,8 @@ pub struct ServerConfig {
     pub hard_limit: Duration,
     /// How long robots get to connect before the battle starts without them.
     pub connect_timeout: Duration,
-    /// Record the battle to this file (design §11, [`recording`]).
+    /// Record the battle to this file (design §11, [`recording`]); a battle stopped
+    /// before its first round leaves none.
     pub record: Option<PathBuf>,
     /// The token observers present on the robots' listener (the embedded observer of a
     /// local battle, [`random_token`]); empty: none (tests). Observers from elsewhere
@@ -555,7 +556,15 @@ impl<'a> BattleLoop<'a> {
         {
             let _ = stream.shutdown(Shutdown::Both);
         }
-        self.engine.finish()?;
+        let finished = self.engine.finish();
+        // A battle stopped before its first round (a cancelled start) leaves no
+        // recording. The file is created up front, so that a bad path fails at once.
+        if rounds == 0
+            && let Some(path) = &self.config.record
+        {
+            let _ = std::fs::remove_file(path);
+        }
+        finished?;
         Ok(BattleOutcome {
             results,
             rounds,
