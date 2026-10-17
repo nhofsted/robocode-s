@@ -52,6 +52,13 @@ pub fn parse(text: &str, mut rules: BattleRules) -> Result<BattleFile, String> {
             _ => {}
         }
     }
+    // As classic's `BattlefieldSpecification`, which refuses other sizes (smaller ones
+    // leave no room to place the robots).
+    for (key, size) in [(WIDTH, rules.width), (HEIGHT, rules.height)] {
+        if !(400..=5000).contains(&size) {
+            return Err(format!("{key}: {size} is not from 400 to 5000"));
+        }
+    }
     Ok(BattleFile { rules, robots })
 }
 
@@ -185,6 +192,8 @@ mod tests {
         assert_eq!(b.rules.width, 800);
         assert!(b.robots.is_empty());
         assert!(parse("robocode.battle.numRounds=x", BattleRules::default()).is_err());
+        let small = parse("robocode.battleField.width=100", BattleRules::default());
+        assert!(small.unwrap_err().contains("400 to 5000"));
     }
 
     #[test]
