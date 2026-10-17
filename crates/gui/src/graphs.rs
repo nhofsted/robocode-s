@@ -91,6 +91,21 @@ impl History {
     }
 }
 
+/// Where the graphs' Round/Battle choice is kept: one for battles and replays alike.
+fn whole_battle_id() -> egui::Id {
+    egui::Id::new("graphs-battle")
+}
+
+/// The graphs show the whole battle rather than the round (the option's choice).
+pub fn whole_battle(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(whole_battle_id()))
+        .unwrap_or(false)
+}
+
+pub fn set_whole_battle(ctx: &egui::Context, battle: bool) {
+    ctx.data_mut(|d| d.insert_temp(whole_battle_id(), battle));
+}
+
 /// The graphs, `height` tall, below the robot list: energy and CPU for the first `shown`
 /// turns of `history`. Without `cpu` (a viewer track: one round, no CPU times), energy only.
 pub fn graphs(
@@ -113,8 +128,7 @@ pub fn graphs(
             visible(Color32::from_rgb(r, g, b))
         })
         .collect();
-    let id = ui.id().with("graphs-battle");
-    let mut battle = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let mut battle = whole_battle(ui.ctx());
     // Each graph: a heading line and the plot.
     let s = ui.spacing().item_spacing.y;
     let plot = if cpu {
@@ -143,7 +157,7 @@ pub fn graphs(
             }
         }
     });
-    ui.data_mut(|d| d.insert_temp(id, battle));
+    set_whole_battle(ui.ctx(), battle);
     let energy = Plot {
         history,
         values: &history.energy,
@@ -379,8 +393,9 @@ fn typical_max(series: &[Vec<f32>], energy: bool) -> f32 {
     if all.is_empty() {
         return 1.0;
     }
-    all.sort_by(f32::total_cmp);
-    let p98 = all[(all.len() - 1) * 98 / 100];
+    // The 98th percentile, without sorting all of a long battle's turns every frame.
+    let k = (all.len() - 1) * 98 / 100;
+    let (_, &mut p98, _) = all.select_nth_unstable_by(k, f32::total_cmp);
     (p98 * 1.25).max(0.1)
 }
 
@@ -411,6 +426,16 @@ fn visible(color: Color32) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cpu_scale_ignores_rare_spikes() {
+        let mut times: Vec<f32> = (0..1000).map(|k| (k % 10) as f32).collect();
+        times[500] = 1000.0;
+        let top = typical_max(&[times.clone(), times], false);
+        assert_eq!(top, 9.0 * 1.25);
+        assert_eq!(typical_max(&[], false), 1.0);
+        assert_eq!(typical_max(&[vec![50.0, 120.0]], true), 120.0 * 1.05);
+    }
 
     fn snapshot(round: i32, totals: &[f64], scores: &[f64]) -> v1::TurnSnapshot {
         v1::TurnSnapshot {

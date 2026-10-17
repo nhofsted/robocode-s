@@ -22,7 +22,7 @@ use robocode_s_runner::local::{
 };
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 
 /// The battle setup form.
@@ -59,7 +59,7 @@ impl Setup {
             paint: false,
             turns_per_second: 30,
             rules: settings.rules,
-            watch: "localhost:7654".into(),
+            watch: settings.watch.clone(),
             watch_token: String::new(),
         }
     }
@@ -212,6 +212,8 @@ pub struct App {
     live: Option<Box<Live>>,
     /// The battle being started: the Start Battle tab shows the loading screen.
     starting: Option<Starting>,
+    /// The setup of the last battle started, for Restart.
+    launched: Option<Setup>,
     /// The recording in the Replay Battle tab; a file field when there is none.
     replay: Option<Box<ReplayView>>,
     selected: usize,
@@ -230,6 +232,8 @@ pub struct App {
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
+    /// List the robots again once the running listing is done.
+    relist: bool,
     /// The robot whose details show below the robot lists: the last one clicked.
     details: Option<String>,
     filter: String,
@@ -246,6 +250,9 @@ pub struct App {
     folder_contents: Vec<Option<Contents>>,
     new_folder: String,
     settings_error: Option<String>,
+    /// The options changed and aren't saved yet: since when (the UI's time). They are
+    /// saved once they have been still for a moment, not on every frame of a drag.
+    settings_unsaved: Option<f64>,
     /// The battles started, so each one's results window opens centred.
     battles: u64,
     /// The file dialog behind the fields' folder buttons (drawn by egui: WSLg has no
@@ -322,6 +329,7 @@ impl App {
             tab: Tab::Start,
             live: None,
             starting: None,
+            launched: None,
             replay: None,
             selected: 0,
             error: None,
@@ -334,6 +342,7 @@ impl App {
             open_path: String::new(),
             available: None,
             listing: None,
+            relist: false,
             details: None,
             filter: String::new(),
             picked: None,
@@ -344,14 +353,16 @@ impl App {
             env_jars,
             new_folder: String::new(),
             settings_error: None,
+            settings_unsaved: None,
             battles: 0,
-            files: FileDialog::new()
+            files: FileDialog::with_file_system(std::sync::Arc::new(crate::files::Files))
                 .id("file-dialog")
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]),
             browsing: None,
             saving: None,
             save_error: None,
         };
+        crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
         app.scan_folders();
         app.list_robots(&cc.egui_ctx);
         if let Some(path) = launch.replay {
@@ -413,8 +424,14 @@ impl App {
         }
     }
 
-    /// Lists the robots in the jars on a background thread (it starts a JVM).
+    /// Lists the robots in the jars on a background thread (it starts a JVM). One listing
+    /// at a time: they share their home, which the robot host empties first, so a second
+    /// one at once fails. Asked again while one runs, it lists again once that one is done.
     fn list_robots(&mut self, ctx: &egui::Context) {
+        if self.listing.is_some() {
+            self.relist = true;
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         let env = self.env.clone();
         let ctx = ctx.clone();
@@ -429,13 +446,18 @@ impl App {
         self.listing = Some(rx);
     }
 
-    /// Takes the robot list once it is there.
-    fn poll_listing(&mut self) {
+    /// Takes the robot list once it is there (or lists again, if the folders changed
+    /// meanwhile).
+    fn poll_listing(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.listing
             && let Ok(result) = rx.try_recv()
         {
-            self.available = Some(result);
             self.listing = None;
+            if std::mem::take(&mut self.relist) {
+                self.list_robots(ctx);
+            } else {
+                self.available = Some(result);
+            }
         }
     }
 
@@ -622,12 +644,11 @@ impl App {
                 return;
             }
         };
-        self.launch(ctx, seed);
+        self.launch(ctx, self.setup.clone(), seed);
     }
 
-    /// Starts the battle in the setup with `seed` (see [`App::start`]).
-    fn launch(&mut self, ctx: &egui::Context, seed: i64) {
-        let s = &self.setup;
+    /// Starts the battle of setup `s` with `seed` (see [`App::start`]).
+    fn launch(&mut self, ctx: &egui::Context, s: Setup, seed: i64) {
         let config = ServerConfig {
             rules: s.battle_rules(),
             seed,
@@ -653,6 +674,7 @@ impl App {
             error: None,
             watching: None,
         });
+        self.launched = Some(s);
         self.error = None;
         self.live = None;
         self.battles += 1;
@@ -666,6 +688,10 @@ impl App {
         if address.is_empty() {
             self.error = Some("Give the address of the battle to watch.".into());
             return;
+        }
+        if self.settings.watch != address {
+            self.settings.watch = address.clone();
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
         }
         let mut live = Live::watch(ctx, address.clone(), self.setup.watch_token.clone());
         live.camera = self.camera;
@@ -1073,6 +1099,15 @@ impl App {
             }
             .to_string(),
         );
+        let filters: &[(&str, &'static [&'static str])] = match field {
+            Browse::Replay => &[
+                ("Recordings", &["rsr", "rec", "track"]),
+                ("Website tracks", &["track"]),
+            ],
+            Browse::OpenBattle => &[("Battle files", &["battle"])],
+            Browse::Record | Browse::Folder | Browse::Save => &[],
+        };
+        crate::files::set_filters(config, filters);
         match field {
             Browse::Record | Browse::Save => self.files.save_file(),
             Browse::Replay | Browse::OpenBattle => self.files.pick_file(),
@@ -1433,7 +1468,7 @@ impl App {
     /// Saves the options and applies them: new robot folders are scanned, and new
     /// defaults go into the battle setup.
     fn settings_changed(&mut self, ctx: &egui::Context, before: &Settings) {
-        self.settings_error = self.settings.save().err();
+        self.settings_unsaved = Some(ctx.input(|i| i.time));
         let (s, setup) = (&self.settings, &mut self.setup);
         if s.classic != before.classic {
             setup.classic = s.classic;
@@ -1529,11 +1564,25 @@ impl App {
                 screen::divider(ui);
                 let mut tps = live.turns_per_second;
                 let (ended, stopping) = (live.outcome.is_some(), live.stopping);
+                let watching = live.watching.is_some();
                 let changed = screen::speed_and_readouts(
                     ui,
                     &mut tps,
                     Some(&live.seed.to_string()),
                     |ui| {
+                        // A watched battle can be left as it runs (or when its server
+                        // stopped answering): it goes on without us.
+                        if watching && !ended {
+                            let button = egui::Button::new("Leave").min_size(egui::vec2(0.0, 26.0));
+                            if ui
+                                .add(button)
+                                .on_hover_text("Stop watching: the battle goes on without you")
+                                .clicked()
+                            {
+                                next = Next::Setup;
+                            }
+                            ui.add_space(8.0);
+                        }
                         if ended {
                             let button = egui::Button::new(RichText::new("New battle").strong())
                                 .min_size(egui::vec2(0.0, 26.0));
@@ -1950,7 +1999,7 @@ impl eframe::App for App {
             self.refresh(ctx);
         }
         shell::footer(root);
-        self.poll_listing();
+        self.poll_listing(ctx);
         self.poll_starting(ctx);
         let style = self.style();
         // A battle keeps running in its tab while another one is open.
@@ -1992,7 +2041,16 @@ impl eframe::App for App {
                         Some(live) if !new_seed => live.seed,
                         _ => random_seed(),
                     };
-                    self.launch(ctx, seed);
+                    // The battle as it was started (the options may have changed the
+                    // setup's defaults since).
+                    let mut setup = self.launched.clone().unwrap_or_else(|| self.setup.clone());
+                    // The battle's recording stays: the new one goes to a new file.
+                    let record = setup.record.trim();
+                    if !record.is_empty() {
+                        setup.record = next_free(Path::new(record)).display().to_string();
+                        self.setup.record.clone_from(&setup.record);
+                    }
+                    self.launch(ctx, setup, seed);
                 }
             },
             Tab::Start => self.start_page(root),
@@ -2012,7 +2070,7 @@ impl eframe::App for App {
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
         }
-        self.play_sounds();
+        self.play_sounds(ctx);
         self.file_dialog(ctx);
         self.save_error_window(ctx);
         // A file dropped on the window opens as a replay.
@@ -2021,14 +2079,43 @@ impl eframe::App for App {
             self.open_path = path.display().to_string();
             self.open_replay(path);
         }
+        self.save_settings(ctx);
         self.screenshot_step(ctx);
+    }
+
+    fn on_exit(&mut self) {
+        if self.settings_unsaved.is_some() {
+            let _ = self.settings.save();
+        }
     }
 }
 
 impl App {
+    /// Saves the options once they have been still for a moment and nothing is being
+    /// dragged; takes the graphs' Round/Battle choice into them first.
+    fn save_settings(&mut self, ctx: &egui::Context) {
+        let battle = crate::graphs::whole_battle(ctx);
+        if battle != self.settings.graphs_battle {
+            self.settings.graphs_battle = battle;
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
+        let Some(since) = self.settings_unsaved else {
+            return;
+        };
+        const STILL: f64 = 0.5;
+        let (now, down) = ctx.input(|i| (i.time, i.pointer.any_down()));
+        if now - since >= STILL && !down {
+            self.settings_error = self.settings.save().err();
+            self.settings_unsaved = None;
+        } else {
+            let wait = (STILL - (now - since)).max(0.05);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+
     /// Plays the sound effects of the battle on screen, when sound is on and it runs at a
     /// watchable speed; the rest are dropped.
-    fn play_sounds(&mut self) {
+    fn play_sounds(&mut self, ctx: &egui::Context) {
         let live = self.live.as_mut().map(|live| {
             let tps = live.turns_per_second;
             (std::mem::take(&mut live.cues), tps)
@@ -2040,7 +2127,10 @@ impl App {
         if !self.settings.sound {
             return;
         }
-        self.sound.prepare();
+        if self.sound.prepare() {
+            // Look for the output thread's answer again soon.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let cues = match self.tab {
             Tab::Start if self.starting.is_none() => match live {
                 Some((cues, tps)) if (1..=sound::MAX_TPS).contains(&tps) => cues,
@@ -2106,6 +2196,27 @@ impl App {
     }
 }
 
+/// A recording's path for a restarted battle, so that it doesn't overwrite the last one:
+/// `battle.rec` becomes `battle-2.rec` (`battle-3.rec`, ... when that one is there too).
+fn next_free(path: &Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    // `battle-2` counts on from 2 rather than becoming `battle-2-2`.
+    let base = match stem.rsplit_once('-') {
+        Some((base, n)) if !base.is_empty() && n.parse::<u32>().is_ok() => base,
+        _ => stem.as_str(),
+    };
+    let extension = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    (2u32..)
+        .map(|n| path.with_file_name(format!("{base}-{n}{extension}")))
+        .find(|p| !p.exists())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 /// What Tank Royale shows of a bot besides its description: its programming language,
 /// platform and game version (classic's `.properties` have no country).
 fn robot_facts(robot: &Listed) -> String {
@@ -2138,7 +2249,28 @@ fn parse_seed(text: &str) -> Result<Option<i64>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GAME_TYPES, Listed, Setup, battle_file, parse_robots, parse_seed, robot_facts};
+    use super::{
+        GAME_TYPES, Listed, Setup, battle_file, next_free, parse_robots, parse_seed, robot_facts,
+    };
+
+    #[test]
+    fn a_restart_records_to_a_new_file() {
+        let dir = std::env::temp_dir().join(format!("robocode-s-gui-next-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("battle.rec");
+        std::fs::write(&first, "").unwrap();
+        assert_eq!(next_free(&first), dir.join("battle-2.rec"));
+        std::fs::write(dir.join("battle-2.rec"), "").unwrap();
+        assert_eq!(next_free(&first), dir.join("battle-3.rec"));
+        assert_eq!(
+            next_free(&dir.join("battle-2.rec")),
+            dir.join("battle-3.rec")
+        );
+        assert_eq!(next_free(&dir.join("my-bots")), dir.join("my-bots-2"));
+        assert_eq!(next_free(&dir.join("-7.rec")), dir.join("-7-2.rec"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn robot_facts_leave_out_what_is_unknown() {

@@ -306,6 +306,21 @@ pub fn apply_debug_properties(properties: &mut DebugProperties, changes: &[v1::D
     }
 }
 
+/// How much console output is shown per robot: the end of it.
+const OUTPUT_LIMIT: usize = 64 * 1024;
+
+/// Keeps the last [`OUTPUT_LIMIT`] bytes of a robot's output (from a character's start):
+/// more makes every frame slow to lay out.
+pub fn keep_output_tail(out: &mut String) {
+    if out.len() > OUTPUT_LIMIT {
+        let cut = out.len() - OUTPUT_LIMIT;
+        let cut = (cut..out.len())
+            .find(|&i| out.is_char_boundary(i))
+            .unwrap_or(out.len());
+        out.drain(..cut);
+    }
+}
+
 /// The robots' output: a tab per robot, with its debug-paint marker in the tab, over the
 /// selected robot's output (`text`) and its debug properties (`properties`, beside the
 /// output when it has any), with buttons to copy, save and clear the output right of the
@@ -789,6 +804,9 @@ pub fn results_window(
                 let measured = id.with("table-width");
                 let wanted = ui.data(|d| d.get_temp::<f32>(measured)).unwrap_or(600.0);
                 let room = ui.ctx().content_rect().width() - 80.0 - WINNER - GAP;
+                // A solid scrollbar, not egui's floating one that shows only on hover: the
+                // columns cut off at the edge are easy to miss.
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
                 let shown = egui::ScrollArea::horizontal()
                     .min_scrolled_width(wanted.min(room).max(120.0))
                     .show(ui, |ui| table(ui, &rows));
@@ -946,7 +964,18 @@ fn cell(ui: &mut egui::Ui, col: usize, text: RichText) {
 
 #[cfg(test)]
 mod tests {
-    use super::short_name;
+    use super::{OUTPUT_LIMIT, keep_output_tail, short_name};
+
+    #[test]
+    fn output_keeps_its_end() {
+        let mut out = "é".repeat(OUTPUT_LIMIT) + "end";
+        keep_output_tail(&mut out);
+        assert!(out.len() <= OUTPUT_LIMIT && out.len() > OUTPUT_LIMIT - 2);
+        assert!(out.ends_with("éend"));
+        let mut short = "short".to_string();
+        keep_output_tail(&mut short);
+        assert_eq!(short, "short");
+    }
 
     #[test]
     fn short_names_drop_the_package() {

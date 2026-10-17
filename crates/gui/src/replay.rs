@@ -10,6 +10,7 @@
 use crate::graphs::History;
 use crate::icons;
 use crate::screen::{self, DebugProperties};
+use crate::shell;
 use crate::sound;
 use crate::sprites::Sprites;
 use crate::track;
@@ -321,7 +322,7 @@ impl ReplayView {
                 &self.paint_visible,
                 |i| {
                     let from = cleared.get(i).copied().flatten();
-                    let text: String = output
+                    let mut text: String = output
                         .iter()
                         .take_while(|(turn, _, _)| *turn <= position)
                         .filter(|(turn, robot, _)| {
@@ -329,6 +330,8 @@ impl ReplayView {
                         })
                         .map(|(_, _, t)| t.as_str())
                         .collect();
+                    // As much as a live battle shows.
+                    screen::keep_output_tail(&mut text);
                     Cow::Owned(text)
                 },
                 |i| {
@@ -366,6 +369,8 @@ impl ReplayView {
             // The timeline, as wide as the controls.
             let mut position = self.position;
             ui.spacing_mut().slider_width = ui.available_width();
+            // Played so far in the app's accent, not egui's blue.
+            ui.visuals_mut().selection.bg_fill = shell::ACCENT.gamma_multiply(0.8);
             let slider = ui.add(
                 egui::Slider::new(&mut position, 0..=self.turns.saturating_sub(1))
                     .show_value(false)

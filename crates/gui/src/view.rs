@@ -390,6 +390,7 @@ pub fn navigate(
         *camera = Camera::default();
     }
     if camera.fitted() {
+        zoom_hint(ui, &response, available, navigation);
         return;
     }
     let mut fit = false;
@@ -424,6 +425,49 @@ pub fn navigate(
     if fit {
         *camera = Camera::default();
     }
+}
+
+/// How long the zoom hint shows, in seconds of the pointer over the battlefield (once a
+/// run, as the field can't tell you can zoom it).
+const ZOOM_HINT: f64 = 4.0;
+
+/// While the pointer is over the fitted battlefield, for the first [`ZOOM_HINT`] seconds
+/// of a run: how to zoom, in its bottom right corner.
+fn zoom_hint(ui: &egui::Ui, response: &egui::Response, available: Rect, navigation: Navigation) {
+    let id = egui::Id::new("zoom-hint-shown");
+    let (shown, dt) = (
+        ui.ctx().data(|d| d.get_temp::<f64>(id)).unwrap_or(0.0),
+        f64::from(ui.input(|i| i.stable_dt)).min(0.1),
+    );
+    if shown >= ZOOM_HINT || !response.hovered() {
+        return;
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(id, shown + dt));
+    ui.ctx().request_repaint_after_secs(0.1);
+    let text = match navigation {
+        Navigation::Modified => "Ctrl+wheel zooms, Ctrl+drag pans",
+        Navigation::Free => "The wheel zooms, a drag pans",
+    };
+    // Fades out over its last second.
+    let alpha = (ZOOM_HINT - shown).clamp(0.0, 1.0) as f32;
+    egui::Area::new(ui.id().with("zoom-hint"))
+        .order(egui::Order::Middle)
+        .interactable(false)
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .fixed_pos(available.right_bottom() + vec2(-8.0, -8.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_black_alpha(170).gamma_multiply(alpha))
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(12.0)
+                            .color(Color32::from_gray(210).gamma_multiply(alpha)),
+                    );
+                });
+        });
 }
 
 /// Draws one turn into `available` as `camera` shows it; returns the transform and the

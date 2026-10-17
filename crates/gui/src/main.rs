@@ -5,6 +5,7 @@
 
 mod app;
 mod backdrop;
+mod files;
 mod graphs;
 mod icons;
 mod input;
