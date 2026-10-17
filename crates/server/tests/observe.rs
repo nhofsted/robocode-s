@@ -191,3 +191,59 @@ fn a_remote_observer_that_pauses_and_leaves_does_not_hold_the_battle_up() {
     assert_eq!(local.join().unwrap().unwrap(), outcome);
     robot.join().unwrap();
 }
+
+#[test]
+fn a_remote_observer_that_stops_reading_does_not_hold_the_battle_up() {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let observe_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let observe_address = observe_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 60,
+            inactivity_time: 20,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let observers = Observers {
+        listener: observe_listener,
+        token: String::new(),
+        wait: true,
+    };
+    let (done, finished) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let outcome = run_battle_with(
+            robots_listener,
+            Some(observers),
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        );
+        let _ = done.send(outcome);
+    });
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    // An observer that says hello and then never reads: the server's writes to it fill
+    // its socket and then block.
+    let mut stalled = TcpStream::connect(&observe_address).unwrap();
+    let hello = v1::ClientMessage {
+        msg: Some(client_message::Msg::Hello(v1::Hello {
+            version: Some(PROTOCOL_VERSION),
+            role: v1::Role::Observer as i32,
+            ..Default::default()
+        })),
+    };
+    write_message(&mut stalled, &hello).unwrap();
+    let outcome = finished
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the battle ends although an observer stopped reading")
+        .unwrap();
+    assert_eq!(outcome.rounds, 60);
+    for r in robots {
+        r.join().unwrap();
+    }
+    drop(stalled);
+}

@@ -30,6 +30,10 @@ use std::time::{Duration, Instant};
 /// At most this many observers at once on an [`Observers`] listener.
 const MAX_REMOTE_OBSERVERS: usize = 16;
 
+/// An observer from elsewhere that takes no data for this long is dropped (a stalled
+/// connection would otherwise hold the battle up: the battle loop does all writing).
+const REMOTE_OBSERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// More consecutive skipped turns disable a robot (240 for robots that did file I/O).
 const MAX_SKIPPED_TURNS: i64 = 30;
 const MAX_SKIPPED_TURNS_WITH_IO: i64 = 240;
@@ -260,6 +264,7 @@ fn observer_handshake(
         return refuse(stream, "too many observers");
     }
     stream.set_read_timeout(None)?;
+    stream.set_write_timeout(Some(REMOTE_OBSERVER_WRITE_TIMEOUT))?;
     let (tx2, connected) = (tx.clone(), connected.clone());
     spawn_observer_reader(reader, tx.clone(), move || {
         connected.fetch_sub(1, Ordering::SeqCst);
@@ -710,6 +715,8 @@ impl<'a> BattleLoop<'a> {
                         self.await_observer = false;
                         self.remote_observers += 1;
                     }
+                } else {
+                    let _ = stream.shutdown(Shutdown::Both);
                 }
             }
             // An observer that paused the battle and left doesn't hold it up for the others
@@ -1010,7 +1017,14 @@ impl<'a> BattleLoop<'a> {
 
     fn broadcast(&mut self, msg: server_message::Msg) {
         let message = server(msg);
-        self.observers
-            .retain_mut(|o| write_message(o, &message).is_ok());
+        // A failed (or timed out) write leaves the stream mid-message: shut it down, which
+        // also ends its reader thread and so tells the battle the observer left.
+        self.observers.retain_mut(|o| {
+            let ok = write_message(o, &message).is_ok();
+            if !ok {
+                let _ = o.shutdown(Shutdown::Both);
+            }
+            ok
+        });
     }
 }
