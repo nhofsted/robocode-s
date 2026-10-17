@@ -9,7 +9,9 @@
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use robocode_s_server::{BattleOutcome, Observers, RobotEntry, ServerConfig, run_battle_with};
+use robocode_s_server::{
+    BattleOutcome, Observers, RobotEntry, ServerConfig, random_token, run_battle_with,
+};
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -428,16 +430,22 @@ pub fn run_local_battle_with(
         .local_addr()
         .map_err(|e| e.to_string())?
         .to_string();
+    // Fresh secrets per battle: any local process reaches the robots' listener. They
+    // aren't recorded and don't affect the battle.
     let entries: Vec<RobotEntry> = battle
         .robots
         .iter()
-        .enumerate()
-        .map(|(i, r)| RobotEntry {
-            token: format!("robot-{i}"),
+        .map(|r| RobotEntry {
+            token: random_token(),
             statics: r.statics.clone(),
         })
         .collect();
-    let config = battle.config.clone();
+    let tokens: Vec<String> = entries.iter().map(|e| e.token.clone()).collect();
+    let config = ServerConfig {
+        observer_token: random_token(),
+        ..battle.config.clone()
+    };
+    let observer_token = config.observer_token.clone();
     let server = thread::spawn(move || run_battle_with(listener, observers, &config, entries));
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
@@ -445,6 +453,7 @@ pub fn run_local_battle_with(
         msg: Some(client_message::Msg::Hello(v1::Hello {
             version: Some(PROTOCOL_VERSION),
             role: v1::Role::Observer as i32,
+            token: observer_token,
             ..Default::default()
         })),
     };
@@ -478,7 +487,7 @@ pub fn run_local_battle_with(
     for (i, robot) in battle.robots.iter().enumerate() {
         let launch_spec = RobotLaunch {
             server: address.clone(),
-            token: format!("robot-{i}"),
+            token: tokens[i].clone(),
             robot: robot.lookup.clone(),
             jars: battle.jars.clone(),
             home: battle.dir.join(format!("robot-{i}")),

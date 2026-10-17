@@ -32,7 +32,7 @@ Every robot runs in its own JVM; a pinned JRE is downloaded on first use. Battle
 
 `--record FILE` records a battle (`--paint` includes the robots' debug painting); `robocode-s replay FILE` re-runs it, checks every turn and prints the results.
 
-`--observe PORT` lets the GUI watch the battle, from this machine or another (Start Battle, Watch a battle, or `robocode-s-gui --watch HOST:PORT`): the battle starts once the first observer connected, and observers control it as in a live battle (pause, speed, stop, kill, input). A port alone listens on 127.0.0.1 only; to listen on other addresses (`--observe 0.0.0.0:7654`) observers need a token, `--observe-token TOKEN` (or `ROBOCODES_OBSERVE_TOKEN`; the GUI's Token field, or `--token`). The connection is not encrypted, so use a trusted network, or an SSH tunnel to the loopback port (`ssh -L 7654:localhost:7654 host`).
+`--observe PORT` lets the GUI watch the battle, from this machine or another (Start Battle, Watch a battle, or `robocode-s-gui --watch HOST:PORT`): the battle starts once the first observer connected, and observers control it as in a live battle (pause, speed, stop, kill, input). A port alone listens on 127.0.0.1 only; to listen on other addresses (`--observe 0.0.0.0:7654`) observers need a token, `--observe-token TOKEN` (or `ROBOCODES_OBSERVE_TOKEN`; the GUI's Token field, or `--token`). The connection is not encrypted, so use a trusted network, or an SSH tunnel to the loopback port (`ssh -L 7654:localhost:7654 host`). Every process on the machine reaches a loopback port, so on a shared machine give it a token too (the battle's own connections, its robots and the built-in observer, get fresh secret tokens each battle).
 
 ## The GUI
 

@@ -41,8 +41,10 @@ import java.util.regex.Pattern;
  * The robot host: one JVM per robot (design §6.4). It connects to the robocode-s server,
  * then runs the robot with classic Robocode's own robot side and a {@link RemotePeer}.
  *
- * <p>Usage: {@code robot-host --server host:port --token T --robot sample.Fire
- * --jar robot.jar [--jar ...] --home dir [--seed N]}. A {@code --jar} may also name a class
+ * <p>Usage: {@code robot-host --server host:port --robot sample.Fire
+ * --jar robot.jar [--jar ...] --home dir [--seed N]}, with the robot's token in the
+ * environment variable {@code ROBOCODES_ROBOT_TOKEN} (other users may read a command line;
+ * {@code --token T} still works). A {@code --jar} may also name a class
  * folder (an IDE's output, e.g. {@code bin}): classic reads it as a development path, so
  * its robots are named with classic's {@code *} for development versions (except classic's
  * {@code sample.*} and {@code tested.*}). With the determinism agent loaded,
@@ -69,7 +71,7 @@ public final class RobotHost {
             args = Arrays.copyOfRange(args, 1, args.length);
         }
         String server = null;
-        String token = "";
+        String token = System.getenv().getOrDefault("ROBOCODES_ROBOT_TOKEN", "");
         List<String> robots = new ArrayList<>();
         Path home = null;
         long seed = 0;
@@ -94,7 +96,7 @@ public final class RobotHost {
         }
         String robot = robots.isEmpty() ? null : robots.get(0);
         if (server == null || robot == null || home == null) {
-            throw new IllegalArgumentException("usage: robot-host --server host:port --token T --robot name "
+            throw new IllegalArgumentException("usage: robot-host --server host:port --robot name "
                     + "--jar robot.jar --home dir [--seed N]");
         }
         System.exit(run(server, token, robot, jars, home, seed));
