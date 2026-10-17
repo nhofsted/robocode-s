@@ -424,9 +424,9 @@ impl App {
         }
     }
 
-    /// Lists the robots in the jars on a background thread (it starts a JVM). One listing
-    /// at a time: they share their home, which the robot host empties first, so a second
-    /// one at once fails. Asked again while one runs, it lists again once that one is done.
+    /// Lists the robots in the jars on a background thread (it starts a JVM), each listing
+    /// in a home of its own below `data/list`. One listing at a time: asked again while
+    /// one runs, it lists again once that one is done.
     fn list_robots(&mut self, ctx: &egui::Context) {
         if self.listing.is_some() {
             self.relist = true;

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -70,10 +71,50 @@ pub struct Listed {
 /// Every robot and team in `jars` (jars and class folders), as classic's repository
 /// finds them. A robot in a class folder is named with classic's `*` for a development
 /// version (`mypackage.MyRobot*`), except classic's `sample.*` and `tested.*`.
-pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec<Listed>, String> {
-    let mut robots = parse_list(&run_describe(host, jars, &[], home)?);
+///
+/// Each listing gets a home of its own below `dir` (`<pid>-<n>`), removed afterwards:
+/// the robot host empties its home's `robots` folder first, so listings sharing one
+/// (two GUIs at once) would break each other. Homes a crash left behind are removed
+/// once they are [`STALE_LISTING`] old.
+pub fn list_robots(host: &JavaHost, jars: &[PathBuf], dir: &Path) -> Result<Vec<Listed>, String> {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    remove_stale(dir, STALE_LISTING);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let home = dir.join(format!("{}-{n}", std::process::id()));
+    // A reused process id's leftovers.
+    let _ = std::fs::remove_dir_all(&home);
+    let output = run_describe(host, jars, &[], &home);
+    let _ = std::fs::remove_dir_all(&home);
+    let mut robots = parse_list(&output?);
     robots.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(robots)
+}
+
+/// A listing takes seconds; one of its homes this old was left behind by a crash.
+pub const STALE_LISTING: Duration = Duration::from_secs(60 * 60);
+
+/// Removes what in `dir` was last changed more than `age` ago.
+fn remove_stale(dir: &Path, age: Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let stale = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|elapsed| elapsed > age);
+        if stale {
+            let _ = if metadata.is_dir() {
+                std::fs::remove_dir_all(entry.path())
+            } else {
+                std::fs::remove_file(entry.path())
+            };
+        }
+    }
 }
 
 /// Parses the robot host's `--describe` list: per robot its name, whether it is a team,
@@ -547,6 +588,24 @@ pub fn lookup_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_listing_homes_are_removed() {
+        let dir = std::env::temp_dir().join(format!("robocodes-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("running")).unwrap();
+        let old = std::fs::File::create(dir.join("left-behind")).unwrap();
+        let two_hours_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 60 * 60);
+        old.set_modified(two_hours_ago).unwrap();
+        drop(old);
+        remove_stale(&dir, STALE_LISTING);
+        assert!(
+            dir.join("running").exists(),
+            "a listing still running stays"
+        );
+        assert!(!dir.join("left-behind").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn random_seeds_are_non_negative() {
