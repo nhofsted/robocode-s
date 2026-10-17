@@ -153,6 +153,9 @@ public final class RobotHost {
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
         if (robots.isEmpty()) {
             StringBuilder out = new StringBuilder();
+            // What the robots run on: this JVM, as robots get the same one.
+            out.append("platform\tJVM ").append(field(System.getProperty("java.version")))
+                    .append('\n');
             for (RobotSpecification spec : engine.getLocalRepository()) {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
                 // The name classic looks it up by: a development version's is
@@ -164,6 +167,7 @@ public final class RobotHost {
                         .append('\t').append(field(spec.getVersion()))
                         .append('\t').append(field(spec.getDescription()))
                         .append('\t').append(field(spec.getWebpage()))
+                        .append('\t').append(field(spec.getRobocodeVersion()))
                         .append('\n');
             }
             System.out.print(out);

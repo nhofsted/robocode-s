@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: EPL-2.0
 
 //! A battle running locally: the server and robot processes on a background thread
-//! (`runner::local`), observed by the GUI.
+//! (`runner::local`), observed by the GUI; or a battle on another server the GUI watches
+//! as an observer (`server::watch`, `robocode-s battle --observe`).
 
 use crate::graphs::History;
 use crate::input::Interaction;
@@ -11,9 +12,12 @@ use crate::view::Camera;
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
-use robocode_s_runner::local::{LocalBattle, LocalOutcome, run_local_battle};
-use robocode_s_server::BattleOutcome;
+use robocode_s_runner::local::{LocalBattle, run_local_battle};
+use robocode_s_server::watch::Watcher;
+use robocode_s_server::{BattleOutcome, convert};
+use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// How much console output is kept per robot.
@@ -23,7 +27,7 @@ const CUES_LIMIT: usize = 256;
 
 enum Update {
     Message(Box<server_message::Msg>),
-    Done(Result<LocalOutcome, String>),
+    Done(Result<BattleOutcome, String>),
 }
 
 pub struct Live {
@@ -36,6 +40,13 @@ pub struct Live {
     pub sentry_border: f64,
     pub rounds: i32,
     pub seed: i64,
+    /// Deterministic mode (ADR 0005), rather than classic timing.
+    pub deterministic: bool,
+    /// A battle on another server, watched as an observer: its address. Its robots, rules
+    /// and seed come with its `BattleInfo`.
+    pub watching: Option<String>,
+    /// The watched battle's connection, to end it when the battle is closed.
+    connection: Arc<Mutex<Option<TcpStream>>>,
     pub latest: Option<v1::TurnSnapshot>,
     /// The snapshot before `latest`, for the scan arcs.
     pub previous: Option<v1::TurnSnapshot>,
@@ -73,6 +84,7 @@ impl Live {
             rules.num_rounds,
         );
         let sentry_border = f64::from(rules.sentry_border_size);
+        let deterministic = battle.config.deterministic;
         let ctx = ctx.clone();
         thread::spawn(move || {
             let tx = updates_tx.clone();
@@ -81,9 +93,55 @@ impl Live {
                 let _ = tx.send(Update::Message(Box::new(msg.clone())));
                 repaint.request_repaint();
             });
+            let _ = updates_tx.send(Update::Done(result.map(|o| o.outcome)));
+            ctx.request_repaint();
+        });
+        let mut live = Self::new(updates, controls, robots, (width, height), rounds);
+        live.sentry_border = sentry_border;
+        live.deterministic = deterministic;
+        live.with_initial_speed()
+    }
+
+    /// Watches the battle on the server at `address` (`host:port`) as an observer, with
+    /// the observer `token` (empty for none). The controls go to that server.
+    pub fn watch(ctx: &egui::Context, address: String, token: String) -> Self {
+        let (updates_tx, updates) = mpsc::channel();
+        let (controls, controls_rx) = mpsc::channel();
+        let connection = Arc::new(Mutex::new(None));
+        let shared = connection.clone();
+        let ctx = ctx.clone();
+        let watched = address.clone();
+        thread::spawn(move || {
+            let result = Watcher::connect(&address, &token).and_then(|watcher| {
+                let handle = watcher.handle().map_err(|e| e.to_string())?;
+                if let Ok(mut shared) = shared.lock() {
+                    *shared = handle.try_clone().ok();
+                }
+                let (tx, repaint) = (updates_tx.clone(), ctx.clone());
+                watcher.run(Some(controls_rx), |msg| {
+                    // Closed meanwhile: leave the battle.
+                    if tx.send(Update::Message(Box::new(msg.clone()))).is_err() {
+                        let _ = handle.shutdown(Shutdown::Both);
+                    }
+                    repaint.request_repaint();
+                })
+            });
             let _ = updates_tx.send(Update::Done(result));
             ctx.request_repaint();
         });
+        let mut live = Self::new(updates, controls, Vec::new(), (800.0, 600.0), 1);
+        live.watching = Some(watched);
+        live.connection = connection;
+        live.with_initial_speed()
+    }
+
+    fn new(
+        updates: Receiver<Update>,
+        controls: Sender<v1::ObserverControl>,
+        robots: Vec<v1::RobotStatics>,
+        (width, height): (f64, f64),
+        rounds: i32,
+    ) -> Self {
         let n = robots.len();
         Self {
             updates,
@@ -91,9 +149,12 @@ impl Live {
             robots,
             width,
             height,
-            sentry_border,
+            sentry_border: 0.0,
             rounds,
             seed: 0,
+            deterministic: true,
+            watching: None,
+            connection: Arc::default(),
             latest: None,
             previous: None,
             history: History::new(n),
@@ -108,7 +169,6 @@ impl Live {
             camera: Camera::default(),
             cues: Vec::new(),
         }
-        .with_initial_speed()
     }
 
     fn with_initial_speed(self) -> Self {
@@ -148,12 +208,30 @@ impl Live {
                     }
                     self.previous = self.latest.replace(s);
                 }
-                Ok(_) => {}
-                Err(result) => {
-                    self.outcome = Some(result.map(|o| o.outcome));
+                Ok(server_message::Msg::BattleInfo(info)) if self.watching.is_some() => {
+                    self.on_info(info)
                 }
+                Ok(_) => {}
+                Err(result) => self.outcome = Some(result),
             }
         }
+    }
+
+    /// A watched battle's robots and rules, as they come.
+    fn on_info(&mut self, info: v1::BattleInfo) {
+        let n = info.robots.len();
+        self.robots = info.robots;
+        let rules = convert::rules_in(&info.rules.unwrap_or_default());
+        self.width = f64::from(rules.width);
+        self.height = f64::from(rules.height);
+        self.sentry_border = f64::from(rules.sentry_border_size);
+        self.rounds = rules.num_rounds;
+        self.deterministic = info.rules.is_some_and(|r| r.deterministic);
+        self.seed = info.seed;
+        self.history = History::new(n);
+        self.output = vec![String::new(); n];
+        self.properties = vec![DebugProperties::new(); n];
+        self.paint = vec![false; n];
     }
 
     pub fn control(&self, control: v1::observer_control::Control) {
@@ -211,9 +289,16 @@ impl Live {
 }
 
 /// A battle that is closed (a new one, or a cancelled start) stops, and its robots with it.
+/// A watched battle goes on without us.
 impl Drop for Live {
     fn drop(&mut self) {
-        if self.outcome.is_none() {
+        if self.watching.is_some() {
+            if let Ok(connection) = self.connection.lock()
+                && let Some(stream) = connection.as_ref()
+            {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        } else if self.outcome.is_none() {
             self.control(v1::observer_control::Control::Abort(true));
         }
     }

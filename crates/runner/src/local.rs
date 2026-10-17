@@ -9,7 +9,7 @@
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use robocode_s_server::{BattleOutcome, RobotEntry, ServerConfig, run_battle};
+use robocode_s_server::{BattleOutcome, Observers, RobotEntry, ServerConfig, run_battle_with};
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -55,6 +55,14 @@ pub struct Listed {
     pub version: String,
     pub description: String,
     pub webpage: String,
+    /// The Robocode version it was built for (`robocode.version`, as Tank Royale shows a
+    /// bot's game version).
+    pub robocode_version: String,
+    /// The programming language, as Tank Royale shows it: classic's robots are JVM
+    /// classes, "Java" (Kotlin, Scala, ... compile to the same; classic doesn't record it).
+    pub language: String,
+    /// What it runs on: the robot host's JVM (`JVM 21.0.4`).
+    pub platform: String,
 }
 
 /// Every robot and team in `jars` (jars and class folders), as classic's repository
@@ -67,8 +75,14 @@ pub fn list_robots(host: &JavaHost, jars: &[PathBuf], home: &Path) -> Result<Vec
 }
 
 /// Parses the robot host's `--describe` list: per robot its name, whether it is a team,
-/// then its author, version, description and web page.
+/// then its author, version, description, web page and Robocode version; and the platform
+/// they all run on.
 fn parse_list(text: &str) -> Vec<Listed> {
+    let platform = text
+        .lines()
+        .find_map(|l| l.strip_prefix("platform\t"))
+        .unwrap_or("")
+        .to_string();
     text.lines()
         .filter_map(|l| l.strip_prefix("list\t"))
         .filter_map(|l| {
@@ -83,6 +97,9 @@ fn parse_list(text: &str) -> Vec<Listed> {
                 version: next(),
                 description: next(),
                 webpage: next(),
+                robocode_version: next(),
+                language: "Java".into(),
+                platform: platform.clone(),
             })
         })
         .collect()
@@ -308,7 +325,8 @@ impl Environment {
 }
 
 /// A seed for battles without one: different per run (report it, so the battle can be
-/// fought again).
+/// fought again). Seeds are Java `long`s (classic's `RANDOMSEED`), so any `i64` is a seed,
+/// negative ones too; the random ones are kept non-negative only so that they read alike.
 pub fn random_seed() -> i64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -317,7 +335,7 @@ pub fn random_seed() -> i64 {
     let mut z = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    (z ^ (z >> 31)) as i64
+    ((z ^ (z >> 31)) >> 1) as i64
 }
 
 /// Prepares a battle of `robots` (classic names; teams expand): describes and names them
@@ -391,6 +409,18 @@ pub fn run_local_battle(
     host: &JavaHost,
     battle: &LocalBattle,
     controls: Option<mpsc::Receiver<v1::ObserverControl>>,
+    observe: impl FnMut(&server_message::Msg),
+) -> Result<LocalOutcome, String> {
+    run_local_battle_with(host, battle, None, controls, observe)
+}
+
+/// [`run_local_battle`], with observers from elsewhere on a listener of their own
+/// (`robocode-s battle --observe`).
+pub fn run_local_battle_with(
+    host: &JavaHost,
+    battle: &LocalBattle,
+    observers: Option<Observers>,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
     mut observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -408,7 +438,7 @@ pub fn run_local_battle(
         })
         .collect();
     let config = battle.config.clone();
-    let server = thread::spawn(move || run_battle(listener, &config, entries));
+    let server = thread::spawn(move || run_battle_with(listener, observers, &config, entries));
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
     let hello = v1::ClientMessage {
@@ -510,15 +540,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn random_seeds_are_non_negative() {
+        // Any i64 is a seed, but the random ones read alike (#36: a screenshot showed a
+        // negative one beside the usual positive ones).
+        for _ in 0..1000 {
+            assert!(random_seed() >= 0);
+        }
+    }
+
+    #[test]
     fn parses_the_list_with_details() {
-        let text = "noise\nlist\tsample.Fire\t0\tMathew Nelson\t1.0\tShoots\thttp://x\n\
+        let text = "noise\nplatform\tJVM 21.0.4\n\
+                    list\tsample.Fire\t0\tMathew Nelson\t1.0\tShoots\thttp://x\t1.9.3.4\n\
                     list\tsampleteam.MyFirstTeam\t1\nlist\told.Robot\t0\t\t\t\t\n";
         let list = parse_list(text);
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].author, "Mathew Nelson");
         assert_eq!(list[0].description, "Shoots");
         assert_eq!(list[0].webpage, "http://x");
+        assert_eq!(list[0].robocode_version, "1.9.3.4");
+        assert_eq!(
+            (list[0].language.as_str(), list[0].platform.as_str()),
+            ("Java", "JVM 21.0.4")
+        );
         assert!(list[1].team && list[1].author.is_empty());
+        assert!(list[2].robocode_version.is_empty());
         assert_eq!(list[2].name, "old.Robot");
     }
 
