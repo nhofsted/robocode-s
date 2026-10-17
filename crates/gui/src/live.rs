@@ -231,9 +231,11 @@ impl Live {
     }
 
     pub fn control(&self, control: v1::observer_control::Control) {
-        let _ = self.controls.send(v1::ObserverControl {
+        let control = v1::ObserverControl {
             control: Some(control),
-        });
+        };
+        robocode_s_server::log_control("window sends", &control);
+        let _ = self.controls.send(control);
     }
 
     pub fn set_paused(&mut self, paused: bool) {

@@ -9,7 +9,8 @@
 //! began (milliseconds of the wall clock's last 100 seconds, to line it up with other
 //! logs), its size, its times and what asked for it. The once-a-second line also has the
 //! live battle's turns a second: as they arrived from the server, and as the window took
-//! them in.
+//! them in. The battle's controls are logged too, as the window sends them and as a local
+//! battle's server applies them (`robocode_s_server::log_control`).
 
 use eframe::egui;
 use std::sync::atomic::{AtomicU64, Ordering};

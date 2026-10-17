@@ -247,3 +247,231 @@ fn a_remote_observer_that_stops_reading_does_not_hold_the_battle_up() {
     }
     drop(stalled);
 }
+
+/// A robot whose thread ends at once, as one whose `run` returns (sample.SittingDuck)
+/// or crashed: alive, but it answers no more turns.
+fn stopped_robot(address: String, token: &'static str) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut s = TcpStream::connect(&address).unwrap();
+        let hello = v1::ClientMessage {
+            msg: Some(client_message::Msg::Hello(v1::Hello {
+                version: Some(PROTOCOL_VERSION),
+                role: v1::Role::Robot as i32,
+                token: token.into(),
+                ..Default::default()
+            })),
+        };
+        write_message(&mut s, &hello).unwrap();
+        while let Ok(Some(m)) = read_message::<v1::ServerMessage>(&mut s) {
+            if let Some(server_message::Msg::RoundStart(_)) = m.msg {
+                let execute = v1::ClientMessage {
+                    msg: Some(client_message::Msg::Execute(v1::Execute {
+                        turn: 0,
+                        commands: Some(v1::RobotCommands::default()),
+                        stopped: true,
+                        ..Default::default()
+                    })),
+                };
+                let _ = write_message(&mut s, &execute);
+            }
+        }
+    })
+}
+
+#[test]
+fn controls_apply_while_no_robot_runs_anymore() {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 3,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            None,
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let robots = [
+        stopped_robot(robots_address.clone(), "a"),
+        stopped_robot(robots_address, "b"),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    let control = |c| v1::ObserverControl { control: Some(c) };
+    use v1::observer_control::Control;
+    tx.send(control(Control::TurnsPerSecond(5))).unwrap();
+    let handle = watcher.handle().unwrap();
+    let mut faster = None;
+    let mut fast = None;
+    let outcome = watcher.run(Some(rx), |msg| {
+        let server_message::Msg::TurnSnapshot(s) = msg else {
+            return;
+        };
+        match s.turn {
+            3 if faster.is_none() => {
+                // Slow, then as fast as it goes.
+                faster = Some(std::time::Instant::now());
+                let _ = tx.send(control(Control::TurnsPerSecond(0)));
+            }
+            100 if fast.is_none() => {
+                fast = faster.map(|t| t.elapsed());
+                let _ = tx.send(control(Control::Abort(true)));
+            }
+            _ => {}
+        }
+        // At 5 turns a second the round would take minutes: give up.
+        if faster.is_some_and(|t| t.elapsed() > Duration::from_secs(10)) {
+            let _ = handle.shutdown(std::net::Shutdown::Both);
+        }
+    });
+    let fast = fast.expect("97 turns within 10 s of the speed going to max");
+    assert!(fast < Duration::from_secs(3), "97 turns took {fast:?}");
+    let outcome = outcome.unwrap();
+    assert!(outcome.aborted, "Stop ends the battle");
+    assert_eq!(outcome.rounds, 1, "no round starts after the stop");
+    assert_eq!(server.join().unwrap().unwrap(), outcome);
+    for r in robots {
+        r.join().unwrap();
+    }
+}
+
+#[test]
+fn a_faster_rate_applies_without_waiting_out_the_slow_turn() {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 1,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            None,
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    let control = |c| v1::ObserverControl { control: Some(c) };
+    use v1::observer_control::Control;
+    tx.send(control(Control::TurnsPerSecond(1))).unwrap();
+    let (mut faster, mut next) = (None, None);
+    let outcome = watcher.run(Some(rx), |msg| {
+        let server_message::Msg::TurnSnapshot(s) = msg else {
+            return;
+        };
+        match s.turn {
+            // A turn a second; right after a turn, as fast as it goes.
+            1 if faster.is_none() => {
+                faster = Some(std::time::Instant::now());
+                let _ = tx.send(control(Control::TurnsPerSecond(0)));
+            }
+            2 if next.is_none() => {
+                next = faster.map(|t| t.elapsed());
+                let _ = tx.send(control(Control::Abort(true)));
+            }
+            _ => {}
+        }
+    });
+    let next = next.unwrap();
+    assert!(
+        next < Duration::from_millis(500),
+        "the next turn after {next:?}"
+    );
+    assert!(outcome.unwrap().aborted);
+    server.join().unwrap().unwrap();
+    for r in robots {
+        r.join().unwrap();
+    }
+}
+
+/// A battle of two idle robots, three rounds with a short inactivity time, watched by an
+/// observer on the robots' listener that sends `act`'s controls; its outcome.
+fn stopped_by(
+    mut act: impl FnMut(&server_message::Msg) -> Vec<v1::observer_control::Control>,
+) -> robocode_s_server::BattleOutcome {
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 3,
+            inactivity_time: 20,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            None,
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    let outcome = watcher
+        .run(Some(rx), |msg| {
+            for control in act(msg) {
+                let _ = tx.send(v1::ObserverControl {
+                    control: Some(control),
+                });
+            }
+        })
+        .unwrap();
+    assert_eq!(server.join().unwrap().unwrap(), outcome);
+    for r in robots {
+        r.join().unwrap();
+    }
+    outcome
+}
+
+#[test]
+fn a_stop_while_paused_ends_the_battle_in_its_round() {
+    use v1::observer_control::Control;
+    let outcome = stopped_by(|msg| match msg {
+        server_message::Msg::TurnSnapshot(s) if s.round == 0 && s.turn == 5 => {
+            vec![Control::Pause(true)]
+        }
+        server_message::Msg::TurnSnapshot(s) if s.round == 0 && s.turn == 6 => {
+            // The turn that ran before the pause came; stop once it holds.
+            thread::sleep(Duration::from_millis(200));
+            vec![Control::Abort(true)]
+        }
+        _ => Vec::new(),
+    });
+    assert!(outcome.aborted);
+    assert_eq!(outcome.rounds, 1);
+}
+
+#[test]
+fn a_stop_at_the_end_of_a_round_starts_no_more_than_the_next() {
+    use v1::observer_control::Control;
+    let outcome = stopped_by(|msg| match msg {
+        server_message::Msg::RoundResult(_) => vec![Control::Abort(true)],
+        _ => Vec::new(),
+    });
+    assert!(outcome.aborted);
+    assert!(outcome.rounds <= 2, "{} rounds", outcome.rounds);
+}

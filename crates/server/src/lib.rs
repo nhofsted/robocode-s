@@ -18,6 +18,7 @@ use recording::Recorder;
 use robocode_s_engine::{Battle, BattleRules, Event};
 use robocode_s_protocol::v1::{self, client_message, recording_entry::Entry, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
+use std::collections::VecDeque;
 use std::io;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -442,6 +443,23 @@ fn spawn_observer_reader(
     });
 }
 
+/// `ROBOCODES_PERF_LOG` (as the GUI's): logs the observers' controls (but their mouse
+/// and keyboard events) to stderr, `what` saying where.
+pub fn log_control(what: &str, control: &v1::ObserverControl) {
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let log = *LOG.get_or_init(|| {
+        std::env::var("ROBOCODES_PERF_LOG").is_ok_and(|v| !v.is_empty() && v != "0")
+    });
+    if log
+        && !matches!(
+            control.control,
+            Some(v1::observer_control::Control::Input(_))
+        )
+    {
+        eprintln!("[perf] {what} {:?}", control.control);
+    }
+}
+
 fn server(msg: server_message::Msg) -> v1::ServerMessage {
     v1::ServerMessage { msg: Some(msg) }
 }
@@ -454,6 +472,9 @@ struct BattleLoop<'a> {
     links: Vec<Link>,
     observers: Vec<TcpStream>,
     rx: Receiver<Incoming>,
+    /// What came from the robots while the battle waited between turns, for the next
+    /// turn's wait for them: they answer as before, after that turn's step.
+    held: VecDeque<Incoming>,
     paused: bool,
     steps: u32,
     turns_per_second: u32,
@@ -506,6 +527,7 @@ impl<'a> BattleLoop<'a> {
             links,
             observers: Vec::new(),
             rx,
+            held: VecDeque::new(),
             paused: false,
             steps: 0,
             turns_per_second: 0,
@@ -527,11 +549,12 @@ impl<'a> BattleLoop<'a> {
             }
         }
         let mut rounds = 0;
-        // As classic: no round starts after a stop.
+        // As classic: no round starts after a stop, one that came since the last turn too.
         while rounds < self.config.rules.num_rounds && !self.abort {
             self.run_round();
             self.engine.input(Entry::FinishRound(true));
             rounds += 1;
+            self.take_controls(None);
         }
         let aborted = self.abort;
         for i in 0..self.links.len() {
@@ -702,6 +725,9 @@ impl<'a> BattleLoop<'a> {
         } else {
             self.config.turn_timeout
         };
+        while let Some(incoming) = self.held.pop_front() {
+            self.handle(incoming);
+        }
         let mut deadline = Instant::now() + timeout;
         while (0..self.links.len()).any(|i| self.expecting(i)) {
             let Some(left) = deadline.checked_duration_since(Instant::now()) else {
@@ -854,6 +880,7 @@ impl<'a> BattleLoop<'a> {
     }
 
     fn on_control(&mut self, control: v1::ObserverControl) {
+        log_control("server applies", &control);
         match control.control {
             Some(v1::observer_control::Control::Pause(pause)) => self.paused = pause,
             Some(v1::observer_control::Control::Step(true)) => self.steps += 1,
@@ -1035,7 +1062,13 @@ impl<'a> BattleLoop<'a> {
 
     /// Observer pacing: pause, single steps and a turn rate. A stopped battle runs out its
     /// round at full speed (classic neither pauses nor delays an aborted battle).
+    ///
+    /// The observers' controls are taken in here as well, between turns: the wait for the
+    /// robots' answers takes them in too, but robots that no longer run (a `run` that
+    /// returned, a crash) are not waited for, and with none running a round went on at the
+    /// old speed, deaf to speed, pause and stop until it ended.
     fn pace(&mut self) {
+        self.take_controls(None);
         if self.abort {
             self.paced = None;
             return;
@@ -1043,7 +1076,7 @@ impl<'a> BattleLoop<'a> {
         while self.paused && self.steps == 0 && !self.observers.is_empty() && !self.abort {
             self.paced = None;
             match self.rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(incoming) => self.handle(incoming),
+                Ok(incoming) => self.take(incoming),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -1051,26 +1084,67 @@ impl<'a> BattleLoop<'a> {
         if self.paused && self.steps > 0 {
             self.steps -= 1;
         }
-        if self.turns_per_second == 0 {
-            self.paced = None;
-            return;
-        }
         // Turns are due a turn's time apart, whatever the turns themselves take: sleeping
         // a whole turn's time after each would add their time (and the sleep's overshoot)
         // to every turn, and fall well short of fast rates (1000 a second ran at 600).
         // A battle that fell behind (slow robots, a pause, a faster rate) starts afresh
-        // rather than catching up in a burst.
-        let interval = Duration::from_secs_f64(1.0 / f64::from(self.turns_per_second));
-        let now = Instant::now();
-        let due = self
-            .paced
-            .map(|last| last + interval)
-            .filter(|&due| due + interval >= now)
-            .unwrap_or(now);
-        if let Some(wait) = due.checked_duration_since(now) {
-            thread::sleep(wait);
+        // rather than catching up in a burst. Controls that come while it waits apply at
+        // once: a faster rate (or a stop) doesn't wait out the slow rate's turn.
+        loop {
+            if self.turns_per_second == 0 || self.abort {
+                self.paced = None;
+                return;
+            }
+            let interval = Duration::from_secs_f64(1.0 / f64::from(self.turns_per_second));
+            let now = Instant::now();
+            let due = self
+                .paced
+                .map(|last| last + interval)
+                .filter(|&due| due + interval >= now)
+                .unwrap_or(now);
+            match due.checked_duration_since(now).filter(|w| !w.is_zero()) {
+                Some(wait) if self.take_controls(Some(wait)) => {}
+                Some(_) | None => {
+                    self.paced = Some(due);
+                    return;
+                }
+            }
         }
-        self.paced = Some(due);
+    }
+
+    /// Takes in what has come, or waits up to `wait` for something to come: observers'
+    /// controls apply now, the robots' messages are held for the next turn. True when
+    /// something came before `wait` was over.
+    fn take_controls(&mut self, wait: Option<Duration>) -> bool {
+        let incoming = match wait {
+            Some(wait) => match self.rx.recv_timeout(wait) {
+                Ok(incoming) => incoming,
+                Err(RecvTimeoutError::Timeout) => return false,
+                Err(RecvTimeoutError::Disconnected) => {
+                    // Nothing comes anymore: wait out the turn.
+                    thread::sleep(wait);
+                    return false;
+                }
+            },
+            None => {
+                while let Ok(incoming) = self.rx.try_recv() {
+                    self.take(incoming);
+                }
+                return false;
+            }
+        };
+        self.take(incoming);
+        true
+    }
+
+    /// An observer's control or connection now, anything else with the next turn.
+    fn take(&mut self, incoming: Incoming) {
+        match incoming {
+            Incoming::Control(_)
+            | Incoming::ObserverConnected { .. }
+            | Incoming::ObserverLeft { .. } => self.handle(incoming),
+            other => self.held.push_back(other),
+        }
     }
 
     fn send(&mut self, i: usize, msg: server_message::Msg) {

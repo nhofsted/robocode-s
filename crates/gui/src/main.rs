@@ -52,7 +52,9 @@ for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
 system's frame, and on Windows). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
 resizes handed to the system to stderr. ROBOCODES_PERF_LOG=1 logs the renderer
-and the frame rate and frame times once a second (=frames: every frame) to stderr.
+and the frame rate and frame times once a second (=frames: every frame), and a
+battle's controls (speed, pause, stop) as sent and as its server applies them, to
+stderr.
 
   --watch HOST:PORT  watch the battle on that server as an observer (one run with
                      `robocode-s battle --observe PORT`), in the Watch Battle tab
