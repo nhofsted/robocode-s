@@ -275,6 +275,25 @@ public final class RobotRandomness {
         agentInstalled = true;
     }
 
+    /** Whether the agent counts the work of robot code (ADR 0014). */
+    public static boolean isMeteringWork() {
+        return agentInstalled && METER_WORK;
+    }
+
+    /**
+     * The work counted for the robots of this JVM so far (in robocode-s: one robot), as
+     * virtual time in nanoseconds: what the virtual clock adds for it, without the turns.
+     */
+    public static long countedWorkNanos() {
+        long instructions = 0;
+        synchronized (FUEL) {
+            for (long[] fuel : FUEL.values()) {
+                instructions += fuel[0];
+            }
+        }
+        return elapsedNanos(0, instructions);
+    }
+
     /** Next value for a robot's {@code Math.random()}, or NaN outside robot threads. */
     private double mathRandom() {
         Stream stream = currentStream();
