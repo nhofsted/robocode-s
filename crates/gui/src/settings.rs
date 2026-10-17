@@ -39,6 +39,9 @@ pub struct Settings {
     pub watch: String,
     /// The energy and CPU graphs show the whole battle rather than the round.
     pub graphs_battle: bool,
+    /// The most frames a second the animations draw; 0 for the display's refresh rate
+    /// (see [`crate::pace`]).
+    pub frame_rate: u32,
 }
 
 /// The battle rules besides the rounds and the battlefield size (classic's `BattleRules`).
@@ -86,6 +89,7 @@ impl Default for Settings {
             rules: Rules::default(),
             watch: "localhost:7654".into(),
             graphs_battle: false,
+            frame_rate: 0,
         }
     }
 }
@@ -292,6 +296,7 @@ mod tests {
             },
             watch: "server:7654".into(),
             graphs_battle: true,
+            frame_rate: 60,
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);

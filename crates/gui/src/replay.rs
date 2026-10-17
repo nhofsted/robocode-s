@@ -346,7 +346,9 @@ impl ReplayView {
             }
             self.last_tick = Some(last + std::time::Duration::from_secs_f64(steps as f64 / rate));
         }
-        ctx.request_repaint();
+        // The next frame when the next turn is due.
+        let next = self.last_tick.unwrap_or(now) + std::time::Duration::from_secs_f64(1.0 / rate);
+        crate::pace::next_frame_in(ctx, next.saturating_duration_since(Instant::now()));
     }
 
     /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
