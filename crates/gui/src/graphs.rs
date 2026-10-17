@@ -184,7 +184,7 @@ pub fn graphs(
         ui.label(RichText::new(text).size(11.0).weak())
             .on_hover_text(if budget > 0.0 {
                 "CPU time each robot used per turn (averaged over a few turns), against \
-                 its turn budget (dashed)"
+                 its turn budget (red; along the top when it's above the scale)"
             } else {
                 "Work each robot did per turn (averaged over a few turns), counted and \
                  converted to time as on the reference machine; deterministic mode has no \
@@ -240,7 +240,7 @@ struct Plot<'a> {
     range: std::ops::Range<usize>,
     /// The scale comes from the values, up to this (higher values are clipped).
     top: Option<f32>,
-    /// A dashed line at this value (the CPU budget).
+    /// The CPU budget: a red line at this value, or along the top when it's off the scale.
     limit: Option<f32>,
     /// Each point is the mean of this many turns, up to it.
     smooth: usize,
@@ -302,16 +302,6 @@ impl Plot<'_> {
                 painter.vline(at, rect.y_range(), grid);
             }
         }
-        if let Some(limit) = self.limit.filter(|&l| l <= top) {
-            let at = y(limit);
-            let dashes = Shape::dashed_line(
-                &[pos2(rect.left(), at), pos2(rect.right(), at)],
-                Stroke::new(1.0, Color32::from_rgb(0xc0, 0x3a, 0x3a).gamma_multiply(0.8)),
-                4.0,
-                3.0,
-            );
-            painter.extend(dashes);
-        }
         let columns = rect.width().max(1.0) as usize;
         for (values, &color) in series.iter().zip(colors) {
             let mut points = Vec::new();
@@ -342,6 +332,38 @@ impl Plot<'_> {
             Stroke::new(1.0, shell::LINE),
             egui::StrokeKind::Inside,
         );
+        // The budget over the robots' lines: dashed at its value, or solid along the top
+        // when the scale stays below it, labelled top right.
+        if let Some(limit) = self.limit {
+            let red = Color32::from_rgb(0xd0, 0x40, 0x40);
+            let stroke = Stroke::new(1.5, red);
+            if limit <= top {
+                let at = y(limit);
+                painter.extend(Shape::dashed_line(
+                    &[pos2(rect.left(), at), pos2(rect.right(), at)],
+                    stroke,
+                    4.0,
+                    3.0,
+                ));
+            } else {
+                painter.hline(rect.x_range(), rect.top() + 0.75, stroke);
+            }
+            let label = painter.layout_no_wrap(
+                format!("budget {}{}", trimmed(limit), self.unit),
+                FontId::proportional(10.0),
+                red,
+            );
+            let at = pos2(
+                rect.right() - label.size().x - 4.0,
+                (y(limit) + 2.0).min(rect.bottom() - label.size().y - 2.0),
+            );
+            painter.rect_filled(
+                egui::Rect::from_min_size(at - vec2(2.0, 0.0), label.size() + vec2(4.0, 0.0)),
+                2.0,
+                shell::BAR.gamma_multiply(0.85),
+            );
+            painter.galley(at, label, red);
+        }
         // The scale, top left, on a backing so lines don't run through it.
         let scale = painter.layout_no_wrap(
             format!("{}{}", trimmed(top), self.unit),
