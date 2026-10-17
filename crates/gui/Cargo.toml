@@ -34,6 +34,12 @@ pulseaudio = "0.3.2"
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 cpal = "0.18.2"
 
-# The terminal a release build was started from (`src/console.rs`).
+# The terminal a release build was started from (`src/console.rs`); the system's parts of
+# our own window frame (`src/window.rs`).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+raw-window-handle = "0.6.2"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+
+# The .exe's icon and version information (`build.rs`), only when building for Windows.
+[build-dependencies]
+winresource = { version = "0.1.34", default-features = false }

@@ -2,14 +2,19 @@
 // flood-filled from the borders, becomes transparent (soft edge for near-black pixels).
 // Usage: node tools/favicon.mjs robocode.ico outdir [sizes...]
 // Writes original-<size>.png and favicon-<size>.png; the site uses favicon-32 and favicon-256.
+// The functions are also used by crates/gui/tools/app-icon.mjs (the desktop app's icon).
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
-const [icoPath, outDir, ...sizeArgs] = process.argv.slice(2);
-const buf = readFileSync(icoPath);
-const wanted = sizeArgs.map(Number);
+/** The sizes in an .ico file, by index. */
+export function sizes(buf) {
+	const count = buf.readUInt16LE(4);
+	return Array.from({ length: count }, (_, i) => buf[6 + i * 16] || 256);
+}
 
-function decode(i) {
+/** Entry `i` of an .ico file holding 32-bit BMP images, as RGBA rows top to bottom. */
+export function decode(buf, i) {
 	const e = 6 + i * 16;
 	const w = buf[e] || 256;
 	const off = buf.readUInt32LE(e + 12);
@@ -30,7 +35,7 @@ function decode(i) {
 	return { w, h, px };
 }
 
-function knockOut({ w, h, px }, hard = 34, soft = 80) {
+export function knockOut({ w, h, px }, hard = 34, soft = 80) {
 	const lum = (i) => Math.max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]);
 	const seen = new Uint8Array(w * h);
 	const stack = [];
@@ -57,7 +62,7 @@ function knockOut({ w, h, px }, hard = 34, soft = 80) {
 	return { w, h, px };
 }
 
-function png({ w, h, px }) {
+export function png({ w, h, px }) {
 	const crcTable = Array.from({ length: 256 }, (_, n) => {
 		let c = n;
 		for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -94,10 +99,13 @@ function png({ w, h, px }) {
 	]);
 }
 
-const count = buf.readUInt16LE(4);
-for (let i = 0; i < count; i++) {
-	const w = buf[6 + i * 16] || 256;
-	if (!wanted.includes(w)) continue;
-	writeFileSync(`${outDir}/original-${w}.png`, png(decode(i)));
-	writeFileSync(`${outDir}/favicon-${w}.png`, png(knockOut(decode(i))));
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+	const [icoPath, outDir, ...sizeArgs] = process.argv.slice(2);
+	const buf = readFileSync(icoPath);
+	const wanted = sizeArgs.map(Number);
+	sizes(buf).forEach((w, i) => {
+		if (!wanted.includes(w)) return;
+		writeFileSync(`${outDir}/original-${w}.png`, png(decode(buf, i)));
+		writeFileSync(`${outDir}/favicon-${w}.png`, png(knockOut(decode(buf, i))));
+	});
 }

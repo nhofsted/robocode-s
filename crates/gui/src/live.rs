@@ -88,6 +88,9 @@ impl Live {
             let tx = updates_tx.clone();
             let repaint = ctx.clone();
             let result = run_local_battle(&host, &battle, Some(controls_rx), |msg| {
+                if matches!(msg, server_message::Msg::TurnSnapshot(_)) {
+                    crate::perf::turn_arrived();
+                }
                 let _ = tx.send(Update::Message(Box::new(msg.clone())));
                 crate::pace::next_frame(&repaint);
             });
@@ -185,6 +188,7 @@ impl Live {
             };
             match update {
                 Ok(server_message::Msg::TurnSnapshot(s)) => {
+                    crate::perf::turn_taken();
                     for (out, r) in self.output.iter_mut().zip(&s.robots) {
                         if !r.output.is_empty() {
                             out.push_str(&r.output);

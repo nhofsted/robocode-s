@@ -7,10 +7,27 @@
 //! without submitting and presenting the frame, which is where a software renderer such
 //! as llvmpipe draws it). `ROBOCODES_PERF_LOG=frames` adds a line per frame: when it
 //! began (milliseconds of the wall clock's last 100 seconds, to line it up with other
-//! logs), its size, its times and what asked for it.
+//! logs), its size, its times and what asked for it. The once-a-second line also has the
+//! live battle's turns a second: as they arrived from the server, and as the window took
+//! them in.
 
 use eframe::egui;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+
+/// Turns of live battles that arrived from their servers, and that the window took in.
+static ARRIVED: AtomicU64 = AtomicU64::new(0);
+static TAKEN: AtomicU64 = AtomicU64::new(0);
+
+/// Counts a live battle's turn as it arrives (on the battle's thread).
+pub fn turn_arrived() {
+    ARRIVED.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts a live battle's turn as the window takes it in.
+pub fn turn_taken() {
+    TAKEN.fetch_add(1, Ordering::Relaxed);
+}
 
 /// What the log adds up between its lines.
 pub struct Perf {
@@ -129,8 +146,10 @@ impl Perf {
         let span = (now - self.window).as_secs_f64();
         if span >= 1.0 {
             let n = f64::from(self.frames);
+            let arrived = ARRIVED.swap(0, Ordering::Relaxed) as f64;
+            let taken = TAKEN.swap(0, Ordering::Relaxed) as f64;
             eprintln!(
-                "[perf] {:.0}x{:.0} px: {:.1} fps ({} resized), gap {:.1} ms (max {:.1}), app {:.1} ms (max {:.1}), eframe cpu {:.1} ms (max {:.1})",
+                "[perf] {:.0}x{:.0} px: {:.1} fps ({} resized), gap {:.1} ms (max {:.1}), app {:.1} ms (max {:.1}), eframe cpu {:.1} ms (max {:.1}), turns {:.0}/s arrived, {:.0}/s shown",
                 size.x,
                 size.y,
                 n / span,
@@ -141,6 +160,8 @@ impl Perf {
                 self.app.1 * 1e3,
                 self.cpu.0 / n * 1e3,
                 self.cpu.1 * 1e3,
+                arrived / span,
+                taken / span,
             );
             self.window = now;
             self.frames = 0;

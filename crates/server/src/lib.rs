@@ -457,6 +457,8 @@ struct BattleLoop<'a> {
     paused: bool,
     steps: u32,
     turns_per_second: u32,
+    /// When the last paced turn was due: the next one is due a turn's time later.
+    paced: Option<Instant>,
     /// An observer stopped the battle; the engine aborts before its next step.
     abort: bool,
     /// Robots an observer killed; they die before the next step.
@@ -507,6 +509,7 @@ impl<'a> BattleLoop<'a> {
             paused: false,
             steps: 0,
             turns_per_second: 0,
+            paced: None,
             abort: false,
             kills: Vec::new(),
             input: Vec::new(),
@@ -1034,9 +1037,11 @@ impl<'a> BattleLoop<'a> {
     /// round at full speed (classic neither pauses nor delays an aborted battle).
     fn pace(&mut self) {
         if self.abort {
+            self.paced = None;
             return;
         }
         while self.paused && self.steps == 0 && !self.observers.is_empty() && !self.abort {
+            self.paced = None;
             match self.rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(incoming) => self.handle(incoming),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -1046,11 +1051,26 @@ impl<'a> BattleLoop<'a> {
         if self.paused && self.steps > 0 {
             self.steps -= 1;
         }
-        if self.turns_per_second > 0 {
-            thread::sleep(Duration::from_secs_f64(
-                1.0 / f64::from(self.turns_per_second),
-            ));
+        if self.turns_per_second == 0 {
+            self.paced = None;
+            return;
         }
+        // Turns are due a turn's time apart, whatever the turns themselves take: sleeping
+        // a whole turn's time after each would add their time (and the sleep's overshoot)
+        // to every turn, and fall well short of fast rates (1000 a second ran at 600).
+        // A battle that fell behind (slow robots, a pause, a faster rate) starts afresh
+        // rather than catching up in a burst.
+        let interval = Duration::from_secs_f64(1.0 / f64::from(self.turns_per_second));
+        let now = Instant::now();
+        let due = self
+            .paced
+            .map(|last| last + interval)
+            .filter(|&due| due + interval >= now)
+            .unwrap_or(now);
+        if let Some(wait) = due.checked_duration_since(now) {
+            thread::sleep(wait);
+        }
+        self.paced = Some(due);
     }
 
     fn send(&mut self, i: usize, msg: server_message::Msg) {

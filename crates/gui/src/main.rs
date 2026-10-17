@@ -85,6 +85,21 @@ and the frame rate and frame times once a second (=frames: every frame) to stder
 /// tabs and gear set the width; below the height the battlefield gets too small.
 const MIN_SIZE: [f32; 2] = [720.0, 480.0];
 
+/// The window's icon: classic Robocode's application icon, as the website's favicon and the
+/// Windows program's own icon (`crates/gui/assets/README.md`).
+const ICON: &[u8] = include_bytes!("../../../web/static/favicon-256.png");
+
+fn icon() -> eframe::egui::IconData {
+    let image = image::load_from_memory_with_format(ICON, image::ImageFormat::Png)
+        .expect("the icon is a PNG")
+        .into_rgba8();
+    eframe::egui::IconData {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
+    }
+}
+
 /// `--size`: `WxH` in points.
 fn parse_size(text: &str) -> Option<[f32; 2]> {
     let (w, h) = text.split_once(['x', 'X'])?;
@@ -232,6 +247,9 @@ fn main() -> ExitCode {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("robocode-s")
+            // The Wayland app id and X11 class, which desktops match to `robocode-s.desktop`.
+            .with_app_id("robocode-s")
+            .with_icon(icon())
             .with_inner_size(size)
             .with_min_inner_size(min_size)
             .with_decorations(!own_frame),
@@ -274,6 +292,31 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_icon_decodes() {
+        let icon = super::icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    }
+
+    /// The .exe's icon (`build.rs`) holds the window's icon as its 256 pixel image.
+    #[test]
+    fn the_exe_icon_matches_the_window_icon() {
+        let ico = include_bytes!("../assets/robocode-s.ico");
+        let u16_at = |i: usize| u16::from_le_bytes([ico[i], ico[i + 1]]) as usize;
+        let u32_at = |i: usize| u32::from_le_bytes(ico[i..i + 4].try_into().unwrap()) as usize;
+        let sizes: Vec<usize> = (0..u16_at(4))
+            .map(|i| match ico[6 + 16 * i] {
+                0 => 256,
+                w => w as usize,
+            })
+            .collect();
+        assert_eq!(sizes, [16, 24, 32, 48, 64, 128, 256]);
+        let last = 6 + 16 * 6;
+        let (len, offset) = (u32_at(last + 8), u32_at(last + 12));
+        assert_eq!(&ico[offset..offset + len], super::ICON);
+    }
+
     use super::{parse_size, parse_zoom};
 
     #[test]

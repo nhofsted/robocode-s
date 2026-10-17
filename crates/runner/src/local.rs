@@ -160,7 +160,7 @@ fn run_describe(
     // Java runs in `home`, so a relative path to it must become absolute first.
     let java = crate::absolute_if_path(&host.java).map_err(|e| e.to_string())?;
     let mut command = Command::new(&java);
-    command
+    crate::no_window(&mut command)
         .args(MODULE_OPENINGS)
         .arg("-cp")
         .arg(lib.join("*"))
@@ -490,6 +490,8 @@ pub fn run_local_battle_with(
     let server = thread::spawn(move || run_battle_with(listener, observers, &config, entries));
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
+    // Controls are small messages: sent at once, not held for the last one's ack.
+    observer.set_nodelay(true).map_err(|e| e.to_string())?;
     let hello = v1::ClientMessage {
         msg: Some(client_message::Msg::Hello(v1::Hello {
             version: Some(PROTOCOL_VERSION),

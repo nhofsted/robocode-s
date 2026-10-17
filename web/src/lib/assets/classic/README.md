@@ -6,4 +6,4 @@ Copyright (c) 2001-2025 Mathew A. Nelson and Robocode contributors. Originally m
 
 The robot images are recoloured in the browser with classic's own algorithm (`ImageUtil.ColorFilter`), ported in `../../components/sprites.ts`; the floor tiles are laid out as in classic's `BattleView` (`../../components/Ground.svelte`).
 
-`static/favicon-32.png` and `favicon-256.png` are classic's application icon (`robocode.content/src/main/resources/robocode.ico`, also the favicon of robocode.sourceforge.io) at those sizes, with the black background made transparent: `node tools/favicon.mjs <robocode.ico> static 32 256`, then rename `favicon-*.png`.
+`static/favicon-32.png` and `favicon-256.png` are classic's application icon (`robocode.content/src/main/resources/robocode.ico`, also the favicon of robocode.sourceforge.io) at those sizes, with the black background made transparent: `node tools/favicon.mjs <robocode.ico> static 32 256`, then rename `favicon-*.png`. The desktop app's icon (`crates/gui/assets/robocode-s.ico`, see its README) is the same image at all of the `.ico`'s sizes, made with the same functions.

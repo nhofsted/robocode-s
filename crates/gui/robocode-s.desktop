@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=robocode-s
+Comment=Robocode battles: setup, live viewer, debug paint, replay
+Exec=robocode-s-gui %f
+Icon=robocode-s
+Terminal=false
+Categories=Game;Simulation;
+StartupWMClass=robocode-s
