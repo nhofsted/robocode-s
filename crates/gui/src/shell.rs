@@ -203,7 +203,7 @@ pub fn page<T>(
             let area = ui.max_rect();
             let column = column(area);
             let (backdrop, sprites) = scenery(state);
-            backdrop.show(ui, sprites, area, column);
+            backdrop.show(ui, sprites, area);
             ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
                 egui::Frame::NONE
                     .fill(PANEL)
