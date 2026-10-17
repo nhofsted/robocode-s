@@ -352,7 +352,7 @@ impl App {
             settings_error: None,
             settings_unsaved: None,
             battles: 0,
-            files: FileDialog::new()
+            files: FileDialog::with_file_system(std::sync::Arc::new(crate::files::Files))
                 .id("file-dialog")
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]),
             browsing: None,
@@ -1096,6 +1096,15 @@ impl App {
             }
             .to_string(),
         );
+        let filters: &[(&str, &'static [&'static str])] = match field {
+            Browse::Replay => &[
+                ("Recordings", &["rsr", "rec", "track"]),
+                ("Website tracks", &["track"]),
+            ],
+            Browse::OpenBattle => &[("Battle files", &["battle"])],
+            Browse::Record | Browse::Folder | Browse::Save => &[],
+        };
+        crate::files::set_filters(config, filters);
         match field {
             Browse::Record | Browse::Save => self.files.save_file(),
             Browse::Replay | Browse::OpenBattle => self.files.pick_file(),
