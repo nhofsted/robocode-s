@@ -1552,11 +1552,25 @@ impl App {
                 screen::divider(ui);
                 let mut tps = live.turns_per_second;
                 let (ended, stopping) = (live.outcome.is_some(), live.stopping);
+                let watching = live.watching.is_some();
                 let changed = screen::speed_and_readouts(
                     ui,
                     &mut tps,
                     Some(&live.seed.to_string()),
                     |ui| {
+                        // A watched battle can be left as it runs (or when its server
+                        // stopped answering): it goes on without us.
+                        if watching && !ended {
+                            let button = egui::Button::new("Leave").min_size(egui::vec2(0.0, 26.0));
+                            if ui
+                                .add(button)
+                                .on_hover_text("Stop watching: the battle goes on without you")
+                                .clicked()
+                            {
+                                next = Next::Setup;
+                            }
+                            ui.add_space(8.0);
+                        }
                         if ended {
                             let button = egui::Button::new(RichText::new("New battle").strong())
                                 .min_size(egui::vec2(0.0, 26.0));
