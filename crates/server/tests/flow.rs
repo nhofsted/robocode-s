@@ -302,3 +302,68 @@ fn a_stop_before_the_robots_connect_ends_the_battle() {
     assert!(outcome.aborted);
     assert_eq!(outcome.rounds, 0);
 }
+
+#[test]
+fn a_battle_stopped_before_its_first_round_leaves_no_recording() {
+    let path = std::env::temp_dir().join(format!("robocodes-cancelled-{}.rec", std::process::id()));
+    let config = ServerConfig {
+        rules: small_rules(),
+        connect_timeout: Duration::from_secs(30),
+        record: Some(path.clone()),
+        ..Default::default()
+    };
+    let (address, server) = start(config, vec![entry("a.A", "a")]);
+    let mut observer = connect(&address, PROTOCOL_VERSION.major, v1::Role::Observer, "");
+    // The file is there while the battle starts (a bad path fails at once).
+    thread::sleep(Duration::from_millis(100));
+    assert!(path.exists());
+    control(&mut observer, v1::observer_control::Control::Abort(true));
+    let outcome = server.join().unwrap().unwrap();
+    assert_eq!(outcome.rounds, 0);
+    assert!(
+        !path.exists(),
+        "no recording of a battle that never started"
+    );
+}
+
+#[test]
+fn the_robots_listener_wants_the_tokens() {
+    let config = ServerConfig {
+        rules: small_rules(),
+        connect_timeout: Duration::from_secs(30),
+        observer_token: "observer-secret".into(),
+        ..Default::default()
+    };
+    let (address, server) = start(config, vec![entry("a.A", "robot-secret")]);
+    // Neither an observer without the token nor a robot with a wrong one gets in.
+    for (role, token) in [
+        (v1::Role::Observer, ""),
+        (v1::Role::Observer, "observer-secreT"),
+        (v1::Role::Robot, "robot-0"),
+    ] {
+        let mut stream = connect(&address, PROTOCOL_VERSION.major, role, token);
+        assert!(
+            matches!(receive(&mut stream), Some(server_message::Msg::Error(_))),
+            "{role:?} with {token:?} refused"
+        );
+        let _ = write_message(
+            &mut stream,
+            &v1::ClientMessage {
+                msg: Some(client_message::Msg::ObserverControl(v1::ObserverControl {
+                    control: Some(v1::observer_control::Control::Abort(true)),
+                })),
+            },
+        );
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert!(!server.is_finished(), "a refused observer stops nothing");
+    let mut observer = connect(
+        &address,
+        PROTOCOL_VERSION.major,
+        v1::Role::Observer,
+        "observer-secret",
+    );
+    control(&mut observer, v1::observer_control::Control::Abort(true));
+    let outcome = server.join().unwrap().unwrap();
+    assert!(outcome.aborted);
+}

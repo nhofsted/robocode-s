@@ -59,8 +59,8 @@ system's frame).
   --screenshot FILE  save the window as PNG and quit: in a battle at turn --after
                      of the first round (or its results, when it ends before),
                      otherwise after --after frames (default 120)
-  --loading          with --battle and --screenshot: shoot the loading screen
-                     after --after frames instead
+  --loading          with --screenshot and --battle or a replay: shoot the loading
+                     screen after --after frames instead
   --kill-at TURN:N   with --battle: kill robot N (from 0, in --battle's order) at
                      turn TURN of the first round, as its kill button does
   --input-at TURN:EVENT

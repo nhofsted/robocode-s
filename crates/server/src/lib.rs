@@ -57,8 +57,13 @@ pub struct ServerConfig {
     pub hard_limit: Duration,
     /// How long robots get to connect before the battle starts without them.
     pub connect_timeout: Duration,
-    /// Record the battle to this file (design §11, [`recording`]).
+    /// Record the battle to this file (design §11, [`recording`]); a battle stopped
+    /// before its first round leaves none.
     pub record: Option<PathBuf>,
+    /// The token observers present on the robots' listener (the embedded observer of a
+    /// local battle, [`random_token`]); empty: none (tests). Observers from elsewhere
+    /// use [`Observers`] and its token instead.
+    pub observer_token: String,
 }
 
 impl Default for ServerConfig {
@@ -72,15 +77,25 @@ impl Default for ServerConfig {
             hard_limit: Duration::from_secs(60),
             connect_timeout: Duration::from_secs(30),
             record: None,
+            observer_token: String::new(),
         }
     }
+}
+
+/// A fresh unpredictable token (128 bits from the operating system's randomness, as hex)
+/// for a robot or an observer of one battle.
+pub fn random_token() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("the operating system's randomness");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A robot expected in the battle.
 #[derive(Debug, Clone)]
 pub struct RobotEntry {
     pub statics: v1::RobotStatics,
-    /// The one-time token the robot presents in its `Hello`.
+    /// The one-time token the robot presents in its `Hello` ([`random_token`]: any local
+    /// process can reach the robots' listener).
     pub token: String,
 }
 
@@ -184,8 +199,9 @@ pub fn run_battle_with(
     let tokens: Vec<String> = robots.iter().map(|r| r.token.clone()).collect();
     let acceptor = {
         let (tx, stop) = (tx.clone(), stop.clone());
+        let observer_token = config.observer_token.clone();
         listener.set_nonblocking(true)?;
-        thread::spawn(move || accept_loop(&listener, &tokens, &tx, &stop))
+        thread::spawn(move || accept_loop(&listener, &tokens, &observer_token, &tx, &stop))
     };
     let wait = observers.as_ref().is_some_and(|o| o.wait);
     let observer_acceptor = match observers {
@@ -303,6 +319,7 @@ fn same_secret(presented: &[u8], secret: &[u8]) -> bool {
 fn accept_loop(
     listener: &TcpListener,
     tokens: &[String],
+    observer_token: &str,
     tx: &Sender<Incoming>,
     stop: &AtomicBool,
 ) {
@@ -310,7 +327,7 @@ fn accept_loop(
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
-                let _ = handshake(stream, tokens, &mut taken, tx);
+                let _ = handshake(stream, tokens, observer_token, &mut taken, tx);
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(5))
@@ -320,10 +337,12 @@ fn accept_loop(
     }
 }
 
-/// Reads the `Hello` and hands the connection to the battle loop.
+/// Reads the `Hello` and hands the connection to the battle loop. Robots and observers
+/// alike show their token: the listener is on loopback, but any local process reaches it.
 fn handshake(
     stream: TcpStream,
     tokens: &[String],
+    observer_token: &str,
     taken: &mut [bool],
     tx: &Sender<Incoming>,
 ) -> io::Result<()> {
@@ -343,7 +362,12 @@ fn handshake(
     stream.set_read_timeout(None)?;
     match v1::Role::try_from(hello.role) {
         Ok(v1::Role::Robot) => {
-            let Some(index) = tokens.iter().position(|t| *t == hello.token) else {
+            // Every token is compared, in constant time each.
+            let index = tokens.iter().enumerate().fold(None, |found, (i, t)| {
+                let matches = same_secret(hello.token.as_bytes(), t.as_bytes());
+                found.or(matches.then_some(i))
+            });
+            let Some(index) = index else {
                 return refuse(stream, "unknown robot token");
             };
             if taken[index] {
@@ -354,6 +378,9 @@ fn handshake(
             let _ = tx.send(Incoming::RobotConnected { index, stream });
         }
         Ok(v1::Role::Observer) => {
+            if !same_secret(hello.token.as_bytes(), observer_token.as_bytes()) {
+                return refuse(stream, "wrong observer token");
+            }
             let left = tx.clone();
             spawn_observer_reader(reader, tx.clone(), move || {
                 let _ = left.send(Incoming::ObserverLeft { remote: false });
@@ -529,7 +556,15 @@ impl<'a> BattleLoop<'a> {
         {
             let _ = stream.shutdown(Shutdown::Both);
         }
-        self.engine.finish()?;
+        let finished = self.engine.finish();
+        // A battle stopped before its first round (a cancelled start) leaves no
+        // recording. The file is created up front, so that a bad path fails at once.
+        if rounds == 0
+            && let Some(path) = &self.config.record
+        {
+            let _ = std::fs::remove_file(path);
+        }
+        finished?;
         Ok(BattleOutcome {
             results,
             rounds,

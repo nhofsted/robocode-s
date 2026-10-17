@@ -6,7 +6,7 @@
 use crate::backdrop::Backdrop;
 use crate::icons;
 use crate::live::Live;
-use crate::replay::ReplayView;
+use crate::replay::{Opening, ReplayView};
 use crate::screen;
 use crate::settings::{Contents, Rules, Settings};
 use crate::shell::{self, Tab};
@@ -216,6 +216,8 @@ pub struct App {
     launched: Option<Setup>,
     /// The recording in the Replay Battle tab; a file field when there is none.
     replay: Option<Box<ReplayView>>,
+    /// A recording being opened: the Replay Battle tab shows its progress.
+    opening: Option<Opening>,
     selected: usize,
     error: Option<String>,
     replay_error: Option<String>,
@@ -334,6 +336,7 @@ impl App {
             selected: 0,
             error: None,
             replay_error: None,
+            opening: None,
             screenshot,
             kill_at: launch.kill_at,
             input_at: launch.input_at,
@@ -366,7 +369,7 @@ impl App {
         app.scan_folders();
         app.list_robots(&cc.egui_ctx);
         if let Some(path) = launch.replay {
-            app.open_replay(path);
+            app.open_replay(&cc.egui_ctx, path);
         } else if launch.start {
             app.start(&cc.egui_ctx);
         } else if launch.watch {
@@ -424,9 +427,9 @@ impl App {
         }
     }
 
-    /// Lists the robots in the jars on a background thread (it starts a JVM). One listing
-    /// at a time: they share their home, which the robot host empties first, so a second
-    /// one at once fails. Asked again while one runs, it lists again once that one is done.
+    /// Lists the robots in the jars on a background thread (it starts a JVM), each listing
+    /// in a home of its own below `data/list`. One listing at a time: asked again while
+    /// one runs, it lists again once that one is done.
     fn list_robots(&mut self, ctx: &egui::Context) {
         if self.listing.is_some() {
             self.relist = true;
@@ -771,16 +774,35 @@ impl App {
         }
     }
 
-    fn open_replay(&mut self, path: PathBuf) {
+    /// Opens a recording in the Replay Battle tab, on a thread of its own (it is replayed
+    /// once, which takes a while for a long battle); one opening before cancels.
+    fn open_replay(&mut self, ctx: &egui::Context, path: PathBuf) {
         self.tab = Tab::Replay;
-        match ReplayView::open(&path) {
+        self.replay_error = None;
+        self.opening = Some(Opening::start(ctx, path));
+    }
+
+    /// Takes the recording being opened once it is there, or why it couldn't be.
+    fn poll_opening(&mut self) {
+        let Some(result) = self.opening.as_ref().and_then(Opening::poll) else {
+            return;
+        };
+        let path = self
+            .opening
+            .take()
+            .map(|o| o.path.clone())
+            .unwrap_or_default();
+        match result {
             Ok(mut view) => {
                 self.selected = 0;
-                self.replay_error = None;
                 view.camera = self.camera;
                 self.replay = Some(Box::new(view));
             }
-            Err(e) => self.replay_error = Some(format!("{}: {e}", path.display())),
+            Err(e) => {
+                // The Replay Battle page shows the error, not an earlier replay.
+                self.replay = None;
+                self.replay_error = Some(format!("{}: {e}", path.display()));
+            }
         }
     }
 
@@ -1129,7 +1151,7 @@ impl App {
                 Browse::Record => self.setup.record = path.display().to_string(),
                 Browse::Replay => {
                     self.open_path = path.display().to_string();
-                    self.open_replay(path);
+                    self.open_replay(ctx, path);
                 }
                 Browse::Folder => {
                     let before = self.settings.clone();
@@ -1207,6 +1229,50 @@ impl App {
         }
     }
 
+    /// The Replay Battle tab while a recording opens: its progress, and Cancel, which
+    /// goes back to the replay before, if any.
+    fn opening_page(&mut self, root: &mut egui::Ui) {
+        let mut cancel = false;
+        self.page(root, |app, ui| {
+            let Some(opening) = &app.opening else {
+                return;
+            };
+            section(ui, "Opening the replay");
+            ui.add_space(20.0);
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Spinner::new().size(28.0).color(shell::ACCENT));
+                ui.add_space(8.0);
+                let name = opening
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                ui.label(format!("Replaying {name}…"));
+                ui.add_space(10.0);
+                let (bar, _) = ui.allocate_exact_size(egui::vec2(320.0, 6.0), egui::Sense::hover());
+                let done = opening.progress().clamp(0.0, 1.0);
+                let painter = ui.painter();
+                painter.rect_filled(bar, 3.0, shell::LINE);
+                let mut filled = bar;
+                filled.set_width(bar.width() * done);
+                painter.rect_filled(filled, 3.0, shell::ACCENT);
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("{:.0}%", done * 100.0)).weak());
+                ui.add_space(16.0);
+                let button = egui::Button::new("Cancel").min_size(egui::vec2(120.0, 30.0));
+                if ui.add(button).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        // The progress moves on without input.
+        root.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
+        if cancel {
+            self.opening = None;
+        }
+    }
+
     /// The Replay Battle tab without a recording: which file to open.
     fn replay_page(&mut self, root: &mut egui::Ui) {
         self.page(root, |app, ui| {
@@ -1224,7 +1290,7 @@ impl App {
                 }
                 if ui.button("Open").clicked() && !app.open_path.trim().is_empty() {
                     let path = PathBuf::from(app.open_path.trim());
-                    app.open_replay(path);
+                    app.open_replay(ui.ctx(), path);
                 }
             });
             ui.label(
@@ -2028,6 +2094,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.poll_opening();
         match self.tab {
             Tab::Start if self.starting.is_some() => self.loading_page(root),
             Tab::Start if self.live.is_some() => match self.live_ui(root) {
@@ -2054,6 +2121,7 @@ impl eframe::App for App {
                 }
             },
             Tab::Start => self.start_page(root),
+            Tab::Replay if self.opening.is_some() => self.opening_page(root),
             Tab::Replay => match &mut self.replay {
                 Some(replay) => {
                     let mut save = None;
@@ -2077,7 +2145,7 @@ impl eframe::App for App {
         let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
         if let Some(path) = dropped {
             self.open_path = path.display().to_string();
-            self.open_replay(path);
+            self.open_replay(ctx, path);
         }
         self.save_settings(ctx);
         self.screenshot_step(ctx);
@@ -2177,6 +2245,10 @@ impl App {
             // A battle that couldn't start: its error, once laid out.
             (Some(starting), _, Tab::Start) if starting.error.is_some() => shot.frames >= 3,
             (Some(_), _, Tab::Start) => shot.loading && shot.frames >= shot.after,
+            // A replay being opened: once it is there (or its loading screen).
+            (_, _, Tab::Replay) if self.opening.is_some() => {
+                shot.loading && shot.frames >= shot.after
+            }
             // An ended battle: its results, once laid out.
             (None, Some(live), Tab::Start) if live.outcome.is_some() => {
                 shot.ended += 1;

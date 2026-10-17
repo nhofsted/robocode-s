@@ -29,7 +29,8 @@ pub struct JavaHost {
 pub struct RobotLaunch {
     /// Server address, e.g. `127.0.0.1:7654`.
     pub server: String,
-    /// The robot's one-time token.
+    /// The robot's one-time token. It goes to the robot host in its environment
+    /// ([`TOKEN_ENV`]), not on its command line, which other users may read.
     pub token: String,
     /// Classic robot name to look up in the jars, e.g. `sample.Fire` or `jk.mega.DrussGT 3.1.16`.
     pub robot: String,
@@ -43,6 +44,9 @@ pub struct RobotLaunch {
     pub deterministic: bool,
     pub memory_mb: u32,
 }
+
+/// The environment variable the robot host reads its token from.
+pub const TOKEN_ENV: &str = "ROBOCODES_ROBOT_TOKEN";
 
 /// Same module openings as classic's robocode.sh; classic's repository needs them.
 pub const MODULE_OPENINGS: [&str; 2] = [
@@ -64,7 +68,6 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     args.push("io.github.nhofsted.robocodes.compat.RobotHost".into());
     for (flag, value) in [
         ("--server", launch.server.clone()),
-        ("--token", launch.token.clone()),
         ("--robot", launch.robot.clone()),
         ("--home", launch.home.display().to_string()),
         ("--seed", launch.seed.to_string()),
@@ -108,6 +111,7 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
     };
     let mut child = Command::new(&host.java)
         .args(jvm_args(&host, &launch))
+        .env(TOKEN_ENV, &launch.token)
         .current_dir(&launch.home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -202,6 +206,7 @@ mod tests {
         assert!(args.contains(&"-XX:-InlineMathNatives".to_string()));
         assert!(args.contains(&"-javaagent:/opt/agent.jar".to_string()));
         assert!(args.windows(2).any(|w| w[0] == "--seed" && w[1] == "42"));
+        assert!(!args.iter().any(|a| a == "--token" || a == "t"));
         launch.deterministic = false;
         let args = jvm_args(&host, &launch);
         assert!(
