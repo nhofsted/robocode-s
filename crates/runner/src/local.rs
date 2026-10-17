@@ -509,7 +509,10 @@ pub fn run_local_battle_with(
                 let message = v1::ClientMessage {
                     msg: Some(client_message::Msg::ObserverControl(control)),
                 };
-                if write_message(&mut writer, &message).is_err() {
+                if let Err(e) = write_message(&mut writer, &message) {
+                    robocode_s_server::log_perf(format_args!(
+                        "window can't send controls anymore: {e}"
+                    ));
                     break;
                 }
             }
@@ -517,11 +520,22 @@ pub fn run_local_battle_with(
     }
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        while let Ok(Some(message)) = read_message::<v1::ServerMessage>(&mut observer) {
-            if let Some(msg) = message.msg
-                && tx.send(msg).is_err()
-            {
-                break;
+        loop {
+            match read_message::<v1::ServerMessage>(&mut observer) {
+                Ok(Some(message)) => {
+                    if let Some(msg) = message.msg
+                        && tx.send(msg).is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    robocode_s_server::log_perf(format_args!(
+                        "window's connection to the battle broke: {e}"
+                    ));
+                    break;
+                }
             }
         }
     });
@@ -543,13 +557,20 @@ pub fn run_local_battle_with(
                 .map_err(|e| format!("launching {}: {e}", robot.statics.name))?,
         );
     }
+    // The battle ends with `BattleOver`; a connection that ends before it broke (the
+    // server then stops the battle, see `ObserverLeft`).
+    let mut over = false;
     for msg in rx {
+        over |= matches!(msg, server_message::Msg::BattleOver(_));
         observe(&msg);
     }
     let outcome = server
         .join()
         .map_err(|_| "server panicked".to_string())?
         .map_err(|e| e.to_string())?;
+    if !over {
+        return Err("lost the connection to the battle".into());
+    }
     let stderr = processes
         .iter_mut()
         .map(|p| {

@@ -3,8 +3,7 @@
 //! The background of the pages: classic's floor, darkened, with a few tanks wandering,
 //! sweeping their radars and firing, as on the website's home page (a port of
 //! `web/src/lib/components/Battlefield.svelte`). Not the engine, just a calm backdrop: slow,
-//! at the options' frame rate (see [`crate::pace`]), and still when there are no margins
-//! to show it in.
+//! at the options' frame rate (see [`crate::pace`]).
 
 use crate::sprites::{Part, Rgb, Sprites};
 use crate::view::sprite;
@@ -30,8 +29,6 @@ const SHADE: Color32 = Color32::from_rgba_premultiplied(5, 7, 11, 153);
 /// Classic's bullet explosion has 17 frames.
 const EXPLOSION_FRAMES: f32 = 17.0;
 const BULLET: Color32 = Color32::from_rgb(255, 194, 92);
-/// Margins narrower than this (each side) aren't worth animating.
-const MIN_MARGIN: f32 = 40.0;
 
 struct Bot {
     pos: Pos2,
@@ -234,9 +231,9 @@ impl Backdrop {
         self.blasts.retain(|e| e.frame < EXPLOSION_FRAMES);
     }
 
-    /// Fills `rect` with the backdrop. `content` is the part the page covers: the tanks
-    /// only move while the margins beside it are wide enough to see them.
-    pub fn show(&mut self, ui: &egui::Ui, sprites: &mut Sprites, rect: Rect, content: Rect) {
+    /// Fills `rect` with the backdrop. The tanks move however narrow the margins beside the
+    /// page: they still show there, and below a short page.
+    pub fn show(&mut self, ui: &egui::Ui, sprites: &mut Sprites, rect: Rect) {
         let ctx = ui.ctx().clone();
         let painter = ui.painter_at(rect);
         floor(&painter, sprites, rect);
@@ -258,16 +255,12 @@ impl Backdrop {
             }
         }
         let now = ctx.input(|i| i.time);
-        let animate = content.left() - rect.left() >= MIN_MARGIN
-            || rect.right() - content.right() >= MIN_MARGIN;
-        if animate {
-            let real = self
-                .last
-                .map_or(1.0, |t| ((now - t) * 60.0) as f32)
-                .min(3.0);
-            self.step(real * PACE, real);
-            crate::pace::next_frame(&ctx);
-        }
+        let real = self
+            .last
+            .map_or(1.0, |t| ((now - t) * 60.0) as f32)
+            .min(3.0);
+        self.step(real * PACE, real);
+        crate::pace::next_frame(&ctx);
         self.last = Some(now);
         self.draw(&ctx, &painter, sprites, rect.min.to_vec2());
     }

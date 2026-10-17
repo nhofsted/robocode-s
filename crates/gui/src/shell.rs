@@ -204,7 +204,7 @@ pub fn page<T>(
             let area = ui.max_rect();
             let column = column(area);
             let (backdrop, sprites) = scenery(state);
-            backdrop.show(ui, sprites, area, column);
+            backdrop.show(ui, sprites, area);
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
