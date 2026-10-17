@@ -33,4 +33,4 @@ The values depend only on what the robot executes, the same in classic's oracle 
 - **Deterministic time:** robots that seed from or budget by the clock are deterministic. Budget loops always terminate and do a fixed amount of work.
 - **Overhead:** robot code runs slower in deterministic mode (a counter update per block; about 1% CPU in the calibration).
 - **Not covered:** time read by the JDK on the robot's behalf (`Thread.sleep`, timeouts) stays real, so robots with timing-dependent threads stay nondeterministic. Robot classes that can't be instrumented (a method growing beyond 64 KiB) run uncounted, with a warning.
-- **Next:** the same counter is the basis for deterministic CPU budgets and skipped turns (#15).
+- The same counter decides deterministic skipped turns (ADR 0018).

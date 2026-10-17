@@ -5,7 +5,9 @@
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, client_message, event, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use robocode_s_server::{BattleOutcome, RobotEntry, ServerConfig, run_battle};
+use robocode_s_server::{
+    BattleOutcome, DETERMINISTIC_BUDGET_NANOS, RobotEntry, ServerConfig, late_turns, run_battle,
+};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -68,6 +70,18 @@ fn execute(stream: &mut TcpStream, turn: i64) {
     let message = v1::ClientMessage {
         msg: Some(client_message::Msg::Execute(v1::Execute {
             turn,
+            commands: Some(v1::RobotCommands::default()),
+            ..Default::default()
+        })),
+    };
+    let _ = write_message(stream, &message);
+}
+
+fn execute_with_work(stream: &mut TcpStream, turn: i64, cpu_nanos: u64) {
+    let message = v1::ClientMessage {
+        msg: Some(client_message::Msg::Execute(v1::Execute {
+            turn,
+            cpu_nanos,
             commands: Some(v1::RobotCommands::default()),
             ..Default::default()
         })),
@@ -207,6 +221,113 @@ fn deterministic_mode_disables_robots_over_the_hard_limit() {
     assert!(saw_death && saw_win, "death {saw_death}, win {saw_win}");
     assert_eq!(outcome.results[0].firsts, 1);
     assert_eq!(outcome.results[1].firsts, 0);
+}
+
+/// A deterministic two-robot battle in which `b.B` reports `work` for its turn `at` (and
+/// nothing otherwise). Returns what B saw: the turns of its Ticks, its SkippedTurn events,
+/// and whether a RobotDeath for B reached A.
+fn work_battle(at: i64, work: u64) -> (Vec<i64>, Vec<i64>, bool) {
+    let config = ServerConfig {
+        rules: BattleRules {
+            inactivity_time: 400,
+            ..small_rules()
+        },
+        deterministic: true,
+        hard_limit: Duration::from_secs(10),
+        ..Default::default()
+    };
+    let (address, server) = start(config, vec![entry("a.A", "a"), entry("b.B", "b")]);
+    let a = {
+        let address = address.clone();
+        thread::spawn(move || {
+            let mut s = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "a");
+            let mut saw_b_death = false;
+            while let Some(msg) = receive(&mut s) {
+                match msg {
+                    server_message::Msg::RoundStart(_) => execute(&mut s, 0),
+                    server_message::Msg::Tick(t) => {
+                        assert_eq!(t.budget_nanos, DETERMINISTIC_BUDGET_NANOS);
+                        for e in &t.events {
+                            if let Some(event::Kind::RobotDeath(d)) = &e.kind {
+                                saw_b_death |= d.name == "b.B";
+                            }
+                        }
+                        execute(&mut s, t.turn);
+                    }
+                    server_message::Msg::BattleOver(_) => break,
+                    _ => {}
+                }
+            }
+            saw_b_death
+        })
+    };
+    let mut b = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "b");
+    let (mut ticks, mut skipped) = (Vec::new(), Vec::new());
+    while let Some(msg) = receive(&mut b) {
+        match msg {
+            server_message::Msg::RoundStart(_) => execute(&mut b, 0),
+            server_message::Msg::Tick(t) => {
+                assert_eq!(t.budget_nanos, DETERMINISTIC_BUDGET_NANOS);
+                ticks.push(t.turn);
+                for e in &t.events {
+                    if let Some(event::Kind::SkippedTurn(s)) = &e.kind {
+                        skipped.push(s.turn);
+                    }
+                }
+                let work = if t.turn == at { work } else { 0 };
+                execute_with_work(&mut b, t.turn, work);
+            }
+            server_message::Msg::BattleOver(_) => break,
+            _ => {}
+        }
+    }
+    let saw_b_death = a.join().unwrap();
+    server.join().unwrap().unwrap();
+    (ticks, skipped, saw_b_death)
+}
+
+#[test]
+fn late_turns_counts_the_turns_a_robot_overran() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    // Within the budget: on time.
+    assert_eq!(late_turns(0, 5, b), 0);
+    assert_eq!(late_turns(b - 1, 5, b), 0);
+    // At the budget: one turn late; then one more per further budget.
+    assert_eq!(late_turns(b, 5, b), 1);
+    assert_eq!(late_turns(2 * b - 1, 5, b), 1);
+    assert_eq!(late_turns(2 * b, 5, b), 2);
+    assert_eq!(late_turns(3 * b + 1, 5, b), 3);
+    assert_eq!(late_turns(40 * b, 5, b), 40);
+    // Turn 1 allows ten budgets.
+    assert_eq!(late_turns(10 * b - 1, 1, b), 0);
+    assert_eq!(late_turns(10 * b, 1, b), 1);
+    assert_eq!(late_turns(12 * b, 1, b), 3);
+    // Turn 0 (the round's start) is never late.
+    assert_eq!(late_turns(0, 0, b), 0);
+    assert_eq!(late_turns(1000 * b, 0, b), 0);
+}
+
+#[test]
+fn deterministic_mode_skips_turns_by_counted_work() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    let (at, work) = (5, 3 * b + 1);
+    let late = late_turns(work, at, b);
+    assert_eq!(late, 3);
+    let (ticks, skipped, saw_death) = work_battle(at, work);
+    assert!(!saw_death, "3 skipped turns do not disable a robot");
+    let i = ticks.iter().position(|&t| t == at).expect("the slow turn");
+    assert_eq!(ticks[i + 1], at + late + 1, "ticks {ticks:?}");
+    assert_eq!(skipped, (at + 1..=at + late).collect::<Vec<_>>());
+}
+
+#[test]
+fn deterministic_mode_disables_robots_that_overrun_too_many_turns() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    let (ticks, _, saw_death) = work_battle(5, 40 * b);
+    assert!(saw_death, "B should be disabled; ticks {ticks:?}");
+    // B's Execute for turn 5 counts as 40 turns late: the Tick after it is turn 46 (the
+    // one that reports its death) and there is none after that.
+    assert_eq!(ticks.last(), Some(&46), "ticks {ticks:?}");
 }
 
 fn control(observer: &mut TcpStream, control: v1::observer_control::Control) {

@@ -217,6 +217,7 @@ Classic robots get a per-robot data directory with a quota (`getDataFile`, `Robo
 ### 7.2 Deterministic mode (optional)
 
 - There are no skipped turns based on time: the server always waits for every robot's intent, up to a hard limit. A robot that exceeds the hard limit is **disabled**. Only that pathological case can make results depend on timing.
+- Robots skip turns by their **counted work** instead (ADR 0018): a robot whose work in a turn exceeds the budget (2.5 ms of virtual time, ADR 0014) answers as many turns late as classic would have run without it, with classic's skipped-turn events and disabling.
 - All engine randomness is seeded.
 - Robots' own randomness is seeded **per robot**: `Math.random()` and `new Random()` draw from streams derived from the battle seed and the robot's name (ADR 0009). For JVM robots, a Java agent (`clients/java-determinism`) does this. Classic itself can't: its `RANDOMSEED` only seeds `Math.random()` on old JVMs, as a single stream shared by all robots.
 - Robot JVMs run with the inexact math intrinsics disabled (`-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow`), so robots' own trigonometry is identical on every platform (§4.3). Otherwise volunteers on different hardware could get different results for the same seed.
@@ -340,7 +341,7 @@ Clients do not choose pairings themselves:
 3. The client calls `POST /api/results` with all results of the batch: per-round scores, a recording hash for each battle, and the engine version.
 4. The results Lambda checks that each assignment exists, is unexpired and belongs to this user, then updates the aggregates (§12.6).
 
-Note: in deterministic mode slow robots never skip turns, so their rumble behavior may differ slightly from classic. This is accepted and documented for the rumble.
+Note: in deterministic mode slow robots skip turns by their counted work, not their time (ADR 0018). Their behavior can still differ slightly from classic on a given machine. This is accepted and documented for the rumble.
 
 ### 12.4 Trust and verification (volunteers only)
 

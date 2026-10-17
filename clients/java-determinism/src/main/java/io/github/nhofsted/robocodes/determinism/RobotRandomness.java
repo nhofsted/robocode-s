@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -80,6 +81,21 @@ public final class RobotRandomness {
     static final String CLOCK_MILLIS_KEY = "robocodes.determinism.clockMillis";
     /** Called by classic's robot side on every turn of a robot thread (a {@code Runnable}). */
     static final String TURN_KEY = "robocodes.determinism.turn";
+    /** Classic's {@code RobotPeer.startRound()}: a new round for the peer (a {@code Consumer<Object>}). */
+    static final String PEER_ROUND_KEY = "robocodes.determinism.peerRound";
+    /**
+     * Classic's {@code RobotPeer.executeImpl()}, on the robot's thread: its turn's work is done
+     * (a {@code Consumer<Object[]>}: the peer, the turn it was woken for and its
+     * {@code AtomicReference} of published commands).
+     */
+    static final String PEER_EXECUTE_KEY = "robocodes.determinism.peerExecute";
+    /** Classic's {@code RobotPeer.waitWakeup()}: whether the robot stays asleep (a {@code Predicate<Object>}). */
+    static final String PEER_ASLEEP_KEY = "robocodes.determinism.peerAsleep";
+    /**
+     * Classic's {@code RobotPeer.performLoadCommands()}: which commands the battle loads (a
+     * {@code Consumer<Object[]>}: the peer and its {@code AtomicReference} of published commands).
+     */
+    static final String PEER_LOAD_KEY = "robocodes.determinism.peerLoad";
 
     /*
      * The virtual clock (ADR 0014). Part of the deterministic rules: changing a constant
@@ -98,9 +114,28 @@ public final class RobotRandomness {
     public static final long NANO_ORIGIN = 1_000_000_000_000L;
     /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
     public static final long EPOCH_MILLIS = 1_767_225_600_000L;
+    /**
+     * Counted work (as virtual time) a robot may do in a turn before it skips turns:
+     * classic's CPU constant on the machine the clock was calibrated on, 2.52 ms (#15).
+     * The same in robocode-s's server ({@code DETERMINISTIC_BUDGET_NANOS}).
+     */
+    public static final long TURN_BUDGET_NANOS = 2_500_000;
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
     private static final Map<ClassLoader, long[]> FUEL = new WeakHashMap<>();
+    /** Classic's robot peers and their turns (#15). */
+    private static final Map<Object, PeerTurns> PEERS = new IdentityHashMap<>();
+
+    /** A classic robot peer's turns. */
+    private static final class PeerTurns {
+        /** Counted work (as virtual time) when its last turn ended; -1: none yet this round. */
+        long work = -1;
+        /** Turns it stays asleep, as if still busy. */
+        long late;
+        /** While late: the commands the battle keeps loading, and those the robot published. */
+        Object oldCommands;
+        Object newCommands;
+    }
 
     private static final long MATH_SALT = 0x4D41544852414E44L; // "MATHRAND"
     private static final long UTILS_SALT = 0x5554494C53524E44L; // "UTILSRND"
@@ -367,14 +402,12 @@ public final class RobotRandomness {
         synchronized (FUEL) {
             fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
         }
-        if (TRACE != null || CALIBRATE != null) {
-            // Robot classes initialize on the robot's thread: remember the counter for the
-            // per-turn trace and the calibration.
-            RobotRandomness randomness = current;
-            Stream stream = randomness == null ? null : randomness.currentStream();
-            if (stream != null) {
-                stream.fuel = fuel;
-            }
+        // Robot classes initialize on the robot's thread: remember the counter for skipped
+        // turns, the per-turn trace and the calibration.
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream != null) {
+            stream.fuel = fuel;
         }
         return fuel;
     }
@@ -390,6 +423,91 @@ public final class RobotRandomness {
             }
             if (TRACE != null && stream.fuel != null) {
                 trace("turn " + stream.turns() + " fuel " + stream.fuel[0]);
+            }
+        }
+    }
+
+    /**
+     * How many turns late a robot answers that woke for {@code turn} and did {@code workNanos}
+     * of counted work: classic waits a budget for each robot each turn (ten on turn 1) and
+     * otherwise runs the turn without it. As robocode-s's server ({@code late_turns}).
+     */
+    public static long lateTurns(long workNanos, long turn) {
+        long allowance = turn == 1 ? 10 * TURN_BUDGET_NANOS : TURN_BUDGET_NANOS;
+        return turn < 1 || workNanos < allowance ? 0 : 1 + (workNanos - allowance) / TURN_BUDGET_NANOS;
+    }
+
+    /** Classic: a new round for this robot peer; its first turn starts its work count. */
+    static void peerRound(Object peer) {
+        synchronized (PEERS) {
+            PEERS.put(peer, new PeerTurns());
+        }
+    }
+
+    /**
+     * Classic, on the robot's thread: the robot ended its turn (it executes). Its work since
+     * the last one, counted the way robocode-s's robot host reports it, decides how many
+     * turns it stays asleep, as if it were still busy.
+     */
+    @SuppressWarnings("unchecked")
+    static void peerExecute(Object[] args) {
+        Object peer = args[0];
+        int turn = (Integer) args[1];
+        var published = (java.util.concurrent.atomic.AtomicReference<Object>) args[2];
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, stream.fuel[0]);
+        synchronized (PEERS) {
+            PeerTurns turns = PEERS.computeIfAbsent(peer, p -> new PeerTurns());
+            long work = turns.work < 0 ? 0 : Math.max(0, now - turns.work);
+            turns.work = now;
+            turns.late = lateTurns(work, turn);
+            if (turns.late > 0) {
+                // Not published yet: these stay in effect while it is late.
+                turns.oldCommands = published.get();
+                turns.newCommands = null;
+            }
+        }
+    }
+
+    /** Classic's battle thread would wake this robot: whether it is still busy instead. */
+    static boolean peerAsleep(Object peer) {
+        synchronized (PEERS) {
+            PeerTurns turns = PEERS.get(peer);
+            if (turns == null || turns.late == 0) {
+                return false;
+            }
+            turns.late--;
+            return true;
+        }
+    }
+
+    /**
+     * Classic's battle thread loads a robot's commands. A late robot already published its
+     * new ones before it went to sleep; in classic it would still be busy, so the battle
+     * keeps loading its old ones until the turn after its late turns.
+     */
+    @SuppressWarnings("unchecked")
+    static void peerLoad(Object[] args) {
+        Object peer = args[0];
+        var published = (java.util.concurrent.atomic.AtomicReference<Object>) args[1];
+        synchronized (PEERS) {
+            PeerTurns turns = PEERS.get(peer);
+            if (turns == null || turns.oldCommands == null) {
+                return;
+            }
+            if (turns.late > 0) {
+                Object commands = published.get();
+                if (commands != turns.oldCommands) {
+                    turns.newCommands = commands;
+                    published.set(turns.oldCommands);
+                }
+            } else {
+                if (turns.newCommands != null) {
+                    published.set(turns.newCommands);
+                }
+                turns.oldCommands = null;
+                turns.newCommands = null;
             }
         }
     }

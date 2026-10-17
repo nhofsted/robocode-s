@@ -1,6 +1,6 @@
 # 0005. Optional deterministic mode
 
-- Status: Accepted
+- Status: Accepted, partly superseded by ADR 0018 (skipped turns by counted work)
 - Date: 2026-10-10
 
 ## Context

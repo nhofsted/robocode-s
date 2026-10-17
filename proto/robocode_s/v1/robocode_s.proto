@@ -258,7 +258,7 @@ message Tick {
   // The robot should keep waiting for the battle to end instead of stopping.
   bool should_wait = 8;
   bool paint_enabled = 9;
-  // CPU time budget for the next turn (ns); 0 in deterministic mode.
+  // CPU time budget for the next turn (ns); in deterministic mode, of counted work (ADR 0018).
   uint64 budget_nanos = 10;
 }
 
@@ -644,7 +644,7 @@ message RobotSnapshot {
   // that skipped turns answers several at once). Timing, not battle state: not part of
   // a recording's snapshot hash.
   uint64 cpu_nanos = 15;
-  // The turn's CPU budget (Tick.budget_nanos); 0 in deterministic mode, which has none.
+  // The turn's CPU budget (Tick.budget_nanos); in deterministic mode, of counted work.
   uint64 budget_nanos = 16;
   // Debug properties set this turn, in order (Execute.debug_properties): changes, as in
   // classic's snapshot; an observer keeps the current values. Not battle state: not part

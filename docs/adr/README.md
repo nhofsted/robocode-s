@@ -19,3 +19,4 @@
 | [0015](0015-static-sveltekit-site.md) | One static SvelteKit site for the rumble and the user documentation |
 | [0016](0016-own-aws-account.md) | The rumble runs in its own AWS account |
 | [0017](0017-lossy-viewer-replays.md) | Rumble replays are lossy viewer tracks, not re-simulated intents |
+| [0018](0018-deterministic-skipped-turns.md) | Deterministic skipped turns from counted work |

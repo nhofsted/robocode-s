@@ -46,8 +46,7 @@ final class RemotePeer implements IRobotPeer {
     private final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
     /**
      * Deterministic mode: a robot's CPU time is its counted work as virtual time (ADR 0014),
-     * the same on every machine, rather than this JVM's (slower there, without math
-     * intrinsics).
+     * the same on every machine, rather than this JVM's. The server skips turns by it (ADR 0018).
      */
     private final boolean countedWork = RobotRandomness.isMeteringWork();
 
@@ -75,6 +74,9 @@ final class RemotePeer implements IRobotPeer {
     void newRound() {
         inbox.clear();
         lastTurn = 0;
+        // A round's start is free: no skipped turns for the work before the first execute,
+        // as in the classic oracle (RobotRandomness.peerRound).
+        cpuAtReturn = -1;
         stopping = false;
         dead = false;
         winner = false;

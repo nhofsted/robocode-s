@@ -528,7 +528,7 @@ On each execute, the engine compares the current turn with the turn of the previ
 - one `SkippedTurnEvent(turn)` is added per skipped turn (if alive);
 - more than 30 consecutive skipped turns (240 for I/O robots) halt and disable the robot.
 
-robocode-s deterministic mode never skips (ADR 0005).
+In robocode-s deterministic mode, a robot's counted work decides when its execute arrives (ADR 0018): the turns it is late for are skipped as above.
 
 ---
 

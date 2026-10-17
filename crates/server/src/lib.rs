@@ -42,13 +42,33 @@ const REMOTE_OBSERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_SKIPPED_TURNS: i64 = 30;
 const MAX_SKIPPED_TURNS_WITH_IO: i64 = 240;
 
+/// Deterministic mode: the counted work (as virtual time, ADR 0014) a robot may do in a
+/// turn before it skips turns. Classic's CPU constant on the machine the virtual clock was
+/// calibrated on (#15); part of the deterministic rules, like the clock's constants
+/// (`RobotRandomness.TURN_BUDGET_NANOS` on the Java side).
+pub const DETERMINISTIC_BUDGET_NANOS: u64 = 2_500_000;
+
+/// How many turns late a robot's `Execute` for `turn` counts in deterministic mode, after
+/// `work` nanoseconds of counted work. As classic, which waits a budget for each robot each
+/// turn (ten on turn 1, `Battle.wakeupRobots`) and otherwise runs the turn without it: the
+/// robot answers after the turns whose wait ran out. A round's start (`turn` 0) is free.
+pub fn late_turns(work: u64, turn: i64, budget: u64) -> i64 {
+    let allowance = if turn == 1 { 10 * budget } else { budget };
+    if turn < 1 || work < allowance {
+        0
+    } else {
+        1 + ((work - allowance) / budget) as i64
+    }
+}
+
 /// How a battle is run.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub rules: BattleRules,
     /// Seed of the engine's randomness (classic's `RANDOMSEED`).
     pub seed: i64,
-    /// Deterministic mode (ADR 0005): always wait for every robot, never skip turns.
+    /// Deterministic mode (ADR 0005): always wait for every robot; robots skip turns by
+    /// their counted work instead of time ([`late_turns`]).
     pub deterministic: bool,
     /// Classic mode: how long robots get per turn before they skip it.
     pub turn_timeout: Duration,
@@ -177,6 +197,11 @@ struct Link {
     input: Vec<v1::Event>,
     bullet_updates: Vec<v1::BulletStatus>,
     team_messages: Vec<v1::TeamMessage>,
+    /// Deterministic mode: an `Execute` that counts as late, and the turn it counts as
+    /// arriving in ([`late_turns`]).
+    late_execute: Option<(i64, v1::Execute)>,
+    /// The turn of the `Tick` a robot answered late; it skipped the turns after it.
+    answered_late: Option<i64>,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -688,6 +713,8 @@ impl<'a> BattleLoop<'a> {
             link.awaiting = None;
             link.active = false;
             link.final_execute = false;
+            link.late_execute = None;
+            link.answered_late = None;
             if link.stream.is_none() {
                 // Could not be started: classic disables it (CANNOT_START).
                 self.engine.input(Entry::Disable(i as i32));
@@ -769,6 +796,7 @@ impl<'a> BattleLoop<'a> {
     fn expecting(&self, i: usize) -> bool {
         let link = &self.links[i];
         link.awaiting.is_some()
+            && link.late_execute.is_none()
             && link.stream.is_some()
             && (self.battle().robots[i].is_running() || link.final_execute)
     }
@@ -787,6 +815,18 @@ impl<'a> BattleLoop<'a> {
         };
         while let Some(incoming) = self.held.pop_front() {
             self.handle(incoming);
+        }
+        // Late `Execute`s arrive now: the robots skipped the turns in between.
+        let time = self.battle().time;
+        for i in 0..self.links.len() {
+            if self.links[i]
+                .late_execute
+                .as_ref()
+                .is_some_and(|(due, _)| *due <= time)
+            {
+                let (_, execute) = self.links[i].late_execute.take().unwrap();
+                self.apply_execute(i, execute);
+            }
         }
         let mut deadline = Instant::now() + timeout;
         while (0..self.links.len()).any(|i| self.expecting(i)) {
@@ -884,15 +924,30 @@ impl<'a> BattleLoop<'a> {
             Incoming::RobotDisconnected { robot } => {
                 self.links[robot].stream = None;
                 self.links[robot].awaiting = None;
+                self.links[robot].late_execute = None;
             }
         }
     }
 
     fn on_execute(&mut self, i: usize, execute: v1::Execute) {
-        let link = &mut self.links[i];
-        if link.awaiting != Some(execute.turn) {
+        let link = &self.links[i];
+        if link.awaiting != Some(execute.turn) || link.late_execute.is_some() {
             return; // not the reply we wait for
         }
+        if self.config.deterministic && !link.final_execute {
+            // The robot's counted work decides when it answers (classic: its wall time).
+            let late = late_turns(execute.cpu_nanos, execute.turn, DETERMINISTIC_BUDGET_NANOS);
+            if late > 0 {
+                self.links[i].late_execute = Some((execute.turn + late, execute));
+                return;
+            }
+        }
+        self.apply_execute(i, execute);
+    }
+
+    /// An `Execute` arrives: as classic's `executeImpl` and `checkSkippedTurn`.
+    fn apply_execute(&mut self, i: usize, execute: v1::Execute) {
+        let link = &mut self.links[i];
         link.awaiting = None;
         link.final_execute = false;
         link.paint = execute.paint;
@@ -921,28 +976,10 @@ impl<'a> BattleLoop<'a> {
             self.links[i].active = false;
             self.engine.input(Entry::Stop(robot));
         }
-        // `checkSkippedTurn`: turns that ran since the Tick this robot answers.
-        let time = self.battle().time;
-        let alive = self.battle().robots[i].is_alive();
-        let skipped = time - execute.turn;
-        if skipped >= 1 {
-            let link = &mut self.links[i];
-            link.events.retain(convert::is_critical);
-            link.input.clear();
-            if alive {
-                for turn in execute.turn + 1..=time {
-                    link.events.push(Event::SkippedTurn { turn });
-                }
-            }
-            let max = if link.io_robot {
-                MAX_SKIPPED_TURNS_WITH_IO
-            } else {
-                MAX_SKIPPED_TURNS
-            };
-            if skipped > max {
-                self.engine.input(Entry::DiscardCommands(robot));
-                self.engine.input(Entry::Disable(robot));
-            }
+        // Turns ran since the Tick this robot answers: it skipped them, which it learns
+        // when it gets its next Tick (`deliver`).
+        if self.battle().time > execute.turn {
+            self.links[i].answered_late = Some(execute.turn);
         }
     }
 
@@ -999,6 +1036,29 @@ impl<'a> BattleLoop<'a> {
         let round_over = self.battle().is_round_over();
         let budget = self.budget_nanos();
         for i in 0..self.links.len() {
+            // `checkSkippedTurn`, when classic wakes a robot that answered late: after this
+            // turn ran, so this turn's events are cleared too. Then the skipped turns' events,
+            // then the limit.
+            let link = &mut self.links[i];
+            let answered_late = if link.active && link.stream.is_some() && link.awaiting.is_none() {
+                link.answered_late.take()
+            } else {
+                None
+            };
+            let skipped_alive = self.battle().robots[i].is_alive();
+            if let Some(answered) = answered_late {
+                let max = if self.links[i].io_robot {
+                    MAX_SKIPPED_TURNS_WITH_IO
+                } else {
+                    MAX_SKIPPED_TURNS
+                };
+                if turn - answered - 1 > max {
+                    self.engine.input(Entry::DiscardCommands(i as i32));
+                    self.engine.input(Entry::Disable(i as i32));
+                    // Classic then stops the robot's thread: its code doesn't run again.
+                    self.engine.input(Entry::Stop(i as i32));
+                }
+            }
             let driver = &mut self.engine.driver;
             let battle = &mut driver.battle;
             let name = battle.robots[i].setup.name.clone();
@@ -1023,6 +1083,15 @@ impl<'a> BattleLoop<'a> {
                 .extend(bullets.iter().map(convert::bullet_status));
             link.team_messages
                 .extend(messages.iter().map(convert::team_message));
+            if let Some(answered) = answered_late {
+                link.events.retain(convert::is_critical);
+                link.input.clear();
+                if skipped_alive {
+                    for skipped in answered + 1..turn {
+                        link.events.push(Event::SkippedTurn { turn: skipped });
+                    }
+                }
+            }
             if link.stream.is_none() || link.awaiting.is_some() {
                 continue;
             }
@@ -1063,10 +1132,10 @@ impl<'a> BattleLoop<'a> {
         self.snapshot_with(true);
     }
 
-    /// A robot's CPU budget per turn; 0 in deterministic mode, which has none.
+    /// A robot's CPU budget per turn; in deterministic mode, of counted work.
     fn budget_nanos(&self) -> u64 {
         if self.config.deterministic {
-            0
+            DETERMINISTIC_BUDGET_NANOS
         } else {
             self.config.turn_timeout.as_nanos() as u64
         }
