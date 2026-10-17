@@ -30,6 +30,9 @@ use std::time::{Duration, Instant};
 /// At most this many observers at once on an [`Observers`] listener.
 const MAX_REMOTE_OBSERVERS: usize = 16;
 
+/// At most this many observers' handshakes (up to the token check) at once.
+const MAX_HANDSHAKES: usize = 32;
+
 /// An observer from elsewhere that takes no data for this long is dropped (a stalled
 /// connection would otherwise hold the battle up: the battle loop does all writing).
 const REMOTE_OBSERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -217,12 +220,21 @@ fn observer_accept_loop(
     stop: &AtomicBool,
 ) {
     let connected = Arc::new(AtomicUsize::new(0));
+    let handshakes = Arc::new(AtomicUsize::new(0));
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
+            // Connections that haven't shown the token yet don't each get a thread without
+            // end: past the limit, they are closed at once.
+            Ok((stream, _)) if handshakes.load(Ordering::SeqCst) >= MAX_HANDSHAKES => {
+                drop(stream);
+            }
             Ok((stream, _)) => {
                 let (token, tx, connected) = (token.to_string(), tx.clone(), connected.clone());
+                let handshakes = handshakes.clone();
+                handshakes.fetch_add(1, Ordering::SeqCst);
                 thread::spawn(move || {
                     let _ = observer_handshake(stream, &token, &tx, &connected);
+                    handshakes.fetch_sub(1, Ordering::SeqCst);
                 });
             }
             Err(_) => thread::sleep(Duration::from_millis(5)),
