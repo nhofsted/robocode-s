@@ -90,6 +90,8 @@ final class WorkMeter {
             node.accept(writer);
             return writer.toByteArray();
         }
+        // After the counting: the helpers it adds aren't counted themselves.
+        JdkCosts.charge(node, FIELD);
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
