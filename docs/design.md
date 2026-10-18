@@ -217,7 +217,7 @@ Classic robots get a per-robot data directory with a quota (`getDataFile`, `Robo
 ### 7.2 Deterministic mode (optional)
 
 - There are no skipped turns based on time: the server always waits for every robot's intent, up to a hard limit. A robot that exceeds the hard limit is **disabled**. Only that pathological case can make results depend on timing.
-- Robots skip turns by their **counted work** instead (ADR 0018): a robot whose work in a turn exceeds the budget (2.5 ms of virtual time, ADR 0014) answers as many turns late as classic would have run without it, with classic's skipped-turn events and disabling.
+- Robots skip turns by their **counted work** instead (ADR 0018): a robot whose work in a turn exceeds the budget (3.2 ms of virtual time, ADR 0014: how long classic really waits for a robot) answers as many turns late as classic would have run without it, with classic's skipped-turn events and disabling. The runner refuses deterministic battles with a robot host that follows other deterministic rules (an outdated build).
 - All engine randomness is seeded.
 - Robots' own randomness is seeded **per robot**: `Math.random()` and `new Random()` draw from streams derived from the battle seed and the robot's name (ADR 0009). For JVM robots, a Java agent (`clients/java-determinism`) does this. Classic itself can't: its `RANDOMSEED` only seeds `Math.random()` on old JVMs, as a single stream shared by all robots.
 - Robot JVMs run with the inexact math intrinsics disabled (`-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow`), so robots' own trigonometry is identical on every platform (§4.3). Otherwise volunteers on different hardware could get different results for the same seed.

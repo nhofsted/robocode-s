@@ -298,10 +298,10 @@ fn late_turns_counts_the_turns_a_robot_overran() {
     assert_eq!(late_turns(2 * b, 5, b), 2);
     assert_eq!(late_turns(3 * b + 1, 5, b), 3);
     assert_eq!(late_turns(40 * b, 5, b), 40);
-    // Turn 1 allows ten budgets.
-    assert_eq!(late_turns(10 * b - 1, 1, b), 0);
-    assert_eq!(late_turns(10 * b, 1, b), 1);
-    assert_eq!(late_turns(12 * b, 1, b), 3);
+    // Turn 1 allows seven budgets.
+    assert_eq!(late_turns(7 * b - 1, 1, b), 0);
+    assert_eq!(late_turns(7 * b, 1, b), 1);
+    assert_eq!(late_turns(9 * b, 1, b), 3);
     // Turn 0 (the round's start) is never late.
     assert_eq!(late_turns(0, 0, b), 0);
     assert_eq!(late_turns(1000 * b, 0, b), 0);

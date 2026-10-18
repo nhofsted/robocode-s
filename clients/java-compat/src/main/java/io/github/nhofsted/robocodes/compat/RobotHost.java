@@ -183,9 +183,10 @@ public final class RobotHost {
                 return 1;
             }
         }
+        // The deterministic rules this host's robots follow, checked against robocode-s's.
+        StringBuilder out = new StringBuilder("rules\t").append(RobotRandomness.rulesVersion()).append('\n');
         // Then all in one selection, as classic does: a team's id numbers it by its
         // position in the selection, which tells two copies of the same team apart.
-        StringBuilder out = new StringBuilder();
         for (RobotSpecification spec : engine.getLocalRepository(String.join(",", robots))) {
             IRobotItem item = (IRobotItem) HiddenAccess.getFileSpecification(spec);
             String team = HiddenAccess.getRobotTeamName(spec);

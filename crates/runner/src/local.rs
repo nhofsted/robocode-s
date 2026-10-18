@@ -34,17 +34,47 @@ pub struct Described {
 }
 
 /// Asks the robot host what classic knows about `robots` (class names, optionally with
-/// version; teams are expanded into their members), in battle order.
+/// version; teams are expanded into their members), in battle order. For a `deterministic`
+/// battle, the robot host must follow robocode-s's deterministic rules.
 pub fn describe(
     host: &JavaHost,
     jars: &[PathBuf],
     robots: &[String],
     home: &Path,
+    deterministic: bool,
 ) -> Result<Vec<Described>, String> {
     if robots.is_empty() {
         return Ok(Vec::new());
     }
-    parse_description(&run_describe(host, jars, robots, home)?)
+    let text = run_describe(host, jars, robots, home)?;
+    if deterministic {
+        check_rules(&text, &host.lib_dir)?;
+    }
+    parse_description(&text)
+}
+
+/// Whether the robot host's `--describe` output (from `lib`) reports robocode-s's
+/// deterministic rules. An outdated build counts robots' work differently: robots would
+/// skip turns they don't skip in classic, or the other way around.
+pub fn check_rules(text: &str, lib: &Path) -> Result<(), String> {
+    let rules = text
+        .lines()
+        .find_map(|l| l.strip_prefix("rules\t"))
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    if rules == Some(robocode_s_server::DETERMINISTIC_RULES) {
+        return Ok(());
+    }
+    Err(format!(
+        "the robot host in {} follows {} deterministic rules than this robocode-s ({}): \
+         rebuild it (./gradlew :clients:java-compat:installDist)",
+        lib.display(),
+        match rules {
+            Some(r) if r > robocode_s_server::DETERMINISTIC_RULES => format!("newer (version {r})"),
+            Some(r) => format!("older (version {r})"),
+            None => "older".to_string(),
+        },
+        robocode_s_server::DETERMINISTIC_RULES
+    ))
 }
 
 /// A robot or team found in the jars or class folders, with the details from its `.properties` (empty
@@ -396,7 +426,13 @@ pub fn prepare(
     let dir = std::path::absolute(env.data.join("battles"))
         .map_err(|e| e.to_string())?
         .join(format!("{stamp}-{}", std::process::id()));
-    let described = describe(&host, &env.jars, robots, &dir.join("describe"))?;
+    let described = describe(
+        &host,
+        &env.jars,
+        robots,
+        &dir.join("describe"),
+        config.deterministic,
+    )?;
     if let Some(path) = &config.record {
         config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
     }
@@ -705,6 +741,19 @@ mod tests {
         );
         assert!(d[1].r#type.advanced && d[1].r#type.team && d[1].r#type.droid);
         assert!(parse_description("robot\tx\ty\t\t0\n").is_err());
+    }
+
+    #[test]
+    fn deterministic_battles_need_the_same_rules() {
+        let lib = Path::new("lib");
+        let current = robocode_s_server::DETERMINISTIC_RULES;
+        let robot = "robot\tsample.Fire\tsample.Fire\t\t0\t0\t0\t0\t0\t0\t0\n";
+        assert!(check_rules(&format!("rules\t{current}\n{robot}"), lib).is_ok());
+        // A robot host from before the rules had versions.
+        let e = check_rules(robot, lib).unwrap_err();
+        assert!(e.contains("older") && e.contains("installDist"), "{e}");
+        let e = check_rules(&format!("rules\t{}\n{robot}", current + 1), lib).unwrap_err();
+        assert!(e.contains("newer"), "{e}");
     }
 
     // Names from classic's recording of `team-vs-walls` (tools/difftest/record-samples.sh).
