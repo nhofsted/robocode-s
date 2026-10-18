@@ -20,7 +20,7 @@ pub struct History {
     energy: Vec<f32>,
     /// Per turn, per robot: CPU time (ms).
     cpu: Vec<f32>,
-    /// The CPU budget per turn (ms); 0 without one (deterministic mode).
+    /// The CPU budget per turn (ms); 0 without one.
     budget: f32,
     /// Per round: each robot's total score at its first turn.
     round_totals: Vec<Vec<f64>>,

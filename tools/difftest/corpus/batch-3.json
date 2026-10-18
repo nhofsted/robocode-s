@@ -389,8 +389,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/gjr.Cephalosporin_0.2.jar",
    "sha256": "8133810e4ce3b00dd583b3344dd942607a2666861d160d8d2d422e11953d6369",
-   "file": "gjr.Cephalosporin_0.2.jar",
-   "exclude": "endless loop when it has seen no enemy (goal heading 0 times 1.1 stays 0); only wall-clock skipped turns end it (#15)"
+   "file": "gjr.Cephalosporin_0.2.jar"
   },
   {
    "name": "japs.Serenity",
@@ -661,8 +660,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/rrh.Iwillfindyou_2.0.jar",
    "sha256": "d24e31ad468182f8e7f33c2eb7eab6396a929030cc4e8acddd54d22b79f89d0b",
-   "file": "rrh.Iwillfindyou_2.0.jar",
-   "exclude": "busy-loops without an action once its energy is at most 0.5 (if (!(getEnergy() > 0.5)) continue); only wall-clock skipped turns end it (#15)"
+   "file": "rrh.Iwillfindyou_2.0.jar"
   },
   {
    "name": "voidious.micro.BlitzBat",

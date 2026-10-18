@@ -12,10 +12,15 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.util.ArrayList;
@@ -27,8 +32,10 @@ import java.util.Set;
  * Deterministic work metering and a virtual clock for robots (#15, ADR 0014).
  *
  * <p>In robot classes the agent adds, at the start of every straight-line block of
- * bytecode, {@code fuel[0] += n}: the block's instructions, plus a fixed cost per call
- * into the JDK. {@code fuel} is one counter per robot (per robot class loader). Calls to
+ * bytecode, {@code fuel[1] += n}: the block's instructions, plus a fixed cost per call
+ * into the JDK. {@code fuel} is one counter per robot (per robot class loader), kept as
+ * {@code {limit, count - limit}}: at a loop's start, the block throws once the count
+ * reaches the limit (an endless loop crashes at a deterministic point, ADR 0018). Calls to
  * {@code System.nanoTime()} and {@code System.currentTimeMillis()} in robot code read a
  * virtual clock instead, computed from that counter and the robot's turns
  * ({@link RobotRandomness#virtualNanos}). The count is exact for the robot's own code and
@@ -67,7 +74,7 @@ final class WorkMeter {
             if (method.instructions.size() > 0) {
                 // Counting first: a clock call costs one JDK call, not the hook's code.
                 if (meter) {
-                    count(node.name, method.instructions);
+                    count(node.name, method);
                     replaceClockCalls(node.name, method.instructions);
                 }
                 IdentityHashes.replaceHashCalls(method.instructions);
@@ -83,6 +90,8 @@ final class WorkMeter {
             node.accept(writer);
             return writer.toByteArray();
         }
+        // After the counting: the helpers it adds aren't counted themselves.
+        JdkCosts.charge(node, FIELD);
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
@@ -262,9 +271,22 @@ final class WorkMeter {
     /**
      * Splits the code into straight-line blocks (a block ends at a label, which any jump
      * target or handler is, and after a jump, switch, return or throw) and adds
-     * {@code fuel[0] += cost} at the start of each block with instructions.
+     * {@code fuel[1] += cost} at the start of each block with instructions.
+     *
+     * <p>Where code can repeat, the block also checks the limit ({@link #countAndCheck}).
+     * Straight-line, so the frames stay valid. Code that runs on and on
+     * passes a loop's start (a backward jump's target) again and again, so it throws a little
+     * after the limit, at the same instruction everywhere; endless recursion overflows the
+     * stack instead. The other blocks only count: a check in every block doubled the CPU time
+     * of tight loops, one at every method's start still cost a fifth. Handlers check too, so
+     * robot code can't catch it for long.
+     *
+     * <p>Except a handler that its own range covers: javac's {@code finally} and
+     * {@code synchronized} handlers retry their first instructions. A check there would
+     * throw into itself forever.
      */
-    private static void count(String className, InsnList instructions) {
+    private static void count(String className, MethodNode method) {
+        InsnList instructions = method.instructions;
         List<AbstractInsnNode> starts = new ArrayList<>();
         List<Long> costs = new ArrayList<>();
         AbstractInsnNode start = null;
@@ -301,15 +323,11 @@ final class WorkMeter {
             starts.add(start);
             costs.add(cost);
         }
+        Set<AbstractInsnNode> checked = repeatable(method);
+        checked.removeAll(selfCoveredHandlers(method));
         for (int i = 0; i < starts.size(); i++) {
-            InsnList add = new InsnList();
-            add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
-            add.add(new InsnNode(Opcodes.ICONST_0));
-            add.add(new InsnNode(Opcodes.DUP2));
-            add.add(new InsnNode(Opcodes.LALOAD));
-            add.add(new LdcInsnNode(costs.get(i)));
-            add.add(new InsnNode(Opcodes.LADD));
-            add.add(new InsnNode(Opcodes.LASTORE));
+            InsnList add = checked.contains(starts.get(i)) ? countAndCheck(className, costs.get(i))
+                    : count(className, costs.get(i));
             AbstractInsnNode first = starts.get(i);
             if (first.getOpcode() == Opcodes.NEW) {
                 // Stack map frames refer to a NEW by the label right before it
@@ -320,6 +338,96 @@ final class WorkMeter {
                 instructions.insertBefore(first, add);
             }
         }
+    }
+
+    /** {@code fuel[1] += cost}: the count, relative to the limit. */
+    private static InsnList count(String className, long cost) {
+        InsnList add = new InsnList();
+        add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+        add.add(new InsnNode(Opcodes.ICONST_1));
+        add.add(new InsnNode(Opcodes.DUP2));
+        add.add(new InsnNode(Opcodes.LALOAD));
+        add.add(new LdcInsnNode(cost));
+        add.add(new InsnNode(Opcodes.LADD));
+        add.add(new InsnNode(Opcodes.LASTORE));
+        return add;
+    }
+
+    /**
+     * The same, then {@code fuel[1 + (int) (~fuel[1] >>> 63)]}: index 2, out of bounds, once
+     * the count reaches the limit. A load: storing at a computed index instead made tight
+     * loops slower still.
+     */
+    private static InsnList countAndCheck(String className, long cost) {
+        InsnList add = count(className, cost);
+        add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+        add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+        add.add(new InsnNode(Opcodes.ICONST_1));
+        add.add(new InsnNode(Opcodes.LALOAD));
+        add.add(new LdcInsnNode(-1L));
+        add.add(new InsnNode(Opcodes.LXOR));
+        add.add(new IntInsnNode(Opcodes.BIPUSH, 63));
+        add.add(new InsnNode(Opcodes.LUSHR));
+        add.add(new InsnNode(Opcodes.L2I));
+        add.add(new InsnNode(Opcodes.ICONST_1));
+        add.add(new InsnNode(Opcodes.IADD));
+        add.add(new InsnNode(Opcodes.LALOAD));
+        add.add(new InsnNode(Opcodes.POP2));
+        return add;
+    }
+
+    /** The first instructions of loops (backward jumps' targets) and handlers. */
+    private static Set<AbstractInsnNode> repeatable(MethodNode method) {
+        Set<AbstractInsnNode> starts = new HashSet<>();
+        InsnList instructions = method.instructions;
+        for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            List<LabelNode> targets = new ArrayList<>();
+            if (insn instanceof JumpInsnNode jump) {
+                targets.add(jump.label);
+            } else if (insn instanceof TableSwitchInsnNode table) {
+                targets.add(table.dflt);
+                targets.addAll(table.labels);
+            } else if (insn instanceof LookupSwitchInsnNode lookup) {
+                targets.add(lookup.dflt);
+                targets.addAll(lookup.labels);
+            }
+            int at = instructions.indexOf(insn);
+            for (LabelNode target : targets) {
+                if (instructions.indexOf(target) <= at) {
+                    starts.add(firstInstruction(target));
+                }
+            }
+        }
+        for (TryCatchBlockNode block : method.tryCatchBlocks) {
+            starts.add(firstInstruction(block.handler));
+        }
+        starts.remove(null);
+        return starts;
+    }
+
+    /** The first real instruction at or after {@code insn} (skipping labels, lines and frames). */
+    private static AbstractInsnNode firstInstruction(AbstractInsnNode insn) {
+        while (insn != null && insn.getOpcode() < 0) {
+            insn = insn.getNext();
+        }
+        return insn;
+    }
+
+    /** The first instructions of handlers whose own range covers them. */
+    private static Set<AbstractInsnNode> selfCoveredHandlers(MethodNode method) {
+        Set<AbstractInsnNode> covered = new HashSet<>();
+        InsnList instructions = method.instructions;
+        for (TryCatchBlockNode block : method.tryCatchBlocks) {
+            AbstractInsnNode first = firstInstruction(block.handler);
+            if (first == null) {
+                continue;
+            }
+            int at = instructions.indexOf(first);
+            if (instructions.indexOf(block.start) <= at && at < instructions.indexOf(block.end)) {
+                covered.add(first);
+            }
+        }
+        return covered;
     }
 
     private static boolean endsBlock(AbstractInsnNode insn) {

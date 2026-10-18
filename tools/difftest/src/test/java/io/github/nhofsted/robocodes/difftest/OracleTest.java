@@ -75,7 +75,7 @@ class OracleTest {
     @Test
     void refusesToRunWithMathIntrinsics() throws Exception {
         List<String> jvmArgs = new ArrayList<>(oracleJvmArgs());
-        jvmArgs.remove("-XX:-InlineMathNatives");
+        jvmArgs.removeIf(a -> a.startsWith("-XX:DisableIntrinsic="));
         Result result = runOracle(jvmArgs, "sample.Fire,sample.Walls", 1, 1, dir.resolve("x.jsonl"));
         assertNotEquals(0, result.exitCode);
         assertTrue(result.stderr.contains("ADR 0003"), result.stderr);

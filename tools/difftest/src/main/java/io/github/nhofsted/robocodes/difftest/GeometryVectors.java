@@ -17,7 +17,7 @@ import java.util.Random;
 /**
  * Writes test vectors for the Rust geometry crate ({@code crates/geom}), computed with
  * the JDK's {@code java.awt.geom} and classic Robocode's {@code BoundingRectangle}.
- * Must run with {@code -XX:-InlineMathNatives}, like the oracle (ADR 0003).
+ * Must run with the inexact math intrinsics disabled, like the oracle (ADR 0003).
  *
  * <p>Lines; doubles are written in Java's shortest round-trip form, so they parse back exactly:
  * <ul>
@@ -44,7 +44,8 @@ public final class GeometryVectors {
             throw new IllegalArgumentException("usage: GeometryVectors <output file>");
         }
         if (Math.sin(1e5) != StrictMath.sin(1e5) || Math.cos(0.7853981633974483) != StrictMath.cos(0.7853981633974483)) {
-            throw new IllegalStateException("run with -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives");
+            throw new IllegalStateException("run with -XX:+UnlockDiagnosticVMOptions "
+                    + "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow");
         }
         try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(Path.of(args[0]), StandardCharsets.UTF_8))) {
             out = w;

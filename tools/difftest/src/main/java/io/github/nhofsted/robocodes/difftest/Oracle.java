@@ -43,7 +43,8 @@ import java.util.zip.GZIPOutputStream;
  * <p>The recording is the reference ("oracle") for differential tests against
  * the robocode-s engine (design §13). Classic must run deterministically and
  * with StrictMath semantics (ADR 0003), which requires these JVM flags:
- * {@code -XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives -Ddebug=true}.
+ * {@code -XX:+UnlockDiagnosticVMOptions
+ * -XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow -Ddebug=true}.
  * They are verified at startup. Classic's security mode stays on, as in the RoboRumble.
  *
  * <p>Robots' own randomness ({@code Math.random()}, {@code new Random()}) is not
@@ -85,13 +86,16 @@ public final class Oracle {
         if (!"true".equals(System.getProperty("debug"))) {
             throw new IllegalStateException("-Ddebug=true is required: without it, classic skips turns based on timing");
         }
-        // With math intrinsics enabled, Math.sin differs from StrictMath.sin for a few
-        // percent of inputs; 10,000 samples will find a difference with certainty.
+        // With the inexact math intrinsics enabled, Math.sin, exp, log, pow etc. differ from
+        // StrictMath for a few percent of inputs; 10,000 samples will find a difference with certainty.
         for (int i = 0; i < 10_000; i++) {
             double a = i * 0.0012345 - 6.0;
-            if (Math.sin(a) != StrictMath.sin(a) || Math.cos(a) != StrictMath.cos(a) || Math.tan(a) != StrictMath.tan(a)) {
+            if (Math.sin(a) != StrictMath.sin(a) || Math.cos(a) != StrictMath.cos(a) || Math.tan(a) != StrictMath.tan(a)
+                    || Math.exp(a) != StrictMath.exp(a) || Math.log(Math.abs(a) + 0.5) != StrictMath.log(Math.abs(a) + 0.5)
+                    || Math.pow(Math.abs(a) + 0.5, 1.7) != StrictMath.pow(Math.abs(a) + 0.5, 1.7)) {
                 throw new IllegalStateException("java.lang.Math differs from StrictMath: run with "
-                        + "-XX:+UnlockDiagnosticVMOptions -XX:-InlineMathNatives (ADR 0003)");
+                        + "-XX:+UnlockDiagnosticVMOptions "
+                        + "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow (ADR 0003)");
             }
         }
     }

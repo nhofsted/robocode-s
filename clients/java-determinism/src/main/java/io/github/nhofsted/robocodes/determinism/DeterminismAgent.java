@@ -17,6 +17,7 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 import java.util.function.ToLongFunction;
 
@@ -82,6 +83,11 @@ public final class DeterminismAgent {
         System.getProperties().put(RobotRandomness.API_TRACE_KEY,
                 (java.util.function.BiConsumer<Object, Object>) RobotRandomness::traceApi);
         System.getProperties().put(STOP_KEY, (Consumer<Object>) DeterminismAgent::awaitRobotThread);
+        // Skipped turns by counted work in classic (#15).
+        System.getProperties().put(RobotRandomness.PEER_ROUND_KEY, (Consumer<Object>) RobotRandomness::peerRound);
+        System.getProperties().put(RobotRandomness.PEER_EXECUTE_KEY, (Consumer<Object[]>) RobotRandomness::peerExecute);
+        System.getProperties().put(RobotRandomness.PEER_ASLEEP_KEY, (Predicate<Object>) RobotRandomness::peerAsleep);
+        System.getProperties().put(RobotRandomness.PEER_LOAD_KEY, (Consumer<Object[]>) RobotRandomness::peerLoad);
         instrumentation.addTransformer(new Transformer(), true);
         instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class,
                 java.util.HashMap.class, java.util.WeakHashMap.class, java.util.Hashtable.class,
@@ -264,6 +270,154 @@ public final class DeterminismAgent {
         }
     }
 
+    /**
+     * Classic's battle side skips turns of robots by their counted work instead of wall time
+     * (#15), as robocode-s's server does in deterministic mode. Classic's own skipping stays:
+     * it waits for every robot (the oracle runs with {@code -Ddebug=true}), and a robot that
+     * did more work than the budget stays asleep for the turns it would have been busy
+     * ({@link RobotRandomness#lateTurns}). Its {@code checkSkippedTurn} then sees it answer
+     * late, with classic's events, kept commands and disabling.
+     * <ul>
+     *   <li>{@code startRound(long, int)} first calls {@code peerRound(this)};</li>
+     *   <li>{@code executeImpl(ExecCommands)} first calls {@code peerExecute({this, currentExecutionTime, commands})};</li>
+     *   <li>{@code waitWakeup()} returns right away if {@code peerAsleep(this)}. Only
+     *       {@code Battle.wakeupRobots} calls it;</li>
+     *   <li>{@code performLoadCommands()} first calls {@code peerLoad({this, commands})}:
+     *       a late robot's new commands are loaded only after its late turns.</li>
+     * </ul>
+     */
+    private static byte[] patchPeer(byte[] classfileBuffer) {
+        String peer = "net/sf/robocode/battle/peer/RobotPeer";
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    boolean round = name.equals("startRound") && descriptor.equals("(JI)V");
+                    boolean execute = name.equals("executeImpl")
+                            && descriptor.startsWith("(Lnet/sf/robocode/peer/ExecCommands;)");
+                    boolean wake = name.equals("waitWakeup") && descriptor.equals("()V");
+                    boolean load = name.equals("performLoadCommands") && descriptor.equals("()V");
+                    if (!round && !execute && !wake && !load) {
+                        return mv;
+                    }
+                    patched[0]++;
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitCode() {
+                            super.visitCode();
+                            loadHook(mv, round ? RobotRandomness.PEER_ROUND_KEY
+                                    : execute ? RobotRandomness.PEER_EXECUTE_KEY
+                                    : load ? RobotRandomness.PEER_LOAD_KEY : RobotRandomness.PEER_ASLEEP_KEY);
+                            if (load || execute) {
+                                // {this, (execute: Integer.valueOf(currentExecutionTime),) commands}
+                                mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Consumer");
+                                mv.visitInsn(execute ? Opcodes.ICONST_3 : Opcodes.ICONST_2);
+                                mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
+                                mv.visitInsn(Opcodes.DUP);
+                                mv.visitInsn(Opcodes.ICONST_0);
+                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                mv.visitInsn(Opcodes.AASTORE);
+                                if (execute) {
+                                    mv.visitInsn(Opcodes.DUP);
+                                    mv.visitInsn(Opcodes.ICONST_1);
+                                    mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                    mv.visitFieldInsn(Opcodes.GETFIELD, peer, "currentExecutionTime", "I");
+                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "valueOf",
+                                            "(I)Ljava/lang/Integer;", false);
+                                    mv.visitInsn(Opcodes.AASTORE);
+                                }
+                                mv.visitInsn(Opcodes.DUP);
+                                mv.visitInsn(execute ? Opcodes.ICONST_2 : Opcodes.ICONST_1);
+                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                mv.visitFieldInsn(Opcodes.GETFIELD, peer, "commands",
+                                        "Ljava/util/concurrent/atomic/AtomicReference;");
+                                mv.visitInsn(Opcodes.AASTORE);
+                                mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Consumer", "accept",
+                                        "(Ljava/lang/Object;)V", true);
+                            } else if (round) {
+                                mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Consumer");
+                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Consumer", "accept",
+                                        "(Ljava/lang/Object;)V", true);
+                            } else {
+                                Label original = new Label();
+                                mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Predicate");
+                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Predicate", "test",
+                                        "(Ljava/lang/Object;)Z", true);
+                                mv.visitJumpInsn(Opcodes.IFEQ, original);
+                                mv.visitInsn(Opcodes.RETURN);
+                                mv.visitLabel(original);
+                                // Frames are expanded (EXPAND_FRAMES): the method's initial frame.
+                                mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {peer}, 0, new Object[0]);
+                            }
+                        }
+                    };
+                }
+            }, ClassReader.EXPAND_FRAMES);
+            if (patched[0] != 4) {
+                throw new IllegalStateException("expected startRound, executeImpl, waitWakeup and performLoadCommands, "
+                        + "found " + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("DeterminismAgent: could not patch RobotPeer: " + t);
+            return null;
+        }
+    }
+
+    /**
+     * Classic's {@code Battle.wakeupSerial} and {@code wakeupParallel} wait for every robot
+     * whose thread runs, not only for living ones ({@code isRunning()} instead of
+     * {@code isAlive()}), as robocode-s's server waits for a robot's final {@code Execute}.
+     * A robot that just died still runs its handlers and then ends or waits for the round's
+     * end; without this, its code ran on unwatched: a robot looping there crashed at its
+     * work cutoff (ADR 0018) at a random time, and its drained energy changed what its
+     * bullets still gave it (rrh.Iwillfindyou).
+     */
+    private static byte[] patchBattle(byte[] classfileBuffer) {
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    if (!name.equals("wakeupSerial") && !name.equals("wakeupParallel")) {
+                        return mv;
+                    }
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitMethodInsn(int opcode, String owner, String method, String desc,
+                                boolean isInterface) {
+                            if (owner.equals("net/sf/robocode/battle/peer/RobotPeer") && method.equals("isAlive")
+                                    && desc.equals("()Z")) {
+                                patched[0]++;
+                                method = "isRunning";
+                            }
+                            super.visitMethodInsn(opcode, owner, method, desc, isInterface);
+                        }
+                    };
+                }
+            }, 0);
+            if (patched[0] != 2) {
+                throw new IllegalStateException("expected isAlive() in wakeupSerial and wakeupParallel, found "
+                        + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("DeterminismAgent: could not patch Battle: " + t);
+            return null;
+        }
+    }
+
     private static final class Transformer implements ClassFileTransformer {
         @Override
         public byte[] transform(Module module, ClassLoader loader, String className, Class<?> classBeingRedefined,
@@ -292,6 +446,12 @@ public final class DeterminismAgent {
             }
             if ("net/sf/robocode/host/security/RobotThreadManager".equals(className)) {
                 return patchStop(classfileBuffer);
+            }
+            if ("net/sf/robocode/battle/peer/RobotPeer".equals(className)) {
+                return patchPeer(classfileBuffer);
+            }
+            if ("net/sf/robocode/battle/Battle".equals(className)) {
+                return patchBattle(classfileBuffer);
             }
             if (IdentityHashes.isRobotClassLoader(loader)) {
                 return patchRobotClass(loader, className, classfileBuffer);
