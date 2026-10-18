@@ -71,11 +71,13 @@ pub fn robots_panel(
                 )
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
+                    let colors = graphs::robot_colors(robots, snapshot);
                     for (i, statics) in robots.iter().enumerate() {
                         let robot = snapshot.and_then(|s| s.robots.get(i));
                         let score =
                             scores.then(|| robot.map_or(0.0, |r| history.score(round, i, r)));
-                        if robot_row(ui, statics, robot, score, *selected == i).clicked() {
+                        if robot_row(ui, statics, robot, colors[i], score, *selected == i).clicked()
+                        {
                             *selected = i;
                         }
                     }
@@ -90,6 +92,7 @@ fn robot_row(
     ui: &mut egui::Ui,
     statics: &v1::RobotStatics,
     robot: Option<&v1::RobotSnapshot>,
+    color: Color32,
     score: Option<f64>,
     selected: bool,
 ) -> egui::Response {
@@ -112,7 +115,7 @@ fn robot_row(
     let energy = robot.and_then(|r| r.energy).unwrap_or_default();
     // The first line: colour, name and score.
     let line = inner.top() + 8.0;
-    swatch(&painter, pos2(inner.left() + 5.0, line), statics, robot);
+    swatch(&painter, pos2(inner.left() + 5.0, line), color);
     let right = match score {
         Some(score) => {
             painter
@@ -178,19 +181,10 @@ fn short_name(name: &str) -> String {
     }
 }
 
-/// A small square in the robot's body colour.
-fn swatch(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    statics: &v1::RobotStatics,
-    robot: Option<&v1::RobotSnapshot>,
-) {
-    let [r, g, b] = match robot {
-        Some(robot) => view::colors(statics, robot).0[0],
-        None => crate::sprites::default_colors(&statics.full_class_name)[0],
-    };
+/// A small square in the robot's colour, as in the graphs.
+fn swatch(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
     let square = Rect::from_center_size(center, vec2(10.0, 10.0));
-    painter.rect_filled(square, 0.0, Color32::from_rgb(r, g, b));
+    painter.rect_filled(square, 0.0, color);
     painter.rect_stroke(
         square,
         0.0,
@@ -386,11 +380,12 @@ pub fn output_panel<'a>(
                                     // minimum.
                                     let share = ui.available_width() / robots.len().max(1) as f32;
                                     let names = (share - TAB_EXTRA - 2.0).clamp(56.0, 180.0);
+                                    let colors = graphs::robot_colors(robots, snapshot);
                                     for (i, statics) in robots.iter().enumerate() {
-                                        let robot = snapshot.and_then(|s| s.robots.get(i));
                                         let on = paint.get(i).copied().unwrap_or(false);
                                         let open = *selected == i;
-                                        let tab = output_tab(ui, statics, robot, open, on, names);
+                                        let tab =
+                                            output_tab(ui, statics, colors[i], open, on, names);
                                         if tab.toggle {
                                             event = Some(OutputEvent::TogglePaint(i));
                                         } else if tab.clicked {
@@ -544,7 +539,7 @@ const TAB_EXTRA: f32 = 6.0 + MARKER + 4.0 + 10.0 + 6.0 + 12.0;
 fn output_tab(
     ui: &mut egui::Ui,
     statics: &v1::RobotStatics,
-    robot: Option<&v1::RobotSnapshot>,
+    swatch_color: Color32,
     open: bool,
     paint: bool,
     names: f32,
@@ -615,8 +610,7 @@ fn output_tab(
     swatch(
         &painter,
         pos2(marker.right() + 4.0 + 5.0, rect.center().y),
-        statics,
-        robot,
+        swatch_color,
     );
     let at = pos2(
         marker.right() + 4.0 + 10.0 + 6.0,
