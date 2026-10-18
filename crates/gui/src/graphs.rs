@@ -118,17 +118,7 @@ pub fn graphs(
     height: f32,
     cpu: bool,
 ) {
-    let tanks: Vec<[Rgb; 3]> = robots
-        .iter()
-        .enumerate()
-        .map(
-            |(i, statics)| match snapshot.and_then(|s| s.robots.get(i)) {
-                Some(robot) => view::colors(statics, robot).0,
-                None => default_colors(&statics.full_class_name),
-            },
-        )
-        .collect();
-    let colors = line_colors(&tanks);
+    let colors = robot_colors(robots, snapshot);
     let mut battle = whole_battle(ui.ctx());
     // Each graph: a heading line and the plot.
     let s = ui.spacing().item_spacing.y;
@@ -432,6 +422,25 @@ fn trimmed(v: f32) -> String {
     } else {
         format!("{v:.2}")
     }
+}
+
+/// Each robot's colour in the graphs, the robot list and the output tabs: see
+/// [`line_colors`].
+pub fn robot_colors(
+    robots: &[v1::RobotStatics],
+    snapshot: Option<&v1::TurnSnapshot>,
+) -> Vec<Color32> {
+    let tanks: Vec<[Rgb; 3]> = robots
+        .iter()
+        .enumerate()
+        .map(
+            |(i, statics)| match snapshot.and_then(|s| s.robots.get(i)) {
+                Some(robot) => view::colors(statics, robot).0,
+                None => default_colors(&statics.full_class_name),
+            },
+        )
+        .collect();
+    line_colors(&tanks)
 }
 
 /// Each robot's line colour: the first of its body, gun and radar colours that is far
