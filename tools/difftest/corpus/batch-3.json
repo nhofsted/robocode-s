@@ -660,8 +660,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/rrh.Iwillfindyou_2.0.jar",
    "sha256": "d24e31ad468182f8e7f33c2eb7eab6396a929030cc4e8acddd54d22b79f89d0b",
-   "file": "rrh.Iwillfindyou_2.0.jar",
-   "exclude": "busy-loops on getEnergy() without an action once its energy is at most 0.5. Counting ends the loop deterministically (ADR 0018), but once disabled or halted its thread keeps running unwatched, into later rounds, and crashes at a random battle time (#15)"
+   "file": "rrh.Iwillfindyou_2.0.jar"
   },
   {
    "name": "voidious.micro.BlitzBat",

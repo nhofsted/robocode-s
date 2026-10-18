@@ -166,8 +166,9 @@ public final class RobotRandomness {
      */
     static final String API_TRACE_KEY = "robocodes.determinism.apiTrace";
 
+    /** Whether robot classes trace their Robocode API calls: with the trace, unless {@code -Drobocodes.traceApi=false}. */
     static boolean tracing() {
-        return TRACE != null;
+        return TRACE != null && !"false".equals(System.getProperty("robocodes.traceApi"));
     }
 
     /** A robot's Robocode API call returned {@code value}. */

@@ -371,6 +371,53 @@ public final class DeterminismAgent {
         }
     }
 
+    /**
+     * Classic's {@code Battle.wakeupSerial} and {@code wakeupParallel} wait for every robot
+     * whose thread runs, not only for living ones ({@code isRunning()} instead of
+     * {@code isAlive()}), as robocode-s's server waits for a robot's final {@code Execute}.
+     * A robot that just died still runs its handlers and then ends or waits for the round's
+     * end; without this, its code ran on unwatched: a robot looping there crashed at its
+     * work cutoff (ADR 0018) at a random time, and its drained energy changed what its
+     * bullets still gave it (rrh.Iwillfindyou).
+     */
+    private static byte[] patchBattle(byte[] classfileBuffer) {
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    if (!name.equals("wakeupSerial") && !name.equals("wakeupParallel")) {
+                        return mv;
+                    }
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitMethodInsn(int opcode, String owner, String method, String desc,
+                                boolean isInterface) {
+                            if (owner.equals("net/sf/robocode/battle/peer/RobotPeer") && method.equals("isAlive")
+                                    && desc.equals("()Z")) {
+                                patched[0]++;
+                                method = "isRunning";
+                            }
+                            super.visitMethodInsn(opcode, owner, method, desc, isInterface);
+                        }
+                    };
+                }
+            }, 0);
+            if (patched[0] != 2) {
+                throw new IllegalStateException("expected isAlive() in wakeupSerial and wakeupParallel, found "
+                        + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("DeterminismAgent: could not patch Battle: " + t);
+            return null;
+        }
+    }
+
     private static final class Transformer implements ClassFileTransformer {
         @Override
         public byte[] transform(Module module, ClassLoader loader, String className, Class<?> classBeingRedefined,
@@ -402,6 +449,9 @@ public final class DeterminismAgent {
             }
             if ("net/sf/robocode/battle/peer/RobotPeer".equals(className)) {
                 return patchPeer(classfileBuffer);
+            }
+            if ("net/sf/robocode/battle/Battle".equals(className)) {
+                return patchBattle(classfileBuffer);
             }
             if (IdentityHashes.isRobotClassLoader(loader)) {
                 return patchRobotClass(loader, className, classfileBuffer);
