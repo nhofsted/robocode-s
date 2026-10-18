@@ -934,8 +934,9 @@ impl<'a> BattleLoop<'a> {
         if link.awaiting != Some(execute.turn) || link.late_execute.is_some() {
             return; // not the reply we wait for
         }
-        if self.config.deterministic && !link.final_execute {
-            // The robot's counted work decides when it answers (classic: its wall time).
+        if self.config.deterministic && !link.final_execute && !execute.stopped {
+            // The robot's counted work decides when it answers (classic: its wall time). Not
+            // after its code ended: classic's `waitForBattleEndImpl` isn't waited for.
             let late = late_turns(execute.cpu_nanos, execute.turn, DETERMINISTIC_BUDGET_NANOS);
             if late > 0 {
                 self.links[i].late_execute = Some((execute.turn + late, execute));

@@ -120,6 +120,15 @@ public final class RobotRandomness {
      * The same in robocode-s's server ({@code DETERMINISTIC_BUDGET_NANOS}).
      */
     public static final long TURN_BUDGET_NANOS = 2_500_000;
+    /**
+     * Counted work (as virtual time) after which a robot's code throws (ADR 0018): it has run
+     * this long since its last turn started, so it is late for more turns than any robot may
+     * skip (240 for I/O robots, after turn 1's ten budgets). An endless loop then crashes at
+     * the same instruction everywhere instead of keeping the battle waiting.
+     */
+    public static final long WORK_CUTOFF_NANOS = 256 * TURN_BUDGET_NANOS;
+    /** {@link #WORK_CUTOFF_NANOS} in counted instructions. */
+    static final long CUTOFF_INSTRUCTIONS = WORK_CUTOFF_NANOS * 1000 / PICOS_PER_INSTRUCTION;
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
     private static final Map<ClassLoader, long[]> FUEL = new WeakHashMap<>();
@@ -183,10 +192,20 @@ public final class RobotRandomness {
 
     private static final ThreadLocal<Boolean> TRACING = ThreadLocal.withInitial(() -> false);
 
+    /** With the trace on, {@code -Drobocodes.traceRobots=<name prefixes, comma-separated>}: only these robots. */
+    private static final List<String> TRACE_ROBOTS = System.getProperty("robocodes.traceRobots") == null ? null
+            : List.of(System.getProperty("robocodes.traceRobots").split(","));
+
     private static void trace(String what) {
         // Writing the trace hashes JDK objects itself; don't trace that.
         if (TRACE == null || TRACING.get()) {
             return;
+        }
+        if (TRACE_ROBOTS != null) {
+            String group = Thread.currentThread().getThreadGroup().getName();
+            if (TRACE_ROBOTS.stream().noneMatch(group::startsWith)) {
+                return;
+            }
         }
         TRACING.set(true);
         try {
@@ -324,7 +343,7 @@ public final class RobotRandomness {
         long instructions = 0;
         synchronized (FUEL) {
             for (long[] fuel : FUEL.values()) {
-                instructions += fuel[0];
+                instructions += count(fuel);
             }
         }
         return elapsedNanos(0, instructions);
@@ -396,11 +415,27 @@ public final class RobotRandomness {
         return mix64(baseSeed ^ UTILS_SALT);
     }
 
+    /**
+     * A robot's work counter, {@code {limit, count - limit}} (instructions): robot code adds
+     * to the second, and throws once it reaches 0 ({@link WorkMeter}).
+     */
+    static long count(long[] fuel) {
+        return fuel[0] + fuel[1];
+    }
+
+    /** Sets the count at which the robot's code throws. */
+    static void limit(long[] fuel, long limit) {
+        long count = count(fuel);
+        fuel[0] = limit;
+        fuel[1] = count - limit;
+    }
+
     /** The work counter of the robot whose classes {@code loader} defines. */
     static Object fuel(Object loader) {
         long[] fuel;
         synchronized (FUEL) {
-            fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[1]);
+            // The count, and the limit for the robot's work until its first turn.
+            fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[] {CUTOFF_INSTRUCTIONS, -CUTOFF_INSTRUCTIONS});
         }
         // Robot classes initialize on the robot's thread: remember the counter for skipped
         // turns, the per-turn trace and the calibration.
@@ -418,11 +453,16 @@ public final class RobotRandomness {
         Stream stream = randomness == null ? null : randomness.currentStream();
         if (stream != null) {
             stream.turn();
+            long[] fuel = stream.fuel;
+            if (fuel != null) {
+                // Classic's robot side, in robocode-s too: its work until the next turn.
+                limit(fuel, count(fuel) + CUTOFF_INSTRUCTIONS);
+            }
             if (CALIBRATE != null) {
                 stream.measureCpu();
             }
             if (TRACE != null && stream.fuel != null) {
-                trace("turn " + stream.turns() + " fuel " + stream.fuel[0]);
+                trace("turn " + stream.turns() + " fuel " + count(stream.fuel));
             }
         }
     }
@@ -456,7 +496,7 @@ public final class RobotRandomness {
         var published = (java.util.concurrent.atomic.AtomicReference<Object>) args[2];
         RobotRandomness randomness = current;
         Stream stream = randomness == null ? null : randomness.currentStream();
-        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, stream.fuel[0]);
+        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, count(stream.fuel));
         synchronized (PEERS) {
             PeerTurns turns = PEERS.computeIfAbsent(peer, p -> new PeerTurns());
             long work = turns.work < 0 ? 0 : Math.max(0, now - turns.work);
@@ -520,7 +560,7 @@ public final class RobotRandomness {
     private static long elapsedNanos(Object fuel) {
         RobotRandomness randomness = current;
         Stream stream = randomness == null ? null : randomness.currentStream();
-        return elapsedNanos(stream == null ? 0 : stream.turns(), ((long[]) fuel)[0]);
+        return elapsedNanos(stream == null ? 0 : stream.turns(), count((long[]) fuel));
     }
 
     /** Counts a robot's clock reads, for the calibration (robots that read it are left out). */
@@ -540,7 +580,7 @@ public final class RobotRandomness {
                 Stream st = e.getValue();
                 synchronized (st) {
                     out.append(e.getKey()).append('\t').append(st.turns).append('\t')
-                            .append(st.fuel == null ? 0 : st.fuel[0]).append('\t').append(st.clockReads)
+                            .append(st.fuel == null ? 0 : count(st.fuel)).append('\t').append(st.clockReads)
                             .append('\t').append(st.cpuNanos).append('\n');
                 }
             }

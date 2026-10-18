@@ -1000,7 +1000,7 @@
    "url": "https://robocode-archive.strangeautomata.com/robots/florent.XSeries.Xmen_0.9.jar",
    "sha256": "7f9235dc6d7526c3c9c024dcba6a51b7d6b9d102eb0eb47a25da1870bc707770",
    "file": "florent.XSeries.Xmen_0.9.jar",
-   "exclude": "Not reproducible in classic: X2 can loop forever in Mirror.onScannedRobot (it rotates a point around the enemy until it lies on the battlefield); classic then waits for wall-clock timeouts and skips turns."
+   "exclude": "Not reproducible: X2 can loop forever in Mirror.onScannedRobot (it rotates a point around the enemy until it lies on the battlefield). Counting ends the loop deterministically (ADR 0018), but its thread can keep running unwatched after the battle stops waiting for it (#15)"
   }
  ]
 }

@@ -10,7 +10,7 @@ Robots read the clock: to seed their own generators (`new Random(System.currentT
 ## Decision
 
 In deterministic mode the determinism agent **counts the work** of robot code and gives robot code a **virtual clock**:
-- **Counting:** at the start of every straight-line block of bytecode in robot classes (defined by classic's robot class loader), `fuel[0] += n`. Here `n` is the block's instructions plus `JDK_CALL_COST` (10) per call into the JDK. `fuel` is one counter per robot class loader (in classic: one per robot).
+- **Counting:** at the start of every straight-line block of bytecode in robot classes (defined by classic's robot class loader), `fuel[0] += n`. Here `n` is the block's instructions plus `JDK_CALL_COST` (10) per call into the JDK. `fuel` is one counter per robot class loader (in classic: one per robot). At the start of loops and handlers the count is also checked against a limit, past which robot code throws (ADR 0018).
 - **Clock:** in robot code, `System.nanoTime()` and `System.currentTimeMillis()` read
   `elapsed = turns × TURN_NANOS + fuel × PICOS_PER_INSTRUCTION / 1000`.
   It starts at `NANO_ORIGIN` and `EPOCH_MILLIS` (2026-01-01T00:00Z). Turns are counted in classic's robot-side `executeImpl` and `waitForBattleEndImpl`.
