@@ -2,10 +2,11 @@
 
 //! Graphs per robot below the robot list (#33): energy over this round or the whole
 //! battle, and the CPU time each robot used per turn against its budget. Drawn with the
-//! painter: compact, one line per robot in its body colour.
+//! painter: compact, one line per robot in its body colour, or in its gun or radar
+//! colour, or else a colour of its own, when another robot's line already looks like it.
 
 use crate::shell;
-use crate::sprites::default_colors;
+use crate::sprites::{Rgb, default_colors, hsl_to_rgb, rgb_to_hsl};
 use crate::view;
 use eframe::egui::{self, Color32, FontId, RichText, Sense, Shape, Stroke, pos2, vec2};
 use robocode_s_protocol::v1;
@@ -117,17 +118,17 @@ pub fn graphs(
     height: f32,
     cpu: bool,
 ) {
-    let colors: Vec<Color32> = robots
+    let tanks: Vec<[Rgb; 3]> = robots
         .iter()
         .enumerate()
-        .map(|(i, statics)| {
-            let [r, g, b] = match snapshot.and_then(|s| s.robots.get(i)) {
-                Some(robot) => view::colors(statics, robot).0[0],
-                None => default_colors(&statics.full_class_name)[0],
-            };
-            visible(Color32::from_rgb(r, g, b))
-        })
+        .map(
+            |(i, statics)| match snapshot.and_then(|s| s.robots.get(i)) {
+                Some(robot) => view::colors(statics, robot).0,
+                None => default_colors(&statics.full_class_name),
+            },
+        )
         .collect();
+    let colors = line_colors(&tanks);
     let mut battle = whole_battle(ui.ctx());
     // Each graph: a heading line and the plot.
     let s = ui.spacing().item_spacing.y;
@@ -433,17 +434,62 @@ fn trimmed(v: f32) -> String {
     }
 }
 
-/// A robot's colour lightened enough to show on the dark graphs.
-fn visible(color: Color32) -> Color32 {
-    let [r, g, b, _] = color.to_array();
-    let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-    const MIN: f32 = 110.0;
-    if luma >= MIN {
-        return color;
+/// Each robot's line colour: the first of its body, gun and radar colours that is far
+/// enough from the lines before it, or else the hue furthest from all of them.
+fn line_colors(tanks: &[[Rgb; 3]]) -> Vec<Color32> {
+    let mut chosen: Vec<Rgb> = Vec::with_capacity(tanks.len());
+    for tank in tanks {
+        let nearest = |c: Rgb, chosen: &[Rgb]| {
+            chosen
+                .iter()
+                .map(|&o| distance(c, o))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let own = tank
+            .iter()
+            .map(|&c| visible(c))
+            .find(|&c| nearest(c, &chosen) >= DISTINCT);
+        let color = own.unwrap_or_else(|| {
+            (0..24)
+                .map(|k| visible(hsl_to_rgb(k as f32 / 24.0, 0.8, 0.5)))
+                .max_by(|&a, &b| nearest(a, &chosen).total_cmp(&nearest(b, &chosen)))
+                .expect("24 hues")
+        });
+        chosen.push(color);
     }
-    let t = (MIN - luma) / (255.0 - luma).max(1.0);
-    let mix = |c: u8| (f32::from(c) + (255.0 - f32::from(c)) * t) as u8;
-    Color32::from_rgb(mix(r), mix(g), mix(b))
+    chosen
+        .into_iter()
+        .map(|[r, g, b]| Color32::from_rgb(r, g, b))
+        .collect()
+}
+
+/// How far apart two line colours must be to tell them apart on the graphs.
+const DISTINCT: f32 = 110.0;
+
+/// The "redmean" approximation of how different two colours look.
+fn distance(a: Rgb, b: Rgb) -> f32 {
+    let [r1, g1, b1] = a.map(f32::from);
+    let [r2, g2, b2] = b.map(f32::from);
+    let mean = (r1 + r2) / 2.0;
+    let (dr, dg, db) = (r1 - r2, g1 - g2, b1 - b2);
+    ((2.0 + mean / 256.0) * dr * dr + 4.0 * dg * dg + (2.0 + (255.0 - mean) / 256.0) * db * db)
+        .sqrt()
+}
+
+/// A robot's colour lightened enough to show on the dark graphs. Raising its lightness
+/// rather than mixing in white keeps it vivid; only a garish saturation is toned down.
+fn visible(color: Rgb) -> Rgb {
+    const MIN: f32 = 110.0;
+    let luma = |[r, g, b]: Rgb| 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+    let [h, s, l] = rgb_to_hsl(color);
+    let s = s.min(0.85);
+    let mut l = l;
+    let mut out = hsl_to_rgb(h, s, l);
+    while luma(out) < MIN && l < 1.0 {
+        l = (l + 0.02).min(1.0);
+        out = hsl_to_rgb(h, s, l);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -492,6 +538,31 @@ mod tests {
         assert_eq!(history.score(1, 0, &ended.robots[0]), 150.0);
         assert_eq!(history.budget, 50.0);
         assert_eq!(history.cpu[0], 2.0);
+    }
+
+    #[test]
+    fn robots_of_one_colour_get_lines_apart() {
+        let red = [[200, 30, 30], [120, 120, 120], [200, 30, 30]];
+        let green = [[200, 30, 30], [30, 180, 30], [200, 30, 30]];
+        let lines = line_colors(&[red, red, green, red]);
+        // The second red robot falls back on its grey gun, the green-gunned one on its gun.
+        assert_eq!(lines[0].to_array()[..3], visible(red[0]));
+        assert_eq!(lines[1].to_array()[..3], visible([120, 120, 120]));
+        assert_eq!(lines[2].to_array()[..3], visible([30, 180, 30]));
+        let rgb = |c: Color32| -> Rgb { c.to_array()[..3].try_into().unwrap() };
+        for (i, &a) in lines.iter().enumerate() {
+            for &b in &lines[..i] {
+                assert!(distance(rgb(a), rgb(b)) >= DISTINCT, "{a:?} near {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_dark_colour_lightens_without_greying() {
+        let [r, g, b] = visible([120, 0, 0]);
+        let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+        assert!(luma >= 110.0);
+        assert!(rgb_to_hsl([r, g, b])[1] >= 0.8, "{r} {g} {b}");
     }
 
     #[test]
