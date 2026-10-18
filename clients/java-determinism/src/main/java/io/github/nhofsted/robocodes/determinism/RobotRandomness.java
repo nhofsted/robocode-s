@@ -115,6 +115,12 @@ public final class RobotRandomness {
     /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
     public static final long EPOCH_MILLIS = 1_767_225_600_000L;
     /**
+     * Classic's CPU constant on the machine the clock was calibrated on, which
+     * {@link #TURN_BUDGET_NANOS} follows from (ADR 0018). The robot host stores it in classic's
+     * settings, so classic needn't measure one, and a robot reading it there finds the rules'.
+     */
+    public static final long CPU_CONSTANT_NANOS = 2_520_000;
+    /**
      * Counted work (as virtual time) a robot may do in a turn before it skips turns: how long
      * classic waits for a robot on the machine the clock was calibrated on (ADR 0018). Its CPU
      * constant there is 2.52 ms, but classic waits in whole milliseconds: 3 waits of 1 ms,

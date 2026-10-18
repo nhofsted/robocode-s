@@ -240,6 +240,9 @@ public final class RobotHost {
         }
         properties.setProperty("robocode.options.development.path", String.join(",", folders));
         properties.setProperty("robocode.options.development.path.excluded", "");
+        // Without a stored CPU constant, classic's start-up measures one in a 5-second busy
+        // loop. Only its engine side uses it, for turn timeouts; the server keeps time here.
+        properties.setProperty("robocode.cpu.constant", Long.toString(RobotRandomness.CPU_CONSTANT_NANOS));
         try (OutputStream out = Files.newOutputStream(settings)) {
             properties.store(out, "Robocode Properties");
         }
