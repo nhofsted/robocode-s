@@ -26,13 +26,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -151,7 +154,7 @@ public final class RobotHost {
 
     static int describe(List<String> robots, List<Path> jars, Path home) throws Exception {
         System.setProperty("NOSECURITY", "true");
-        copyJars(jars, home);
+        Map<String, Path> copies = copyJars(jars, home);
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
         if (robots.isEmpty()) {
             StringBuilder out = new StringBuilder();
@@ -162,7 +165,7 @@ public final class RobotHost {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
                 // The name classic looks it up by: a development version's is
                 // `name version*`, where the specification says `name* version`. Then the
-                // details from its .properties, for the robot chooser.
+                // details from its .properties, for the robot chooser, and where it is.
                 out.append("list\t").append(item.getUniqueFullClassNameWithVersion())
                         .append('\t').append(item.isTeam() ? '1' : '0')
                         .append('\t').append(field(spec.getAuthorName()))
@@ -170,6 +173,7 @@ public final class RobotHost {
                         .append('\t').append(field(spec.getDescription()))
                         .append('\t').append(field(spec.getWebpage()))
                         .append('\t').append(field(spec.getRobocodeVersion()))
+                        .append('\t').append(source(item, copies))
                         .append('\n');
             }
             System.out.print(out);
@@ -210,8 +214,10 @@ public final class RobotHost {
      * class folders (an IDE's output) become classic's development paths, read in place.
      * The robots directory starts empty, so jars and the robot database of an earlier
      * listing in the same home are not found again.
+     *
+     * @return the jars by the file name of their copy
      */
-    private static void copyJars(List<Path> jars, Path home) throws IOException {
+    private static Map<String, Path> copyJars(List<Path> jars, Path home) throws IOException {
         Path robots = home.resolve("robots");
         if (Files.isDirectory(robots)) {
             try (var paths = Files.walk(robots)) {
@@ -222,11 +228,13 @@ public final class RobotHost {
         }
         Files.createDirectories(robots);
         List<String> folders = new ArrayList<>();
+        Map<String, Path> copies = new HashMap<>();
         for (Path jar : jars) {
             if (Files.isDirectory(jar)) {
                 folders.add(jar.toAbsolutePath().toString());
             } else {
                 Files.copy(jar, robots.resolve(jar.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                copies.put(jar.getFileName().toString(), jar.toAbsolutePath());
             }
         }
         // Classic's development paths, in its robocode.properties (it splits them at commas
@@ -249,6 +257,28 @@ public final class RobotHost {
         // Robots in a class folder write their data files into the battle's home, as robots
         // in jars do, rather than into the folder (classic's default for development robots).
         System.setProperty("ALWAYSUSECACHEFORDATA", "true");
+        return copies;
+    }
+
+    /**
+     * The jar or class folder a robot was found in, as given on the command line ("" if
+     * unknown): robocode-s caches listings per jar and gives battles only their robots' jars.
+     */
+    static String source(IRobotSpecItem item, Map<String, Path> copies) {
+        String root = item.getRootPath();
+        if (root == null) {
+            return "";
+        }
+        try {
+            String url = root.startsWith("jar:") ? root.substring(4) : root;
+            int inside = url.indexOf("!/");
+            Path path = Path.of(new URI(inside < 0 ? url : url.substring(0, inside)));
+            Path given = item.isInJAR() ? copies.get(path.getFileName().toString()) : path;
+            String s = given == null ? "" : given.toString();
+            return s.indexOf('\t') >= 0 || s.indexOf('\n') >= 0 ? "" : s;
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static IHostingRobotProxy createProxy(RobotSpecification spec,
