@@ -96,28 +96,257 @@ pub struct Listed {
     pub language: String,
     /// What it runs on: the robot host's JVM (`JVM 21.0.4`).
     pub platform: String,
+    /// The jar or class folder it is in, as given to the listing (`None` if the robot host
+    /// didn't say).
+    pub source: Option<PathBuf>,
 }
 
 /// Every robot and team in `jars` (jars and class folders), as classic's repository
 /// finds them. A robot in a class folder is named with classic's `*` for a development
 /// version (`mypackage.MyRobot*`), except classic's `sample.*` and `tested.*`.
 ///
-/// Each listing gets a home of its own below `dir` (`<pid>-<n>`), removed afterwards:
+/// Jars listed before come from a cache beside `dir` ([`listing`]), so only new and
+/// changed jars and the class folders start classic's repository. A robot that is in two
+/// jars is listed once.
+pub fn list_robots(host: &JavaHost, jars: &[PathBuf], dir: &Path) -> Result<Vec<Listed>, String> {
+    let mut robots = parse_list(&listing(host, jars, dir, true)?);
+    robots.sort_by(|a, b| a.name.cmp(&b.name));
+    robots.dedup_by(|a, b| a.name == b.name);
+    Ok(robots)
+}
+
+/// The robot host's listing (`platform` and `list` lines) of the jars in `jars`, and of
+/// its class folders with `folders`. A jar's lines are cached in `<dir>.cache.tsv` under
+/// its size and last change, and all of them under the robot host's files, which make
+/// the lines: a listing starts classic's repository only for jars that are new or
+/// changed since, and for class folders, which change as the IDE compiles.
+///
+/// That listing gets a home of its own below `dir` (`<pid>-<n>`), removed afterwards:
 /// the robot host empties its home's `robots` folder first, so listings sharing one
 /// (two GUIs at once) would break each other. Homes a crash left behind are removed
 /// once they are [`STALE_LISTING`] old.
-pub fn list_robots(host: &JavaHost, jars: &[PathBuf], dir: &Path) -> Result<Vec<Listed>, String> {
+fn listing(host: &JavaHost, jars: &[PathBuf], dir: &Path, folders: bool) -> Result<String, String> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
-    remove_stale(dir, STALE_LISTING);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let home = dir.join(format!("{}-{n}", std::process::id()));
-    // A reused process id's leftovers.
-    let _ = std::fs::remove_dir_all(&home);
-    let output = run_describe(host, jars, &[], &home);
-    let _ = std::fs::remove_dir_all(&home);
-    let mut robots = parse_list(&output?);
-    robots.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(robots)
+    let cache_file = {
+        let mut name = dir.as_os_str().to_owned();
+        name.push(".cache.tsv");
+        PathBuf::from(name)
+    };
+    let fingerprint = host_fingerprint(&host.lib_dir);
+    let mut cache = ListCache::read(&cache_file)
+        .filter(|c| c.host == fingerprint)
+        .unwrap_or_else(|| ListCache {
+            host: fingerprint,
+            ..ListCache::default()
+        });
+    let mut scan = Vec::new();
+    let mut files = Vec::new();
+    for jar in jars {
+        if jar.is_dir() {
+            if folders {
+                scan.push(jar.clone());
+            }
+            continue;
+        }
+        let path = std::path::absolute(jar).map_err(|e| e.to_string())?;
+        let stamp = file_stamp(&path);
+        if stamp.is_none() || cache.jars.get(&path).map(|(s, _)| *s) != stamp {
+            scan.push(jar.clone());
+        }
+        files.push(path);
+    }
+    let mut listed = Vec::new();
+    if !scan.is_empty() {
+        remove_stale(dir, STALE_LISTING);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let home = dir.join(format!("{}-{n}", std::process::id()));
+        // A reused process id's leftovers.
+        let _ = std::fs::remove_dir_all(&home);
+        let output = run_describe(host, &scan, &[], &home);
+        let _ = std::fs::remove_dir_all(&home);
+        let output = output?;
+        if let Some(platform) = output.lines().find_map(|l| l.strip_prefix("platform\t")) {
+            cache.platform = platform.to_string();
+        }
+        let mut by_source: HashMap<&str, Vec<String>> = HashMap::new();
+        for line in output.lines().filter(|l| l.starts_with("list\t")) {
+            let source = line.rsplit('\t').next().unwrap_or("");
+            by_source.entry(source).or_default().push(line.to_string());
+        }
+        for jar in &scan {
+            let path = std::path::absolute(jar).map_err(|e| e.to_string())?;
+            let lines = by_source
+                .remove(path.to_string_lossy().as_ref())
+                .unwrap_or_default();
+            match file_stamp(&path) {
+                Some(stamp) => {
+                    cache.jars.insert(path, (stamp, lines));
+                }
+                // A class folder's robots, or a jar that just went away: listed, not cached.
+                None => listed.extend(lines),
+            }
+        }
+        // Robots without a source (an older robot host's listing) aren't cached either.
+        listed.extend(by_source.into_values().flatten());
+        cache.write(&cache_file);
+    }
+    let mut text = format!("platform\t{}\n", cache.platform);
+    for path in &files {
+        if let Some((_, lines)) = cache.jars.get(path) {
+            for line in lines {
+                text.push_str(line);
+                text.push('\n');
+            }
+        }
+    }
+    for line in listed {
+        text.push_str(&line);
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+/// A jar's size and last change (nanoseconds since 1970): whenever it is replaced or
+/// rebuilt, one of them changes.
+type Stamp = (u64, u128);
+
+fn file_stamp(path: &Path) -> Option<Stamp> {
+    let metadata = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+    let changed = metadata.modified().ok()?;
+    let nanos = changed
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some((metadata.len(), nanos))
+}
+
+/// The robot host's files with their stamps: a rebuilt robot host may list robots
+/// differently, so it starts a new cache.
+fn host_fingerprint(lib: &Path) -> String {
+    let mut files: Vec<String> = std::fs::read_dir(lib)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let (size, changed) = file_stamp(&e.path())?;
+            Some(format!(
+                "{}:{size}:{changed}",
+                e.file_name().to_string_lossy()
+            ))
+        })
+        .collect();
+    files.sort();
+    files.join(" ")
+}
+
+/// The listing cache: per jar its stamp and its `list` lines.
+#[derive(Debug, Default)]
+struct ListCache {
+    host: String,
+    platform: String,
+    jars: HashMap<PathBuf, (Stamp, Vec<String>)>,
+}
+
+impl ListCache {
+    /// `host`, `platform`, then per jar a `jar` line (path, size, change) and its lines.
+    fn read(path: &Path) -> Option<Self> {
+        let text = std::fs::read_to_string(path).ok()?;
+        let mut lines = text.lines();
+        let host = lines.next()?.strip_prefix("host\t")?.to_string();
+        let platform = lines.next()?.strip_prefix("platform\t")?.to_string();
+        let mut cache = Self {
+            host,
+            platform,
+            jars: HashMap::new(),
+        };
+        let mut current = None;
+        for line in lines {
+            if let Some(jar) = line.strip_prefix("jar\t") {
+                let mut f = jar.split('\t');
+                let (path, size, changed) = (f.next()?, f.next()?, f.next()?);
+                let stamp = (size.parse().ok()?, changed.parse().ok()?);
+                cache.jars.insert(PathBuf::from(path), (stamp, Vec::new()));
+                current = Some(PathBuf::from(path));
+            } else if line.starts_with("list\t") {
+                cache
+                    .jars
+                    .get_mut(current.as_ref()?)?
+                    .1
+                    .push(line.to_string());
+            }
+        }
+        Some(cache)
+    }
+
+    /// Written to a file of its own first and then renamed, so two GUIs listing at once
+    /// never read half a cache; the last one wins.
+    fn write(&self, path: &Path) {
+        let mut text = format!("host\t{}\nplatform\t{}\n", self.host, self.platform);
+        let mut jars: Vec<_> = self.jars.iter().collect();
+        jars.sort_by(|a, b| a.0.cmp(b.0));
+        for (jar, ((size, changed), lines)) in jars {
+            let Some(jar) = jar.to_str().filter(|j| !j.contains(['\t', '\n'])) else {
+                continue;
+            };
+            text.push_str(&format!("jar\t{jar}\t{size}\t{changed}\n"));
+            for line in lines {
+                text.push_str(line);
+                text.push('\n');
+            }
+        }
+        let partial = path.with_extension(format!("{}.partial", std::process::id()));
+        if std::fs::write(&partial, text).is_ok() && std::fs::rename(&partial, path).is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+    }
+}
+
+/// The jars and class folders a battle of `robots` (classic names, optionally with
+/// version) needs: the jars the listing finds them in, and every class folder. Starting
+/// classic's repository over every jar takes seconds per hundred jars, in the battle's
+/// description and again in each robot's host. A team gets all of `jars`: its members
+/// may be in other jars, and classic leaves out members it doesn't find. So does a
+/// robot the listing doesn't find in a jar, unless there are class folders it may be in.
+pub fn battle_jars(
+    host: &JavaHost,
+    jars: &[PathBuf],
+    robots: &[String],
+    dir: &Path,
+) -> Vec<PathBuf> {
+    match listing(host, jars, dir, false) {
+        Ok(text) => jars_of(&parse_list(&text), jars, robots),
+        Err(_) => jars.to_vec(),
+    }
+}
+
+/// [`battle_jars`] from the listing of the jars in `jars`.
+fn jars_of(listed: &[Listed], jars: &[PathBuf], robots: &[String]) -> Vec<PathBuf> {
+    let folders: Vec<PathBuf> = jars.iter().filter(|j| j.is_dir()).cloned().collect();
+    let mut needed: Vec<PathBuf> = Vec::new();
+    for robot in robots {
+        let found: Vec<&Listed> = listed
+            .iter()
+            .filter(|l| {
+                l.name == *robot
+                    || (!robot.contains(' ') && l.name.split(' ').next() == Some(robot))
+            })
+            .collect();
+        if found.iter().any(|l| l.team || l.source.is_none())
+            || (found.is_empty() && folders.is_empty())
+        {
+            return jars.to_vec();
+        }
+        for source in found.iter().filter_map(|l| l.source.as_ref()) {
+            if !needed.contains(source) {
+                needed.push(source.clone());
+            }
+        }
+    }
+    // In the order given: where classic finds a robot twice, the same one as before.
+    jars.iter()
+        .filter(|j| j.is_dir() || std::path::absolute(j).is_ok_and(|p| needed.contains(&p)))
+        .cloned()
+        .collect()
 }
 
 /// A listing takes seconds; one of its homes this old was left behind by a crash.
@@ -148,8 +377,8 @@ fn remove_stale(dir: &Path, age: Duration) {
 }
 
 /// Parses the robot host's `--describe` list: per robot its name, whether it is a team,
-/// then its author, version, description, web page and Robocode version; and the platform
-/// they all run on.
+/// then its author, version, description, web page, Robocode version and the jar or class
+/// folder it is in; and the platform they all run on.
 fn parse_list(text: &str) -> Vec<Listed> {
     let platform = text
         .lines()
@@ -171,6 +400,7 @@ fn parse_list(text: &str) -> Vec<Listed> {
                 description: next(),
                 webpage: next(),
                 robocode_version: next(),
+                source: Some(next()).filter(|s| !s.is_empty()).map(PathBuf::from),
                 language: "Java".into(),
                 platform: platform.clone(),
             })
@@ -426,13 +656,26 @@ pub fn prepare(
     let dir = std::path::absolute(env.data.join("battles"))
         .map_err(|e| e.to_string())?
         .join(format!("{stamp}-{}", std::process::id()));
-    let described = describe(
+    let mut jars = battle_jars(&host, &env.jars, robots, &env.data.join("list"));
+    let mut described = describe(
         &host,
-        &env.jars,
+        &jars,
         robots,
         &dir.join("describe"),
         config.deterministic,
-    )?;
+    );
+    // A robot the cache didn't find where it is now: the description says what's wrong.
+    if described.is_err() && jars != env.jars {
+        jars = env.jars.clone();
+        described = describe(
+            &host,
+            &jars,
+            robots,
+            &dir.join("describe"),
+            config.deterministic,
+        );
+    }
+    let described = described?;
     if let Some(path) = &config.record {
         config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
     }
@@ -445,7 +688,7 @@ pub fn prepare(
                 statics: s,
             })
             .collect(),
-        jars: env.jars.clone(),
+        jars,
         dir,
         memory_mb,
     };
@@ -664,6 +907,83 @@ mod tests {
         );
         assert!(!dir.join("left-behind").exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn listings_say_where_each_robot_is() {
+        let text = "platform\tJVM 21\n\
+                    list\ta.A 1.0\t0\tme\t1.0\t\t\t1.9\t/r/a.jar\n\
+                    list\tb.B 2\t1\t\t\t\t\t\t\n";
+        let listed = parse_list(text);
+        assert_eq!(listed[0].source, Some(PathBuf::from("/r/a.jar")));
+        assert_eq!(listed[0].robocode_version, "1.9");
+        assert_eq!(listed[1].source, None, "an older robot host doesn't say");
+        assert!(listed[1].team);
+    }
+
+    #[test]
+    fn the_listing_cache_reads_what_it_wrote() {
+        let path = std::env::temp_dir().join(format!("robocodes-cache-{}.tsv", std::process::id()));
+        let mut cache = ListCache {
+            host: "lib.jar:1:2".into(),
+            platform: "JVM 21".into(),
+            ..ListCache::default()
+        };
+        let line = "list\ta.A 1.0\t0\tme\t1.0\t\t\t1.9\t/r/a.jar".to_string();
+        cache
+            .jars
+            .insert("/r/a.jar".into(), ((10, 20), vec![line.clone()]));
+        cache.jars.insert("/r/empty.jar".into(), ((1, 2), vec![]));
+        cache.write(&path);
+        let read = ListCache::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            (read.host.as_str(), read.platform.as_str()),
+            ("lib.jar:1:2", "JVM 21")
+        );
+        assert_eq!(read.jars[Path::new("/r/a.jar")], ((10, 20), vec![line]));
+        assert_eq!(
+            read.jars[Path::new("/r/empty.jar")],
+            ((1, 2), vec![]),
+            "jars without robots are cached too"
+        );
+    }
+
+    #[test]
+    fn a_battle_gets_only_its_robots_jars() {
+        let robot = |name: &str, jar: &str, team: bool| Listed {
+            name: name.into(),
+            team,
+            source: Some(PathBuf::from(jar)),
+            ..Listed::default()
+        };
+        let listed = [
+            robot("a.A 1.0", "/r/a.jar", false),
+            robot("b.B 1.0", "/r/b1.jar", false),
+            robot("b.B 1.0c", "/r/b2.jar", false),
+            robot("t.Team 1", "/r/t.jar", true),
+        ];
+        let jars: Vec<PathBuf> = ["/r/b2.jar", "/r/a.jar", "/r/b1.jar", "/r/t.jar", "/r/c.jar"]
+            .map(PathBuf::from)
+            .to_vec();
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let pick = |n: &[&str]| jars_of(&listed, &jars, &names(n));
+        assert_eq!(pick(&["a.A 1.0"]), [PathBuf::from("/r/a.jar")]);
+        // Without a version, every version's jar, in the order given.
+        assert_eq!(
+            pick(&["b.B", "a.A 1.0"]),
+            ["/r/b2.jar", "/r/a.jar", "/r/b1.jar"].map(PathBuf::from)
+        );
+        assert_eq!(
+            pick(&["t.Team 1"]),
+            jars,
+            "a team's members may be anywhere"
+        );
+        assert_eq!(
+            pick(&["a.A 1.0", "x.Unknown"]),
+            jars,
+            "nowhere else to look"
+        );
     }
 
     #[test]
