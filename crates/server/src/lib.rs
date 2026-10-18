@@ -43,17 +43,30 @@ const MAX_SKIPPED_TURNS: i64 = 30;
 const MAX_SKIPPED_TURNS_WITH_IO: i64 = 240;
 
 /// Deterministic mode: the counted work (as virtual time, ADR 0014) a robot may do in a
-/// turn before it skips turns. Classic's CPU constant on the machine the virtual clock was
-/// calibrated on (#15); part of the deterministic rules, like the clock's constants
-/// (`RobotRandomness.TURN_BUDGET_NANOS` on the Java side).
-pub const DETERMINISTIC_BUDGET_NANOS: u64 = 2_500_000;
+/// turn before it skips turns. How long classic waits for a robot on the machine the
+/// virtual clock was calibrated on (ADR 0018): 3 whole-millisecond waits for its CPU
+/// constant of 2.52 ms, 3.28 ms on Linux, less classic's own robot-side work per turn
+/// (64 µs), which it times too but isn't counted. Part of the deterministic rules, like the
+/// clock's constants (`RobotRandomness.TURN_BUDGET_NANOS` on the Java side).
+pub const DETERMINISTIC_BUDGET_NANOS: u64 = 3_200_000;
+
+/// Budgets a robot may use in turn 1: classic waits 21 milliseconds then instead of 3.
+pub const FIRST_TURN_BUDGETS: u64 = 7;
+
+/// Version of the deterministic rules (`RobotRandomness.rulesVersion()` on the Java side):
+/// deterministic battles need a robot host that follows the same ones.
+pub const DETERMINISTIC_RULES: u32 = 1;
 
 /// How many turns late a robot's `Execute` for `turn` counts in deterministic mode, after
 /// `work` nanoseconds of counted work. As classic, which waits a budget for each robot each
-/// turn (ten on turn 1, `Battle.wakeupRobots`) and otherwise runs the turn without it: the
+/// turn (seven on turn 1, `Battle.wakeupRobots`) and otherwise runs the turn without it: the
 /// robot answers after the turns whose wait ran out. A round's start (`turn` 0) is free.
 pub fn late_turns(work: u64, turn: i64, budget: u64) -> i64 {
-    let allowance = if turn == 1 { 10 * budget } else { budget };
+    let allowance = if turn == 1 {
+        FIRST_TURN_BUDGETS * budget
+    } else {
+        budget
+    };
     if turn < 1 || work < allowance {
         0
     } else {

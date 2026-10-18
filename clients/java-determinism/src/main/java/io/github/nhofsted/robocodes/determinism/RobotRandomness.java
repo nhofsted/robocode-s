@@ -115,20 +115,38 @@ public final class RobotRandomness {
     /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
     public static final long EPOCH_MILLIS = 1_767_225_600_000L;
     /**
-     * Counted work (as virtual time) a robot may do in a turn before it skips turns:
-     * classic's CPU constant on the machine the clock was calibrated on, 2.52 ms (#15).
-     * The same in robocode-s's server ({@code DETERMINISTIC_BUDGET_NANOS}).
+     * Counted work (as virtual time) a robot may do in a turn before it skips turns: how long
+     * classic waits for a robot on the machine the clock was calibrated on (ADR 0018). Its CPU
+     * constant there is 2.52 ms, but classic waits in whole milliseconds: 3 waits of 1 ms,
+     * 3.28 ms on Linux. Less the 64 µs of classic's own robot-side work per turn, which it
+     * times too but isn't counted. The same in robocode-s's server ({@code DETERMINISTIC_BUDGET_NANOS}).
      */
-    public static final long TURN_BUDGET_NANOS = 2_500_000;
+    public static final long TURN_BUDGET_NANOS = 3_200_000;
+    /**
+     * Budgets a robot may use in turn 1: classic waits 21 milliseconds then instead of 3
+     * (ten times its CPU constant's whole milliseconds, and one more).
+     */
+    public static final long FIRST_TURN_BUDGETS = 7;
     /**
      * Counted work (as virtual time) after which a robot's code throws (ADR 0018): it has run
      * this long since its last turn started, so it is late for more turns than any robot may
-     * skip (240 for I/O robots, after turn 1's ten budgets). An endless loop then crashes at
+     * skip (240 for I/O robots, after turn 1's seven budgets). An endless loop then crashes at
      * the same instruction everywhere instead of keeping the battle waiting.
      */
     public static final long WORK_CUTOFF_NANOS = 256 * TURN_BUDGET_NANOS;
     /** {@link #WORK_CUTOFF_NANOS} in counted instructions. */
     static final long CUTOFF_INSTRUCTIONS = WORK_CUTOFF_NANOS * 1000 / PICOS_PER_INSTRUCTION;
+
+    /**
+     * Version of the deterministic rules: the constants above and how they decide skipped
+     * turns. Bump it with any change to them. robocode-s refuses deterministic battles with
+     * a robot host that follows other rules ({@code DETERMINISTIC_RULES} in its server): an
+     * outdated build would otherwise count robots' work differently, without an error. A
+     * method, so callers get this jar's value, not one javac copied into them.
+     */
+    public static int rulesVersion() {
+        return 1;
+    }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
     private static final Map<ClassLoader, long[]> FUEL = new WeakHashMap<>();
@@ -470,11 +488,11 @@ public final class RobotRandomness {
 
     /**
      * How many turns late a robot answers that woke for {@code turn} and did {@code workNanos}
-     * of counted work: classic waits a budget for each robot each turn (ten on turn 1) and
+     * of counted work: classic waits a budget for each robot each turn (seven on turn 1) and
      * otherwise runs the turn without it. As robocode-s's server ({@code late_turns}).
      */
     public static long lateTurns(long workNanos, long turn) {
-        long allowance = turn == 1 ? 10 * TURN_BUDGET_NANOS : TURN_BUDGET_NANOS;
+        long allowance = turn == 1 ? FIRST_TURN_BUDGETS * TURN_BUDGET_NANOS : TURN_BUDGET_NANOS;
         return turn < 1 || workNanos < allowance ? 0 : 1 + (workNanos - allowance) / TURN_BUDGET_NANOS;
     }
 

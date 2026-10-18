@@ -46,10 +46,10 @@ class PeerPatchTest {
     }
 
     @Test
-    void theFirstTurnAllowsTenBudgets() {
-        assertEquals(0, RobotRandomness.lateTurns(10 * TURN_BUDGET_NANOS - 1, 1));
-        assertEquals(1, RobotRandomness.lateTurns(10 * TURN_BUDGET_NANOS, 1));
-        assertEquals(3, RobotRandomness.lateTurns(12 * TURN_BUDGET_NANOS, 1));
+    void theFirstTurnAllowsSevenBudgets() {
+        assertEquals(0, RobotRandomness.lateTurns(7 * TURN_BUDGET_NANOS - 1, 1));
+        assertEquals(1, RobotRandomness.lateTurns(7 * TURN_BUDGET_NANOS, 1));
+        assertEquals(3, RobotRandomness.lateTurns(9 * TURN_BUDGET_NANOS, 1));
     }
 
     @Test
