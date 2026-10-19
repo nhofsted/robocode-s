@@ -20,3 +20,4 @@
 | [0016](0016-own-aws-account.md) | The rumble runs in its own AWS account |
 | [0017](0017-lossy-viewer-replays.md) | Rumble replays are lossy viewer tracks, not re-simulated intents |
 | [0018](0018-deterministic-skipped-turns.md) | Deterministic skipped turns from counted work |
+| [0019](0019-built-in-robot-sandbox.md) | Robots run in a built-in OS sandbox; Docker is an alternative |

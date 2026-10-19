@@ -132,7 +132,7 @@ A battle's outcome depends on more than the protocol: rules and physics, the PRN
 
 - **Schema:** Protocol Buffers (proto3). It has the broadest code generation coverage: Java, Kotlin, Python, C#, Rust (`prost`), C++ and C (`nanopb`/`upb`).
 - **Framing:** a varint length prefix followed by the message, over any byte stream.
-- **Transports:** TCP (default), with TLS required when the peer is not on loopback. Unix domain sockets and Windows named pipes are later optimizations for local mode.
+- **Transports:** the process's **stdin and stdout** for robots the runner starts (ADR 0019); TCP for observers, remote robots and runner agents, with TLS required when the peer is not on loopback. A robot on pipes still sends `Hello` (role, protocol version) and gets `HelloAck`, but presents no token: the pipe pair is its identity, and its index can't be taken over TCP (`server::run_battle_piped`, `RobotPipe`). The server writes each message and flushes it (lockstep), and reads the robot's stdout on a thread of its own, as for a socket; at the end of the battle it closes the robot's stdin. A pipe has no read timeout, so there is no 10 s `Hello` timeout for it: a robot that never says `Hello` holds a reader thread only, until the runner kills its process, and the battle goes on after its connect timeout without it. A robot's stdout carries only the protocol: the host keeps the pipes to itself (§8).
 - **Versioning:** `Hello` / `HelloAck` handshake with protocol major/minor versions and feature flags.
 
 ### 5.2 Roles
@@ -174,7 +174,7 @@ server -> robot : RoundOver / BattleOver
 - Debug paint is only requested from a robot while an observer has it enabled. This saves bandwidth and robot CPU time, as in classic.
 - `BattleInfo` carries the battle's seed, and observers get `BattleOver` too, with the rounds fought and the final results (robots get it without them), so an observer elsewhere can show the results.
 - **Observers from elsewhere** (#36, `server::Observers`, `robocode-s battle --observe ADDR`): a listener of their own beside the robots' one, which stays on loopback, so robot tokens are never reachable from outside. It takes only observers (`Role.OBSERVER`), with the token in their `Hello` when one is set (compared in constant time; a wrong one is answered after a delay), at most 16 at once, each handshake on its own thread with a 10 s timeout. The CLI binds a port alone to 127.0.0.1 and refuses an address that isn't loopback without `--observe-token` (or `$ROBOCODES_OBSERVE_TOKEN`). The connection is plain TCP: the token and the battle travel unencrypted, so a remote observer belongs on a trusted network or an SSH tunnel (`ssh -L 7654:localhost:7654 host`). With `--observe` the battle starts once the first observer connected, so it sees it from the first turn; later observers join where the battle is. Every observer controls the battle (pause, step, speed, paint, stop, kill, input), as Tank Royale's controllers do; an observer that leaves while the battle is paused resumes it, so the command line's own observer isn't held up, and once the last observer from elsewhere left, the battle runs at full speed again.
-- **Local security** (PR #48 review): the robots' listener is on loopback, but any process on the machine reaches it, another user's too. So in a local battle (`runner::local`) every robot gets a fresh unpredictable token per battle (`server::random_token`: 128 bits from the operating system's randomness), and so does the embedded observer (`ServerConfig.observer_token`), which the robots' listener now requires of observers as well; both are compared in constant time. Nothing else connects there: the GUI's and the CLI's own observer is the embedded one, and observers from elsewhere use their own listener. A robot's token reaches its host in the environment (`ROBOCODES_ROBOT_TOKEN`), not on the command line, which other users can read (`ps`); the observer's never leaves the process. Tokens are neither recorded nor part of the battle, so recordings and outcomes don't change. Robots themselves run unsandboxed as the same user (`NOSECURITY`, §8), so a malicious robot could still read another robot's environment before that one connected (each token works once) or attack the user's processes in other ways: isolating untrusted robots is the container runner's job (§6). An `--observe` port on loopback without `--observe-token` is the user's choice and is open to every local process; set a token on a shared machine.
+- **Local security** (PR #48 review; since #67 local robots are on pipes, which no other process reaches, so what follows about robot tokens holds for TCP robots only, and the listener there takes just the embedded observer): the listener is on loopback, but any process on the machine reaches it, another user's too. So in a local battle (`runner::local`) every robot gets a fresh unpredictable token per battle (`server::random_token`: 128 bits from the operating system's randomness), and so does the embedded observer (`ServerConfig.observer_token`), which the robots' listener now requires of observers as well; both are compared in constant time. Nothing else connects there: the GUI's and the CLI's own observer is the embedded one, and observers from elsewhere use their own listener. A robot's token reaches its host in the environment (`ROBOCODES_ROBOT_TOKEN`), not on the command line, which other users can read (`ps`); the observer's never leaves the process. Tokens are neither recorded nor part of the battle, so recordings and outcomes don't change. Robots themselves run unsandboxed as the same user (`NOSECURITY`, §8), so a malicious robot could still read another robot's environment before that one connected (each token works once) or attack the user's processes in other ways: isolating untrusted robots is the container runner's job (§6). An `--observe` port on loopback without `--observe-token` is the user's choice and is open to every local process; set a token on a shared machine.
 - **Debug properties** (#36, classic's `setDebugProperty(key, value)`): an `Execute` brings the properties the robot set since its last one, in order (classic's `ExecCommands.getDebugProperties()`), and the next `RobotSnapshot` carries them as `debug_properties`: changes, as classic's snapshot does, not the current set. An observer keeps the current values; an empty value (classic's `null` or `""`) removes a property, as classic's robot console does. The GUI shows them as a key/value table beside the robot's output.
 
 ## 6. Robot hosting (runners)
@@ -184,9 +184,12 @@ server -> robot : RoundOver / BattleOver
 | Mode | Use case | Isolation | Notes |
 |---|---|---|---|
 | **Local process** | Development, fast rumble runs with trusted robots | Low: OS process only. Memory limited through runtime flags (e.g. `-Xmx`); optionally Job Objects on Windows or cgroups on Linux. | The JRE is **downloaded on demand**: on first use, a pinned Eclipse Temurin JRE for the platform is fetched into the robocode-s data dir and its checksum verified. Other runtimes follow the same pattern where possible. |
-| **Container** | Untrusted robots, tournaments | High: CPU, memory, pids, read-only rootfs, no general network | Requires Docker (Docker Desktop on Windows/macOS). |
+| **OS sandbox** (ADR 0019) | Default where available; untrusted robots, the rumble | High: no network, filesystem limited to its grants, memory and process limits | Built in: on Linux seccomp everywhere and Landlock where the kernel has it (bubblewrap as an option), on Windows an AppContainer and a Job Object. None on macOS yet. |
+| **Container** (ADR 0019) | Untrusted robots, remote agents, macOS | High: CPU, memory, pids, read-only rootfs, no network | Optional; requires Docker (Docker Desktop on Windows/macOS). |
 | **Remote agent** | Distributed tournaments, spreading load | Whatever the remote host's launcher provides | `runner` in agent mode, authenticated to the server. |
 | *WASM (future)* | Native and new-language robots | High, plus deterministic fuel metering | wasmtime embedded in the runner (§14). |
+
+The runner starts a local robot with `--stdio` and piped stdin and stdout (`Transport::Stdio`; `Transport::Tcp` with a token in the environment remains for robots a server reaches by address) and hands its pipes to the server; stderr is piped too, its tail kept for diagnosis.
 
 ### 6.2 Container images
 
@@ -197,7 +200,7 @@ server -> robot : RoundOver / BattleOver
 
 ### 6.3 Container network isolation
 
-A robot must reach the server and nothing else. **Decision:** robot containers sit on an `--internal` Docker network that also contains a tiny relay container. The relay forwards only to the server's robot port. This works the same on all three platforms and needs no host firewall rules.
+A robot must reach the server and nothing else. **Decision (ADR 0019):** a robot the runner starts talks to the server over its stdin and stdout, in a sandbox or a container alike, so it needs no network at all: containers run with `--network none`, and the OS sandbox denies every socket but Unix ones. TCP with tokens stays for remote robots and runner agents. (Until ADR 0019 the plan was a relay container on an `--internal` Docker network.)
 
 ### 6.4 One process per robot
 
@@ -242,6 +245,7 @@ The **robot host** runs classic Java robots unchanged (ADR 0012). It does not re
 - **Same name, same object:** in classic every event carries the very same `String` instance for a robot's name, the robot's own name included, and rumble bots compare names with `==`. The host keeps one instance per name (not `intern()`: classic's names aren't interned).
 - **A robot whose code ends** (crash, robot-side disable, `run()` returning) sends one final `Execute` with its current commands, `drain_energy` and `stopped`. That matches classic's `waitForBattleEndImpl`, which stores its commands once more and then only re-sends the server's copy.
 - **Kotlin:** like classic 1.11.1, the host has `kotlin-stdlib` 2.4.0 on its class path, for robots written in Kotlin.
+- **Transport:** with `--stdio` the host takes the process's stdin and stdout for the protocol (buffered, flushed after every message), then points `System.out` at stderr and `System.in` at an empty stream, so that classic's logging, a robot's stray `System.out` outside classic's robot streams and the JVM can't write into it; `--server` connects over TCP with a token. `--describe` is unchanged (it prints to stdout and isn't a battle).
 - `RobotHost` (the main class) connects, receives its identity in `HelloAck`, configures the robot's random streams (ADR 0009, 0010), looks up the robot in its jar through classic's repository, creates classic's proxy and then drives rounds from the server's messages.
 - **Class folders** (#36): a `--jar` may name a folder of class files (an IDE's output). The host makes it one of classic's development paths (`robocode.options.development.path` in the home's `robocode.properties`), so classic reads it in place and names its robots as development versions (`my.Robot*`, `my.Robot 1.0*`; not `sample.*` and `tested.*`). Every battle starts fresh JVMs in a new home, so a recompiled robot is new in the next battle; the home's `robots` folder is emptied first, so a reused home keeps no old jars or robot database. Each listing of the robots (the GUI's) has a home of its own, `data/list/<pid>-<n>`, removed afterwards (one a crash left behind goes once it is an hour old): two listings sharing one, as two GUIs at once did, broke each other. `ALWAYSUSECACHEFORDATA=true` sends such robots' data files to the home, as for jars, instead of into the folder.
 - It runs with `NOSECURITY=true` (one class loader for classic's engine classes and the peer); isolation is the process or container (§6).
@@ -496,7 +500,7 @@ robocode-s/
 | M0 | Bootstrap | Repo, CI (Linux/Windows/macOS), design doc, proto skeleton |
 | **M1** | **Headless engine + Java compat (MVP)** | Engine, server, local-process runner, java-compat library, `cli` battles; difftest is bit-exact for all classic sample robots over ≥1000 seeded rounds |
 | M2 | GUI | Viewer, battle setup, debug paint, recording and replay |
-| M3 | Isolation and distribution | Docker runner images, network relay, warm pools, remote runner agents with TLS and tokens |
+| M3 | Isolation and distribution | Robots over stdio, built-in OS sandbox (Linux, Windows), Docker runner image as an alternative (ADR 0019), release archives per platform, remote runner agents with TLS and tokens, warm pools |
 | M4 | Polyglot | Python, .NET, Rust, C/C++ and modern Java/Kotlin client libraries plus sample robots |
 | M5 | Rumble | Free-tier AWS backend (work/results/auth/submit/rankings), rumble client, seeding import from RoboWiki, website with rankings, reputation-based cross-checks |
 | M5b | Web replay | Replay decoder (WASM) and canvas viewer; on-demand replays in the browser |
@@ -524,7 +528,7 @@ robocode-s/
 | Decision | Choice |
 |---|---|
 | Compatibility level | Bit-exact with classic (verified by difftest) |
-| Sandbox | Pluggable: local process, Docker, remote; WASM later |
+| Sandbox | Built-in OS sandbox by default (Linux, Windows), Docker as an alternative, plain process, remote; WASM later (ADR 0019) |
 | Tank Royale | Independent protocol; adapter later |
 | Determinism | Optional deterministic mode |
 | Name | robocode-s |
@@ -536,7 +540,7 @@ robocode-s/
 | Design doc location | In repo (`docs/design.md`) |
 | Classic LiteRumble | Not contributing (non-goal) |
 | Bit-exact definition | Against classic with StrictMath/fdlibm semantics |
-| Container network | Relay container on an internal Docker network |
+| Robot connection | Robots the runner starts talk over stdin/stdout, with no network (ADR 0019) |
 | Java runtime (local mode) | Pinned Temurin JRE, downloaded on demand |
 | Classic sample robots | Bundled under EPL-2.0 |
 | Engine version | One integer (`ENGINE_VERSION`), bumped with every change that can alter a battle's outcome; stored in replays, results and reports; rumble results of different versions are never mixed (§4.4, §12.6) |

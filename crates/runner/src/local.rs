@@ -6,11 +6,11 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
-use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, launch};
+use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Transport, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{
-    BattleOutcome, Observers, RobotEntry, ServerConfig, random_token, run_battle_with,
+    BattleOutcome, Observers, RobotEntry, RobotPipe, ServerConfig, random_token, run_battle_piped,
 };
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
@@ -750,8 +750,10 @@ pub fn run_local_battle_with(
         .local_addr()
         .map_err(|e| e.to_string())?
         .to_string();
-    // Fresh secrets per battle: any local process reaches the robots' listener. They
-    // aren't recorded and don't affect the battle.
+    // The robots talk to the server over their stdin and stdout (ADR 0019); the listener
+    // is for the battle's own observer. A fresh secret per battle for that: any local
+    // process reaches it. It isn't recorded and doesn't affect the battle. The robots'
+    // tokens are never used: their indexes are taken by their pipes.
     let entries: Vec<RobotEntry> = battle
         .robots
         .iter()
@@ -760,13 +762,36 @@ pub fn run_local_battle_with(
             statics: r.statics.clone(),
         })
         .collect();
-    let tokens: Vec<String> = entries.iter().map(|e| e.token.clone()).collect();
+    let mut processes = Vec::new();
+    let mut pipes = Vec::new();
+    for (i, robot) in battle.robots.iter().enumerate() {
+        let launch_spec = RobotLaunch {
+            transport: Transport::Stdio,
+            robot: robot.lookup.clone(),
+            jars: battle.jars.clone(),
+            home: battle.dir.join(format!("robot-{i}")),
+            seed: battle.config.seed,
+            deterministic: battle.config.deterministic,
+            memory_mb: battle.memory_mb,
+        };
+        let mut process = launch(host, &launch_spec)
+            .map_err(|e| format!("launching {}: {e}", robot.statics.name))?;
+        if let Some((reader, writer)) = process.take_pipes() {
+            pipes.push(RobotPipe {
+                robot: i,
+                reader: Box::new(reader),
+                writer: Box::new(writer),
+            });
+        }
+        processes.push(process);
+    }
     let config = ServerConfig {
         observer_token: random_token(),
         ..battle.config.clone()
     };
     let observer_token = config.observer_token.clone();
-    let server = thread::spawn(move || run_battle_with(listener, observers, &config, entries));
+    let server =
+        thread::spawn(move || run_battle_piped(listener, observers, &config, entries, pipes));
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
     // Controls are small messages: sent at once, not held for the last one's ack.
@@ -819,23 +844,6 @@ pub fn run_local_battle_with(
         }
     });
 
-    let mut processes = Vec::new();
-    for (i, robot) in battle.robots.iter().enumerate() {
-        let launch_spec = RobotLaunch {
-            server: address.clone(),
-            token: tokens[i].clone(),
-            robot: robot.lookup.clone(),
-            jars: battle.jars.clone(),
-            home: battle.dir.join(format!("robot-{i}")),
-            seed: battle.config.seed,
-            deterministic: battle.config.deterministic,
-            memory_mb: battle.memory_mb,
-        };
-        processes.push(
-            launch(host, &launch_spec)
-                .map_err(|e| format!("launching {}: {e}", robot.statics.name))?,
-        );
-    }
     // The battle ends with `BattleOver`; a connection that ends before it broke (the
     // server then stops the battle, see `ObserverLeft`).
     let mut over = false;

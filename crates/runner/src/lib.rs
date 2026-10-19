@@ -8,7 +8,7 @@ pub mod local;
 
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -24,14 +24,27 @@ pub struct JavaHost {
     pub agent_jar: PathBuf,
 }
 
+/// How a launched robot talks to the server.
+#[derive(Debug, Clone)]
+pub enum Transport {
+    /// Over the robot host's stdin and stdout, which the runner takes
+    /// ([`RobotProcess::take_pipes`]): the pipes are the robot's identity, and it needs no
+    /// network (ADR 0019).
+    Stdio,
+    /// Over TCP, for a robot a server reaches by address.
+    Tcp {
+        /// Server address, e.g. `127.0.0.1:7654`.
+        server: String,
+        /// The robot's one-time token. It goes to the robot host in its environment
+        /// ([`TOKEN_ENV`]), not on its command line, which other users may read.
+        token: String,
+    },
+}
+
 /// One robot to launch.
 #[derive(Debug, Clone)]
 pub struct RobotLaunch {
-    /// Server address, e.g. `127.0.0.1:7654`.
-    pub server: String,
-    /// The robot's one-time token. It goes to the robot host in its environment
-    /// ([`TOKEN_ENV`]), not on its command line, which other users may read.
-    pub token: String,
+    pub transport: Transport,
     /// Classic robot name to look up in the jars, e.g. `sample.Fire` or `jk.mega.DrussGT 3.1.16`.
     pub robot: String,
     /// Jars or class folders containing the robot.
@@ -72,8 +85,14 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     args.push("-cp".into());
     args.push(host.lib_dir.join("*").display().to_string());
     args.push("io.github.nhofsted.robocodes.compat.RobotHost".into());
+    match &launch.transport {
+        Transport::Stdio => args.push("--stdio".into()),
+        Transport::Tcp { server, .. } => {
+            args.push("--server".into());
+            args.push(server.clone());
+        }
+    }
     for (flag, value) in [
-        ("--server", launch.server.clone()),
         ("--robot", launch.robot.clone()),
         ("--home", launch.home.display().to_string()),
         ("--seed", launch.seed.to_string()),
@@ -91,6 +110,7 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
 /// A running robot process.
 pub struct RobotProcess {
     child: Child,
+    pipes: Option<(ChildStdout, ChildStdin)>,
     stderr: Arc<Mutex<String>>,
 }
 
@@ -115,14 +135,20 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         home: std::path::absolute(&launch.home)?,
         ..launch.clone()
     };
-    let mut child = no_window(&mut Command::new(&host.java))
+    let mut command = Command::new(&host.java);
+    no_window(&mut command)
         .args(jvm_args(&host, &launch))
-        .env(TOKEN_ENV, &launch.token)
         .current_dir(&launch.home)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    match &launch.transport {
+        Transport::Stdio => command.stdin(Stdio::piped()).stdout(Stdio::piped()),
+        Transport::Tcp { token, .. } => command
+            .env(TOKEN_ENV, token)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null()),
+    };
+    let mut child = command.spawn()?;
+    let pipes = child.stdout.take().zip(child.stdin.take());
     let stderr = Arc::new(Mutex::new(String::new()));
     if let Some(pipe) = child.stderr.take() {
         let tail = stderr.clone();
@@ -141,10 +167,19 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
             }
         });
     }
-    Ok(RobotProcess { child, stderr })
+    Ok(RobotProcess {
+        child,
+        pipes,
+        stderr,
+    })
 }
 
 impl RobotProcess {
+    /// The robot's stdout and stdin of a [`Transport::Stdio`] launch, once.
+    pub fn take_pipes(&mut self) -> Option<(ChildStdout, ChildStdin)> {
+        self.pipes.take()
+    }
+
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         self.child.wait()
     }
@@ -211,8 +246,10 @@ mod tests {
             agent_jar: "/opt/agent.jar".into(),
         };
         let mut launch = RobotLaunch {
-            server: "127.0.0.1:1".into(),
-            token: "t".into(),
+            transport: Transport::Tcp {
+                server: "127.0.0.1:1".into(),
+                token: "t".into(),
+            },
             robot: "sample.Fire".into(),
             jars: vec!["/r/samples.jar".into()],
             home: "/tmp/h".into(),
@@ -225,6 +262,11 @@ mod tests {
         assert!(args.contains(&"-javaagent:/opt/agent.jar".to_string()));
         assert!(args.windows(2).any(|w| w[0] == "--seed" && w[1] == "42"));
         assert!(!args.iter().any(|a| a == "--token" || a == "t"));
+        assert!(args.contains(&"--server".to_string()));
+        launch.transport = Transport::Stdio;
+        let args = jvm_args(&host, &launch);
+        assert!(args.contains(&"--stdio".to_string()));
+        assert!(!args.contains(&"--server".to_string()));
         launch.deterministic = false;
         let args = jvm_args(&host, &launch);
         assert!(

@@ -22,6 +22,10 @@ import robocode.control.RobotSpecification;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -47,11 +51,16 @@ import java.util.regex.Pattern;
  * <p>Usage: {@code robot-host --server host:port --robot sample.Fire
  * --jar robot.jar [--jar ...] --home dir [--seed N]}, with the robot's token in the
  * environment variable {@code ROBOCODES_ROBOT_TOKEN} (other users may read a command line;
- * {@code --token T} still works). A {@code --jar} may also name a class
- * folder (an IDE's output, e.g. {@code bin}): classic reads it as a development path, so
- * its robots are named with classic's {@code *} for development versions (except classic's
- * {@code sample.*} and {@code tested.*}). With the determinism agent loaded,
- * the robot's random streams are derived from the seed and its unique name (ADR 0009).
+ * {@code --token T} still works). With {@code --stdio} instead of {@code --server} the
+ * protocol runs over this process's stdin and stdout, as the runner starts robots (ADR
+ * 0019): no network and no token, the pipes are the robot's identity. The host takes the
+ * two streams for itself and points {@code System.out} at stderr and {@code System.in} at
+ * nothing, so that nothing else can write into or read from the protocol. A {@code --jar}
+ * may also name a class folder (an IDE's output, e.g. {@code bin}): classic reads it as a
+ * development path, so its robots are named with classic's {@code *} for development
+ * versions (except classic's {@code sample.*} and {@code tested.*}). With the determinism
+ * agent loaded, the robot's random streams are derived from the seed and its unique name
+ * (ADR 0009).
  *
  * <p>{@code robot-host --describe --home dir --jar robot.jar --robot a [--robot b ...]}
  * instead prints what classic's repository knows about each robot, teams expanded into
@@ -72,6 +81,10 @@ public final class RobotHost {
         boolean describe = args.length > 0 && args[0].equals("--describe");
         if (describe) {
             args = Arrays.copyOfRange(args, 1, args.length);
+        }
+        boolean stdio = args.length > 0 && Arrays.asList(args).contains("--stdio");
+        if (stdio) {
+            args = Arrays.stream(args).filter(a -> !a.equals("--stdio")).toArray(String[]::new);
         }
         String server = null;
         String token = System.getenv().getOrDefault("ROBOCODES_ROBOT_TOKEN", "");
@@ -98,53 +111,66 @@ public final class RobotHost {
             System.exit(describe(robots, jars, home));
         }
         String robot = robots.isEmpty() ? null : robots.get(0);
-        if (server == null || robot == null || home == null) {
-            throw new IllegalArgumentException("usage: robot-host --server host:port --robot name "
-                    + "--jar robot.jar --home dir [--seed N]");
+        if ((server == null) != stdio || robot == null || home == null) {
+            throw new IllegalArgumentException("usage: robot-host (--server host:port | --stdio) "
+                    + "--robot name --jar robot.jar --home dir [--seed N]");
+        }
+        if (stdio) {
+            // Before anything else can print: the protocol owns the real stdin and stdout.
+            InputStream in = new BufferedInputStream(new FileInputStream(FileDescriptor.in));
+            OutputStream out = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
+            System.setOut(System.err);
+            System.setIn(new ByteArrayInputStream(new byte[0]));
+            System.exit(run(in, out, token, robot, jars, home, seed));
         }
         System.exit(run(server, token, robot, jars, home, seed));
     }
 
     static int run(String server, String token, String robot, List<Path> jars, Path home, long seed)
             throws Exception {
+        int colon = server.lastIndexOf(':');
+        try (Socket socket = new Socket(server.substring(0, colon), Integer.parseInt(server.substring(colon + 1)))) {
+            socket.setTcpNoDelay(true);
+            return run(new BufferedInputStream(socket.getInputStream()),
+                    new BufferedOutputStream(socket.getOutputStream()), token, robot, jars, home, seed);
+        }
+    }
+
+    /** Plays the robot over the connection {@code in} and {@code out}; each message is flushed. */
+    static int run(InputStream in, OutputStream out, String token, String robot, List<Path> jars,
+            Path home, long seed) throws Exception {
         // One class loader for classic's engine classes, so our peer and classic's proxies
         // share types. Classic's package and thread checks are off; robocode-s isolates
         // robots by process and container instead (design §6).
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
 
-        int colon = server.lastIndexOf(':');
-        try (Socket socket = new Socket(server.substring(0, colon), Integer.parseInt(server.substring(colon + 1)))) {
-            socket.setTcpNoDelay(true);
-            InputStream in = new BufferedInputStream(socket.getInputStream());
-            OutputStream out = new BufferedOutputStream(socket.getOutputStream());
-            ClientMessage.newBuilder().setHello(Hello.newBuilder()
-                    .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(0))
-                    .setRole(Role.ROLE_ROBOT)
-                    .setToken(token)).build().writeDelimitedTo(out);
-            out.flush();
-            ServerMessage first = ServerMessage.parseDelimitedFrom(in);
-            if (first == null || !first.hasHelloAck()) {
-                System.err.println("server refused the robot: " + (first == null ? "connection closed" : first));
-                return 1;
-            }
-            var statics = first.getHelloAck().getRobot();
-            if (RobotRandomness.isAgentInstalled()) {
-                RobotRandomness.configure(seed, List.of(statics.getName()));
-            }
-
-            // Initializes classic's container and repository. Not closed: classic's cleanup
-            // expects its battle module, and the process ends with the battle anyway.
-            RobocodeEngine engine = new RobocodeEngine(home.toFile());
-            RobotSpecification[] found = engine.getLocalRepository(robot);
-            if (found.length == 0) {
-                System.err.println("robot " + robot + " not found in " + jars);
-                return 1;
-            }
-            RemotePeer peer = new RemotePeer(out);
-            IHostingRobotProxy proxy = createProxy(found[0], statics, peer);
-            return serve(in, proxy, peer);
+        ClientMessage.newBuilder().setHello(Hello.newBuilder()
+                .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(0))
+                .setRole(Role.ROLE_ROBOT)
+                .setToken(token)).build().writeDelimitedTo(out);
+        out.flush();
+        ServerMessage first = ServerMessage.parseDelimitedFrom(in);
+        if (first == null || !first.hasHelloAck()) {
+            System.err.println("server refused the robot: " + (first == null ? "connection closed" : first));
+            return 1;
         }
+        var statics = first.getHelloAck().getRobot();
+        if (RobotRandomness.isAgentInstalled()) {
+            RobotRandomness.configure(seed, List.of(statics.getName()));
+        }
+
+        // Initializes classic's container and repository. Not closed: classic's cleanup
+        // expects its battle module, and the process ends with the battle anyway.
+        RobocodeEngine engine = new RobocodeEngine(home.toFile());
+        RobotSpecification[] found = engine.getLocalRepository(robot);
+        if (found.length == 0) {
+            System.err.println("robot " + robot + " not found in " + jars);
+            return 1;
+        }
+        RemotePeer peer = new RemotePeer(out);
+        IHostingRobotProxy proxy = createProxy(found[0], statics, peer);
+        return serve(in, proxy, peer);
     }
 
     /** A field of a {@code --describe} line: whitespace runs as one space, "" for none. */

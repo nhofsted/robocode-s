@@ -19,7 +19,7 @@ use robocode_s_engine::{Battle, BattleRules, Event};
 use robocode_s_protocol::v1::{self, client_message, recording_entry::Entry, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use std::collections::VecDeque;
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -161,7 +161,7 @@ pub struct BattleOutcome {
 enum Incoming {
     RobotConnected {
         index: usize,
-        stream: TcpStream,
+        stream: Conn,
     },
     ObserverConnected {
         stream: TcpStream,
@@ -182,10 +182,59 @@ enum Incoming {
     },
 }
 
+/// A robot's connection from the battle loop's side: a socket, or the pipes of a process
+/// the runner started (ADR 0019). The battle loop writes; a reader thread has the other half.
+enum Conn {
+    Tcp(TcpStream),
+    /// `None` once shut down: dropping the writer closes the robot's stdin.
+    Pipe(Option<Box<dyn Write + Send>>),
+}
+
+impl Conn {
+    /// Ends the connection, and with it the reader thread.
+    fn shutdown(&mut self) {
+        match self {
+            Conn::Tcp(s) => {
+                let _ = s.shutdown(Shutdown::Both);
+            }
+            Conn::Pipe(w) => *w = None,
+        }
+    }
+}
+
+impl Write for Conn {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Conn::Tcp(s) => s.write(buf),
+            Conn::Pipe(Some(w)) => w.write(buf),
+            Conn::Pipe(None) => Err(io::ErrorKind::BrokenPipe.into()),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Conn::Tcp(s) => s.flush(),
+            Conn::Pipe(Some(w)) => w.flush(),
+            Conn::Pipe(None) => Err(io::ErrorKind::BrokenPipe.into()),
+        }
+    }
+}
+
+/// A robot the runner started with its stdin and stdout as the connection (design §5.1):
+/// no listener, no token; the pipe pair is the robot's identity. It still says `Hello`.
+pub struct RobotPipe {
+    /// Index of the robot in the battle's [`RobotEntry`] list.
+    pub robot: usize,
+    /// What the robot writes (its stdout).
+    pub reader: Box<dyn Read + Send>,
+    /// What the robot reads (its stdin); dropped when the battle ends.
+    pub writer: Box<dyn Write + Send>,
+}
+
 /// Per robot, what the battle loop knows about its connection.
 #[derive(Default)]
 struct Link {
-    stream: Option<TcpStream>,
+    stream: Option<Conn>,
     /// The robot receives results this round: from `RoundStart` until the `Tick` in which
     /// it stops (death, halt or the end of the round).
     active: bool,
@@ -233,14 +282,34 @@ pub fn run_battle_with(
     config: &ServerConfig,
     robots: Vec<RobotEntry>,
 ) -> io::Result<BattleOutcome> {
+    run_battle_piped(listener, observers, config, robots, Vec::new())
+}
+
+/// [`run_battle_with`], where the robots in `pipes` are connected through their pipes
+/// instead of the listener (which still takes observers and the other robots).
+pub fn run_battle_piped(
+    listener: TcpListener,
+    observers: Option<Observers>,
+    config: &ServerConfig,
+    robots: Vec<RobotEntry>,
+    pipes: Vec<RobotPipe>,
+) -> io::Result<BattleOutcome> {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let tokens: Vec<String> = robots.iter().map(|r| r.token.clone()).collect();
+    // A piped robot's index isn't open to the listener, whatever token it presents.
+    let mut taken = vec![false; tokens.len()];
+    for pipe in pipes {
+        if let Some(t) = taken.get_mut(pipe.robot) {
+            *t = true;
+        }
+        spawn_pipe_robot(pipe, tx.clone());
+    }
     let acceptor = {
         let (tx, stop) = (tx.clone(), stop.clone());
         let observer_token = config.observer_token.clone();
         listener.set_nonblocking(true)?;
-        thread::spawn(move || accept_loop(&listener, &tokens, &observer_token, &tx, &stop))
+        thread::spawn(move || accept_loop(&listener, &tokens, taken, &observer_token, &tx, &stop))
     };
     let wait = observers.as_ref().is_some_and(|o| o.wait);
     let observer_acceptor = match observers {
@@ -356,11 +425,11 @@ fn same_secret(presented: &[u8], secret: &[u8]) -> bool {
 fn accept_loop(
     listener: &TcpListener,
     tokens: &[String],
+    mut taken: Vec<bool>,
     observer_token: &str,
     tx: &Sender<Incoming>,
     stop: &AtomicBool,
 ) {
-    let mut taken = vec![false; tokens.len()];
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -410,6 +479,7 @@ fn handshake(
             }
             taken[index] = true;
             spawn_robot_reader(index, reader, tx.clone());
+            let stream = Conn::Tcp(stream);
             let _ = tx.send(Incoming::RobotConnected { index, stream });
         }
         Ok(v1::Role::Observer) => {
@@ -465,28 +535,74 @@ fn refuse(mut stream: TcpStream, message: &str) -> io::Result<()> {
     )
 }
 
-fn spawn_robot_reader(robot: usize, mut reader: TcpStream, tx: Sender<Incoming>) {
+fn spawn_robot_reader(robot: usize, reader: TcpStream, tx: Sender<Incoming>) {
+    thread::spawn(move || read_robot(robot, reader, &tx));
+}
+
+/// Takes a piped robot's `Hello`, hands its connection to the battle loop and goes on
+/// reading it. A pipe has no read timeout, so a robot that never says `Hello` holds this
+/// thread, not the battle (which goes on after its connect timeout): the thread ends when
+/// the runner kills the process.
+fn spawn_pipe_robot(pipe: RobotPipe, tx: Sender<Incoming>) {
     thread::spawn(move || {
-        loop {
-            match read_message::<v1::ClientMessage>(&mut reader) {
-                Ok(Some(v1::ClientMessage { msg: Some(message) })) => {
-                    let message = Box::new(message);
-                    if tx.send(Incoming::Message { robot, message }).is_err() {
-                        return;
-                    }
-                }
-                Ok(Some(_)) => {}
-                ended => {
-                    log_perf(format_args!(
-                        "server drops robot {robot} because {}",
-                        why_ended(&ended)
-                    ));
-                    let _ = tx.send(Incoming::RobotDisconnected { robot });
+        let RobotPipe {
+            robot,
+            mut reader,
+            writer,
+        } = pipe;
+        let mut conn = Conn::Pipe(Some(writer));
+        let hello = read_message::<v1::ClientMessage>(&mut reader);
+        let ok = matches!(
+            &hello,
+            Ok(Some(v1::ClientMessage { msg: Some(client_message::Msg::Hello(h)) }))
+                if h.version.map(|v| v.major) == Some(PROTOCOL_VERSION.major)
+                    && h.role == v1::Role::Robot as i32
+        );
+        if !ok {
+            let message = match hello {
+                Ok(Some(_)) => "expected a robot Hello of this protocol version".into(),
+                other => why_ended(&other),
+            };
+            let error = v1::Error { message };
+            let _ = write_message(&mut conn, &server(server_message::Msg::Error(error)));
+            let _ = conn.flush();
+            conn.shutdown();
+            let _ = tx.send(Incoming::RobotDisconnected { robot });
+            return;
+        }
+        if tx
+            .send(Incoming::RobotConnected {
+                index: robot,
+                stream: conn,
+            })
+            .is_ok()
+        {
+            read_robot(robot, reader, &tx);
+        }
+    });
+}
+
+/// Forwards a robot's messages to the battle loop until its connection ends.
+fn read_robot(robot: usize, mut reader: impl Read, tx: &Sender<Incoming>) {
+    loop {
+        match read_message::<v1::ClientMessage>(&mut reader) {
+            Ok(Some(v1::ClientMessage { msg: Some(message) })) => {
+                let message = Box::new(message);
+                if tx.send(Incoming::Message { robot, message }).is_err() {
                     return;
                 }
             }
+            Ok(Some(_)) => {}
+            ended => {
+                log_perf(format_args!(
+                    "server drops robot {robot} because {}",
+                    why_ended(&ended)
+                ));
+                let _ = tx.send(Incoming::RobotDisconnected { robot });
+                return;
+            }
         }
-    });
+    }
 }
 
 /// Forwards an observer's controls; `left` runs when its connection ends.
@@ -672,13 +788,11 @@ impl<'a> BattleLoop<'a> {
             results: results.clone(),
         }));
         // Reader threads hold clones of the sockets; shutting them down closes the
-        // connections and ends those threads.
-        for stream in self
-            .links
-            .iter()
-            .filter_map(|l| l.stream.as_ref())
-            .chain(&self.observers)
-        {
+        // connections and ends those threads. A piped robot's stdin closes: it ends.
+        for stream in self.links.iter_mut().filter_map(|l| l.stream.as_mut()) {
+            stream.shutdown();
+        }
+        for stream in &self.observers {
             let _ = stream.shutdown(Shutdown::Both);
         }
         let finished = self.engine.finish();
@@ -1300,7 +1414,7 @@ impl<'a> BattleLoop<'a> {
 
     fn send(&mut self, i: usize, msg: server_message::Msg) {
         if let Some(stream) = self.links[i].stream.as_mut() {
-            if let Err(e) = write_message(stream, &server(msg)) {
+            if let Err(e) = write_message(stream, &server(msg)).and_then(|()| stream.flush()) {
                 log_perf(format_args!(
                     "server drops robot {i} because writing to it failed: {e}"
                 ));
