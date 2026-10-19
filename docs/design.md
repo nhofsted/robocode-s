@@ -184,7 +184,8 @@ server -> robot : RoundOver / BattleOver
 | Mode | Use case | Isolation | Notes |
 |---|---|---|---|
 | **Local process** | Development, fast rumble runs with trusted robots | Low: OS process only. Memory limited through runtime flags (e.g. `-Xmx`); optionally Job Objects on Windows or cgroups on Linux. | The JRE is **downloaded on demand**: on first use, a pinned Eclipse Temurin JRE for the platform is fetched into the robocode-s data dir and its checksum verified. Other runtimes follow the same pattern where possible. |
-| **Container** | Untrusted robots, tournaments | High: CPU, memory, pids, read-only rootfs, no general network | Requires Docker (Docker Desktop on Windows/macOS). |
+| **OS sandbox** (ADR 0019) | Default where available; untrusted robots, the rumble | High: no network, filesystem limited to its grants, memory and process limits | Built in: Landlock and seccomp on Linux, an AppContainer and a Job Object on Windows. None on macOS yet. |
+| **Container** (ADR 0019) | Untrusted robots, remote agents, macOS | High: CPU, memory, pids, read-only rootfs, no network | Optional; requires Docker (Docker Desktop on Windows/macOS). |
 | **Remote agent** | Distributed tournaments, spreading load | Whatever the remote host's launcher provides | `runner` in agent mode, authenticated to the server. |
 | *WASM (future)* | Native and new-language robots | High, plus deterministic fuel metering | wasmtime embedded in the runner (§14). |
 
@@ -197,7 +198,7 @@ server -> robot : RoundOver / BattleOver
 
 ### 6.3 Container network isolation
 
-A robot must reach the server and nothing else. **Decision:** robot containers sit on an `--internal` Docker network that also contains a tiny relay container. The relay forwards only to the server's robot port. This works the same on all three platforms and needs no host firewall rules.
+A robot must reach the server and nothing else. **Decision (ADR 0019):** a robot the runner starts talks to the server over its stdin and stdout, in a sandbox or a container alike, so it needs no network at all: containers run with `--network none`, and the OS sandbox denies every socket but Unix ones. TCP with tokens stays for remote robots and runner agents. (Until ADR 0019 the plan was a relay container on an `--internal` Docker network.)
 
 ### 6.4 One process per robot
 
@@ -496,7 +497,7 @@ robocode-s/
 | M0 | Bootstrap | Repo, CI (Linux/Windows/macOS), design doc, proto skeleton |
 | **M1** | **Headless engine + Java compat (MVP)** | Engine, server, local-process runner, java-compat library, `cli` battles; difftest is bit-exact for all classic sample robots over ≥1000 seeded rounds |
 | M2 | GUI | Viewer, battle setup, debug paint, recording and replay |
-| M3 | Isolation and distribution | Docker runner images, network relay, warm pools, remote runner agents with TLS and tokens |
+| M3 | Isolation and distribution | Robots over stdio, built-in OS sandbox (Linux, Windows), Docker runner image as an alternative (ADR 0019), release archives per platform, remote runner agents with TLS and tokens, warm pools |
 | M4 | Polyglot | Python, .NET, Rust, C/C++ and modern Java/Kotlin client libraries plus sample robots |
 | M5 | Rumble | Free-tier AWS backend (work/results/auth/submit/rankings), rumble client, seeding import from RoboWiki, website with rankings, reputation-based cross-checks |
 | M5b | Web replay | Replay decoder (WASM) and canvas viewer; on-demand replays in the browser |
@@ -524,7 +525,7 @@ robocode-s/
 | Decision | Choice |
 |---|---|
 | Compatibility level | Bit-exact with classic (verified by difftest) |
-| Sandbox | Pluggable: local process, Docker, remote; WASM later |
+| Sandbox | Built-in OS sandbox by default (Linux, Windows), Docker as an alternative, plain process, remote; WASM later (ADR 0019) |
 | Tank Royale | Independent protocol; adapter later |
 | Determinism | Optional deterministic mode |
 | Name | robocode-s |
@@ -536,7 +537,7 @@ robocode-s/
 | Design doc location | In repo (`docs/design.md`) |
 | Classic LiteRumble | Not contributing (non-goal) |
 | Bit-exact definition | Against classic with StrictMath/fdlibm semantics |
-| Container network | Relay container on an internal Docker network |
+| Robot connection | Robots the runner starts talk over stdin/stdout, with no network (ADR 0019) |
 | Java runtime (local mode) | Pinned Temurin JRE, downloaded on demand |
 | Classic sample robots | Bundled under EPL-2.0 |
 | Engine version | One integer (`ENGINE_VERSION`), bumped with every change that can alter a battle's outcome; stored in replays, results and reports; rumble results of different versions are never mixed (§4.4, §12.6) |
