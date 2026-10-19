@@ -21,6 +21,7 @@ The operating systems have sandboxes of their own that need no install: Landlock
   - **macOS:** no OS sandbox for now (`sandbox-exec` is deprecated); Docker, or none.
 - **Other sandboxes, the user's choice:** `--sandbox bwrap` runs the robot under bubblewrap where it is installed (mount namespaces: the robot sees only its grants), on top of the layers above.
 - **Docker (`--sandbox docker`)** is another alternative, for remote runner agents, organisers who prefer it and macOS: `robocode-s-runner-jvm` with the pinned JRE, robot host and agent, started with `docker run -i --network none --read-only`, the robot's jars mounted read-only and its home writable, with CPU, memory and pids limits. Its stdio carries the protocol too, so it needs no relay container (replacing §6.3's decision).
+- **One option everywhere:** `--sandbox` (CLI, and the GUI's options) has the same values on every platform, even where only one sandbox exists: Linux `os`, `bwrap`, `docker`, `none`; Windows `os`, `docker`, `none`; macOS `docker`, `none`. A value the platform doesn't have is refused, naming the ones it has.
 - **`--sandbox none`** is today's plain local process. The default is `os` where the platform has it, otherwise `none`. A battle reports which sandbox, and on Linux which layers, its robots run in. The rumble client requires a sandbox that limits the filesystem: `os` with Landlock or on Windows, `bwrap` or `docker`.
 
 ## Consequences
