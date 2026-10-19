@@ -6,7 +6,8 @@ use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, client_message, event, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{
-    BattleOutcome, DETERMINISTIC_BUDGET_NANOS, RobotEntry, ServerConfig, late_turns, run_battle,
+    BattleOutcome, DETERMINISTIC_BUDGET_NANOS, RobotEntry, RobotPipe, ServerConfig, late_turns,
+    run_battle, run_battle_piped,
 };
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -118,6 +119,78 @@ fn refuses_unknown_tokens_and_versions() {
     // The robot never connected: it is disabled and the battle still finishes.
     let outcome = server.join().unwrap().unwrap();
     assert_eq!(outcome.results.len(), 1);
+}
+
+#[test]
+fn a_robot_on_pipes_plays_and_its_token_is_not_taken_by_others() {
+    let config = ServerConfig {
+        rules: small_rules(),
+        turn_timeout: Duration::from_millis(500),
+        ..Default::default()
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    // A's token is empty: no TCP robot may take its place with it, nor with any other.
+    let robots = vec![entry("a.A", ""), entry("b.B", "b")];
+    let (robot_in, server_writes) = std::io::pipe().unwrap();
+    let (server_reads, mut robot_out) = std::io::pipe().unwrap();
+    let pipe = RobotPipe {
+        robot: 0,
+        reader: Box::new(server_reads),
+        writer: Box::new(server_writes),
+    };
+    let server =
+        thread::spawn(move || run_battle_piped(listener, None, &config, robots, vec![pipe]));
+    let mut robot_in = robot_in;
+    let hello = v1::ClientMessage {
+        msg: Some(client_message::Msg::Hello(v1::Hello {
+            version: Some(PROTOCOL_VERSION),
+            role: v1::Role::Robot as i32,
+            ..Default::default()
+        })),
+    };
+    write_message(&mut robot_out, &hello).unwrap();
+    let mut impostor = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "");
+    assert!(
+        matches!(receive(&mut impostor), Some(server_message::Msg::Error(e)) if e.message.contains("token"))
+    );
+    let b = thread::spawn(move || {
+        let mut s = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "b");
+        while let Some(msg) = receive(&mut s) {
+            match msg {
+                server_message::Msg::RoundStart(_) => execute(&mut s, 0),
+                server_message::Msg::Tick(t) => execute(&mut s, t.turn),
+                _ => {}
+            }
+        }
+    });
+    let mut turns = 0;
+    let mut acked = false;
+    // The server closes the pipe at the end of the battle: the read ends.
+    while let Ok(Some(m)) = read_message::<v1::ServerMessage>(&mut robot_in) {
+        let execute = |turn| v1::ClientMessage {
+            msg: Some(client_message::Msg::Execute(v1::Execute {
+                turn,
+                commands: Some(v1::RobotCommands::default()),
+                ..Default::default()
+            })),
+        };
+        match m.msg {
+            Some(server_message::Msg::HelloAck(_)) => acked = true,
+            Some(server_message::Msg::RoundStart(_)) => {
+                write_message(&mut robot_out, &execute(0)).unwrap()
+            }
+            Some(server_message::Msg::Tick(t)) => {
+                turns += 1;
+                write_message(&mut robot_out, &execute(t.turn)).unwrap()
+            }
+            _ => {}
+        }
+    }
+    b.join().unwrap();
+    let outcome = server.join().unwrap().unwrap();
+    assert!(acked && turns > 5, "acked {acked}, {turns} turns");
+    assert_eq!(outcome.results.len(), 2);
 }
 
 #[test]
