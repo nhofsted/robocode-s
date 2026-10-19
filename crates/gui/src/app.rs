@@ -16,10 +16,10 @@ use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::{DialogState, FileDialog, OpeningMode};
 use robocode_s_engine::BattleRules;
-use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{
     Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
 };
+use robocode_s_runner::{JavaHost, Sandbox};
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -175,6 +175,8 @@ struct Starting {
     /// A battle on another server, watched: its address. The contestants and settings
     /// come once it is connected.
     watching: Option<String>,
+    /// What its robots run in ([`Sandbox::report`]); `None` when watched.
+    sandbox: Option<String>,
 }
 
 /// A battle with what comes before it: the loading screen while it starts, then the
@@ -421,6 +423,7 @@ impl App {
         }
         let env_jars = crate::settings::env_jars();
         env.jars = settings.robot_paths(&env_jars);
+        env.sandbox = settings.sandbox();
         let perf = crate::perf::Perf::from_env();
         if perf.is_some() {
             crate::perf::Perf::renderer(cc);
@@ -783,6 +786,7 @@ impl App {
             paint: s.paint,
             error: None,
             watching: None,
+            sandbox: Some(self.env.sandbox.report()),
         });
         self.launched = Some(s);
         self.error = None;
@@ -819,6 +823,7 @@ impl App {
             paint: false,
             error: None,
             watching: Some(address),
+            sandbox: None,
         });
         self.selected = 0;
         self.remote.live = Some(Box::new(live));
@@ -1005,6 +1010,13 @@ impl App {
                             starting.seed
                         ))
                         .weak(),
+                    );
+                }
+                if let Some(sandbox) = &starting.sandbox {
+                    ui.label(
+                        RichText::new(format!("robots in sandbox {sandbox}"))
+                            .small()
+                            .weak(),
                     );
                 }
                 ui.add_space(20.0);
@@ -1497,6 +1509,7 @@ impl App {
                         );
                         ui.end_row();
                     }
+                    sandbox_row(ui, &mut app.settings);
                 });
 
             section(ui, "Battlefield");
@@ -1614,6 +1627,7 @@ impl App {
     /// defaults go into the battle setup.
     fn settings_changed(&mut self, ctx: &egui::Context, before: &Settings) {
         self.settings_unsaved = Some(ctx.input(|i| i.time));
+        self.env.sandbox = self.settings.sandbox();
         let (s, setup) = (&self.settings, &mut self.setup);
         if s.classic != before.classic {
             setup.classic = s.classic;
@@ -1972,6 +1986,50 @@ fn browse_button(ui: &mut egui::Ui, hint: &str) -> bool {
         icons::folder(p, c, 7.0, color);
     })
     .clicked()
+}
+
+/// The options' sandbox row: what robots run in (ADR 0019). The sandboxes this platform
+/// lacks are listed, disabled, with the reason.
+fn sandbox_row(ui: &mut egui::Ui, settings: &mut Settings) {
+    let chosen = settings.sandbox();
+    ui.label("Sandbox").on_hover_text(
+        "What the robots run in: they are code from anyone. os is the system's own \
+         sandbox (on Linux seccomp, and Landlock where the kernel has it): no network, \
+         and only the robot's files. bwrap is bubblewrap, if installed. none is a plain \
+         process, with all your rights.",
+    );
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("sandbox")
+            .selected_text(chosen.name())
+            .show_ui(ui, |ui| {
+                for sandbox in Sandbox::ALL {
+                    let why = sandbox.unavailable();
+                    let item = ui.add_enabled(
+                        why.is_none(),
+                        egui::Button::selectable(chosen == sandbox, sandbox.name()),
+                    );
+                    let item = match why {
+                        Some(why) => item.on_disabled_hover_text(why),
+                        None => item,
+                    };
+                    if item.clicked() {
+                        settings.sandbox = sandbox.name().into();
+                    }
+                }
+            });
+        ui.label(RichText::new(chosen.report()).weak());
+    });
+    ui.end_row();
+    if let Some(why) = settings
+        .sandbox
+        .parse::<Sandbox>()
+        .err()
+        .filter(|_| settings.sandbox != chosen.name())
+    {
+        ui.label("");
+        ui.label(RichText::new(format!("{why}: {chosen} instead")).weak());
+        ui.end_row();
+    }
 }
 
 /// The rules' rows in a two-column grid: gun cooling rate, inactivity time, sentry border

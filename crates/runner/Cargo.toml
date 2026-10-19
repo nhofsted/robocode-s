@@ -21,3 +21,7 @@ robocode-s-server.workspace = true
 
 [dev-dependencies]
 robocode-s-engine.workspace = true
+
+# The Linux sandbox (`src/sandbox/linux.rs`): seccomp, Landlock and rlimits.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.190"

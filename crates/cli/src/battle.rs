@@ -45,6 +45,10 @@ Robots and runtime:
   --java PATH            Java executable ($ROBOCODES_JAVA; default: pinned JRE)
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
+  --sandbox KIND         what robots run in (ADR 0019): os (Linux: seccomp, and
+                         Landlock where the kernel has it), bwrap (bubblewrap,
+                         if installed), docker (not yet), none (a plain
+                         process); default os where there is one, else none
 
 Output:
   --json                 results as JSON instead of a table
@@ -143,6 +147,9 @@ impl Options {
                 "--java" => o.env.java = Some(value(arg)?.into()),
                 "--host-lib" => o.env.host_lib = value(arg)?.into(),
                 "--agent-jar" => o.env.agent_jar = value(arg)?.into(),
+                "--sandbox" => {
+                    o.env.sandbox = value(arg)?.parse().map_err(|e| format!("--sandbox: {e}"))?
+                }
                 "--json" => o.json = true,
                 "--record" => o.record = Some(value(arg)?.into()),
                 "--paint" => o.paint = true,
@@ -288,6 +295,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "rounds": local.outcome.rounds,
             "deterministic": !o.classic,
             "engineVersion": robocode_s_engine::ENGINE_VERSION,
+            "sandbox": host.sandbox.report(),
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "results": results::json(&rows),
         });
@@ -299,9 +307,10 @@ pub fn run(o: &Options) -> Result<(), String> {
             "deterministic"
         };
         println!(
-            "{} rounds, seed {seed}, {mode} mode, engine {}\n",
+            "{} rounds, seed {seed}, {mode} mode, engine {}, sandbox {}\n",
             local.outcome.rounds,
-            robocode_s_engine::ENGINE_VERSION
+            robocode_s_engine::ENGINE_VERSION,
+            host.sandbox.report()
         );
         print!("{}", results::table(&rows));
     }
@@ -388,5 +397,25 @@ mod tests {
         assert_eq!(o.env.jars, [PathBuf::from("x.jar"), PathBuf::from("y.jar")]);
         assert!(o.classic);
         assert_eq!(o.turn_timeout, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn sandboxes_the_platform_lacks_are_refused() {
+        use robocode_s_runner::Sandbox;
+        let o = Options::parse(&args("a.B --sandbox none")).unwrap();
+        assert_eq!(o.env.sandbox, Sandbox::None);
+        let docker = Options::parse(&args("a.B --sandbox docker")).unwrap_err();
+        assert!(
+            docker.starts_with("--sandbox: ") && docker.contains("#70"),
+            "{docker}"
+        );
+        let os = Options::parse(&args("a.B --sandbox os"));
+        if cfg!(target_os = "linux") {
+            assert_eq!(os.unwrap().env.sandbox, Sandbox::Os);
+            assert_eq!(Options::defaults().env.sandbox, Sandbox::Os);
+        } else {
+            assert!(os.unwrap_err().ends_with("here robots run in: none"));
+            assert_eq!(Options::defaults().env.sandbox, Sandbox::None);
+        }
     }
 }
