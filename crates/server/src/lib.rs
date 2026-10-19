@@ -613,6 +613,7 @@ impl<'a> BattleLoop<'a> {
                     seed: config.seed,
                     rules: Some(rules),
                     robots: statics.clone(),
+                    engine_version: robocode_s_engine::ENGINE_VERSION,
                 },
             )?),
             None => None,

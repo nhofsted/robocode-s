@@ -120,9 +120,11 @@ Robot-side math runs in the robot's own runtime and is not affected.
 
 A battle's outcome depends on more than the protocol: rules and physics, the PRNG, fuel counting and its calibration (§7.2), the pinned JRE and java-compat. A change to any of them can change who wins, so a result only means something together with the engine that produced it.
 
-- The engine gets an explicit **engine version**, separate from the protocol version (§5.1) and from release versions. It changes with every change that can alter a battle's outcome.
-- It is stored with every result: in replay headers (§11), in rumble result submissions (§12.3), in the rumble data model (§12.6), in CLI battle results and in difftest reports. Results are only compared or verified within one engine version (§12.4).
-- `robocode-s --version` shows it.
+- The engine has one explicit **engine version**, a single integer: `ENGINE_VERSION` in `crates/engine`. It is separate from the protocol version (§5.1) and from release versions.
+- **Bump it with every change that can alter a battle's outcome:** rules and physics, the PRNG, fuel counting and its calibration (including the Java-side constants in `clients/java-determinism`, so every `DETERMINISTIC_RULES` bump), java-compat behaviour, the pinned JRE.
+- `DETERMINISTIC_RULES` stays the robot host's compatibility check (the runner refuses a host with other rules). Tests guard the bump rule: one pins `(ENGINE_VERSION, DETERMINISTIC_RULES)` together, another hashes the outcome of a small seeded battle (`crates/engine/tests/fingerprint.rs`) and fails when it changes without a bump.
+- It is stored with every result: in replay headers (§11), in rumble result submissions (§12.3), in the rumble data model (§12.6), in CLI battle results and exports, and in difftest reports. Results are only compared or verified within one engine version (§12.4).
+- `robocode-s --version` shows it: `robocode-s 0.1.0 (engine 1, protocol 1.0)`.
 
 ## 5. Protocol
 
@@ -273,10 +275,11 @@ Native APIs for new robots, all generated from the same `.proto`:
 
 ## 11. Recording and replay
 
-- **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, engine version, seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, the drained, disabled and stopped robots, and an observer's abort, killed robots and mouse and keyboard input (which the engine ignores: robots' reactions are recorded as their commands, so the input is there for completeness and viewers). The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
+- **Format** (`proto`, `RecordingEntry`; gzip): a header (format version, release version, engine version (§4.4; 0 if recorded before engine versions), seed, rules, robots) followed by **every input the server gave the engine**, in order: round start and end, each turn's step, the commands each `Execute` brought, the drained, disabled and stopped robots, and an observer's abort, killed robots and mouse and keyboard input (which the engine ignores: robots' reactions are recorded as their commands, so the input is there for completeness and viewers). The server feeds the engine only through one driver (`crates/server/src/driver.rs`) that records each input before applying it, so a replay takes exactly the server's path.
 - A **snapshot marker** is recorded wherever the server published a `TurnSnapshot`. It holds what the engine doesn't know (console output, debug paint, each robot's CPU time and the turn budget, and the debug properties robots set) and a 64-bit hash of the snapshot, so every replayed turn is verified. CPU times and debug properties are not battle state: the hash leaves them out (as output and paint), and a replay shows them. Recordings from before they were recorded replay with CPU times of 0 and no debug properties.
 - Replay re-runs the deterministic engine. Keyframes aren't stored: the engine state is cheap to clone, so a viewer takes them in memory while it loads a recording, and scrubbing replays from the nearest one. The GUI loads on a thread of its own (`replay::Opening`), showing the progress with Cancel, so a long recording doesn't hold the window up; a website track takes the same way. A 5-round, 10-robot sample battle (4,777 turns) records to 190 KB and replays in 70 ms.
 - `robocode-s battle --record FILE` records; `robocode-s replay FILE` replays, verifies and prints the results.
+- A recording made with another engine version than the replaying one is still replayed, with a warning (CLI: on stderr; GUI: next to the turn readouts), since the replay may differ. Verification by snapshot hashes decides whether it did.
 - The file is created when the battle starts, so that a path that can't be written fails at once, and removed again when the battle is stopped before its first round (a cancelled start in the GUI): such a battle leaves no recording. A battle stopped later keeps one, up to the stop.
 - Rumble replays in the browser use a different, lossy format (§12.7, ADR 0017).
 - Classic `.br` recordings can be imported if feasible (low priority).
@@ -339,7 +342,9 @@ Clients do not choose pairings themselves:
 1. A client calls `GET /api/work`. It gets a **batch** of battle assignments: division, robot IDs and jar hashes, number of rounds, **seed** and assignment ID. Pairings with the fewest battles come first, as in LiteRumble.
 2. The client runs the battles in **deterministic mode** (§7.2). It downloads jars through CloudFront and verifies them by hash.
 3. The client calls `POST /api/results` with all results of the batch: per-round scores, a recording hash for each battle, and the engine version.
-4. The results Lambda checks that each assignment exists, is unexpired and belongs to this user, then updates the aggregates (§12.6).
+4. The results Lambda checks that each assignment exists, is unexpired and belongs to this user, then updates the aggregates (§12.6). Results of another engine version than the current one are not counted.
+
+Clients on an older engine version can't produce current results: assignments carry the engine version, and a client refuses work for one it doesn't run.
 
 Note: in deterministic mode slow robots skip turns by their counted work, not their time (ADR 0018). Their behavior can still differ slightly from classic on a given machine. This is accepted and documented for the rumble.
 
@@ -376,20 +381,21 @@ Removing a user's results requires their per-battle contributions. These are kep
 ### 12.6 Data model and rankings
 
 DynamoDB holds only aggregates; there are no per-battle rows.
-- **Pairing statistics:** battles and the running sums needed for each metric, per (division, bot A, bot B).
-- **Per-bot aggregates:** sums of pairing averages, updated by delta in the same transaction as the pairing statistic. APS, PWIN and survival can then be read from the bots table alone, without a scan.
+- **Pairing statistics:** battles and the running sums needed for each metric, per (engine version, division, bot A, bot B).
+- **Per-bot aggregates:** sums of pairing averages, per engine version, updated by delta in the same transaction as the pairing statistic. APS, PWIN and survival can then be read from the bots table alone, without a scan.
 - **Users:** reputation, quarantine flag, counters.
 - **Assignments:** outstanding work, with a DynamoDB TTL so expired ones disappear for free.
 
 Write cost: a battle costs roughly 4–10 WCU (transactional), so 25 WCU sustains about 3 battles/s, more than 200k battles/day. Batching uploads smooths out spikes.
 
 Rankings:
+- **Engine versions are never mixed** (O14). Results carry the engine version they were run with. Rankings use only the current engine version. When it changes, the rumble fills the new version's pairings from scratch (fewest battles first does that by itself); the old aggregates are kept, but not ranked. The data files say which engine version they rank.
 - **Once a day** a scheduled Lambda computes all metrics together: APS, PWIN and survival from the per-bot aggregates; Glicko-2, ANPP, Vote and pairing matrices from a slow, rate-limited scan of the pairing statistics, kept inside the free read capacity. It writes the data files of `docs/rumble-data.md`: per-rumble rankings and per-bot files with pairings and history. The website shows the rumble as of that run.
 - **History:** a daily snapshot of each bot's rank and score, appended to small per-bot JSON files, for trend charts.
 
 ### 12.7 Recordings and replays
 
-Recordings are stored per **round**, not per battle. A rumble recording is a **lossy viewer track** (ADR 0017, `crates/replay`): the round as the viewer draws it, quantized to what a screen shows, predicted and range-coded. The exact round is reproducible from its seed, bot versions and round index. Measured on top bots: 3.3–3.8 bytes per turn in 1v1, so about 3.5 KB for a 900-turn round and 20 KB for a 6,000-turn one. Lossless intents would take 37–39 bytes per turn.
+Recordings are stored per **round**, not per battle. A rumble recording is a **lossy viewer track** (ADR 0017, `crates/replay`): the round as the viewer draws it, quantized to what a screen shows, predicted and range-coded. The exact round is reproducible from its seed, bot versions, round index and engine version, which the track's header holds (ADR 0017). Measured on top bots: 3.3–3.8 bytes per turn in 1v1, so about 3.5 KB for a 900-turn round and 20 KB for a 6,000-turn one. Lossless intents would take 37–39 bytes per turn.
 
 **Stored round slots:**
 - **Which matchups:** every matchup where **at least one bot is in the top 50** of its division.
@@ -511,7 +517,7 @@ robocode-s/
 - **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
-- **O14** Engine version (§4.4, #22): one number or components (rules, metering calibration, runtime)? And what happens to rumble results when it changes: rerun, keep but rank separately, or mark as stale?
+- **O14** ~~Engine version (§4.4, #22)~~ Decided: one integer, `ENGINE_VERSION`. Rumble results of different engine versions are never mixed: aggregates are kept per version, only the current one is ranked, a new version starts its pairings from scratch (§12.6).
 
 ## 18. Decisions so far
 
@@ -533,6 +539,7 @@ robocode-s/
 | Container network | Relay container on an internal Docker network |
 | Java runtime (local mode) | Pinned Temurin JRE, downloaded on demand |
 | Classic sample robots | Bundled under EPL-2.0 |
+| Engine version | One integer (`ENGINE_VERSION`), bumped with every change that can alter a battle's outcome; stored in replays, results and reports; rumble results of different versions are never mixed (§4.4, §12.6) |
 | Rumble frontend | SvelteKit, static, with browser-side API calls; also hosts the user documentation |
 | Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
 | Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |

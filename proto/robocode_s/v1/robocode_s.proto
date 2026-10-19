@@ -744,11 +744,13 @@ message RecordingEntry {
 message RecordingHeader {
   // Version of this format.
   uint32 format = 1;
-  // robocode-s version that recorded it.
+  // robocode-s release version that recorded it.
   string engine = 2;
   int64 seed = 3;
   BattleRules rules = 4;
   repeated RobotStatics robots = 5;
+  // Engine version (design §4.4) the battle ran with; 0 = recorded before engine versions.
+  uint32 engine_version = 6;
 }
 
 message RecordedCommands {

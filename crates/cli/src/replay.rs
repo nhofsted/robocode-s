@@ -22,6 +22,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     };
     let recording =
         Recording::read(Path::new(file.as_str())).map_err(|e| format!("{file}: {e}"))?;
+    if let Some(warning) = recording.engine_warning() {
+        eprintln!("robocode-s replay: warning: {warning}");
+    }
     let mut replay = recording.replay();
     let (mut turns, mut painted, mut unverified) = (0usize, 0usize, Vec::new());
     for frame in replay.by_ref() {
@@ -38,6 +41,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if json {
         let out = serde_json::json!({
             "seed": recording.header.seed,
+            "engineVersion": recording.header.engine_version,
             "rounds": recording.rounds(),
             "turns": turns,
             "paintedTurns": painted,
@@ -48,10 +52,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
         println!("{out}");
     } else {
         println!(
-            "{} rounds, seed {}, recorded by robocode-s {}; {turns} turns {}{}\n",
+            "{} rounds, seed {}, recorded by robocode-s {}{}; {turns} turns {}{}\n",
             recording.rounds(),
             recording.header.seed,
             recording.header.engine,
+            match recording.header.engine_version {
+                0 => String::new(),
+                v => format!(" (engine {v})"),
+            },
             if unverified.is_empty() {
                 "replayed identically"
             } else {

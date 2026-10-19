@@ -14,7 +14,7 @@ usage: robocode-s <command> [options]
 Commands:
   battle     run a headless battle and print the results
   replay     re-run a recorded battle, verify it and print the results
-  --version  print the version
+  --version  print the version, engine version and protocol version
 
 `robocode-s battle --help` describes the battle options.
 ";
@@ -23,7 +23,14 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
-            println!("robocode-s {}", env!("CARGO_PKG_VERSION"));
+            let protocol = robocode_s_protocol::PROTOCOL_VERSION;
+            println!(
+                "robocode-s {} (engine {}, protocol {}.{})",
+                env!("CARGO_PKG_VERSION"),
+                robocode_s_engine::ENGINE_VERSION,
+                protocol.major,
+                protocol.minor
+            );
             ExitCode::SUCCESS
         }
         Some("battle") => {

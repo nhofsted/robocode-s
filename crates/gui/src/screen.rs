@@ -831,7 +831,14 @@ pub fn results_window(
                             title: "Save the results",
                             name: "results.csv".to_string(),
                             text: results::csv(&rows),
-                            by_extension: vec![("txt", results::table(&rows))],
+                            by_extension: vec![(
+                                "txt",
+                                format!(
+                                    "robocode-s engine {}\n\n{}",
+                                    robocode_s_engine::ENGINE_VERSION,
+                                    results::table(&rows)
+                                ),
+                            )],
                         });
                     }
                     let hint = "Copy the results table";

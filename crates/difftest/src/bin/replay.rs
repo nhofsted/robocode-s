@@ -16,8 +16,11 @@ fn main() -> ExitCode {
     for file in &files {
         match robocode_s_difftest::replay_file(Path::new(file)) {
             Ok(s) => println!(
-                "OK   {file}: {} rounds, {} turns, {} events",
-                s.rounds, s.turns, s.events
+                "OK   {file}: {} rounds, {} turns, {} events, engine {}",
+                s.rounds,
+                s.turns,
+                s.events,
+                robocode_s_engine::ENGINE_VERSION
             ),
             // A known classic race (engine-spec §15.3): reported, not a failure.
             Err(e) if e.starts_with(robocode_s_difftest::RACE) => println!("RACE {file}: {e}"),

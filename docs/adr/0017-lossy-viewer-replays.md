@@ -11,7 +11,7 @@ The design planned browser replays as per-round robot intents, re-run by the eng
 - Below the top 10–16 bits, these mantissas are noise. Predicting them from what the engine reports back, from a value cache, or from recognised formulas (radar lock, head-on aim) saves 1–2 bytes per value at best; formulas match the robots' exact bits less than 1% of the time.
 - Lossless intents therefore cost **37–39 bytes per turn** after xz, and top-bot rounds are long: 2,600–7,300 turns for BeepBoop vs DrussGT, so **100–300 KB per round**.
 
-Nobody watching a replay can see bit-exactness. Exactness matters for verification and debugging, and battles are deterministic (ADR 0005, 0014): seed, bot versions and round index reproduce a round exactly.
+Nobody watching a replay can see bit-exactness. Exactness matters for verification and debugging, and battles are deterministic (ADR 0005, 0014): seed, bot versions, round index and engine version (design §4.4) reproduce a round exactly.
 
 ## Decision
 
@@ -41,4 +41,5 @@ Nobody watching a replay can see bit-exactness. Exactness matters for verificati
 - The browser viewer doesn't need the engine. M5b becomes a canvas player for tracks. Scrubbing decodes the round once and then jumps between its frames.
 - A rumble replay can't be re-simulated or shown with debug paint. To debug, authors reproduce the battle locally from its seed (exact) and record it with the desktop GUI.
 - The desktop GUI's Replay Battle plays tracks too, beside its full recordings: it tells them apart by the first byte (gzip's `1f` for a recording, the version for a track), so a version must never be `0x1f`. No extra magic number is needed.
-- The format is version 1 of a prototype. The quantization and predictors may still change before the rumble stores replays; the version byte allows that.
+- Version 2 stores the engine version after the version byte, as a LEB128 integer, before the coded stream. Version 1 tracks still decode, with engine version 0 (unknown).
+- The format is a prototype. The quantization and predictors may still change before the rumble stores replays; the version byte allows that.

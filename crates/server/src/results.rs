@@ -118,12 +118,13 @@ pub fn table(rows: &[Contestant]) -> String {
 }
 
 /// The results as CSV: a header with classic's columns (the total score's share in a
-/// column of its own), then a row per contestant with the values rounded as classic shows
-/// them.
+/// column of its own, the engine version in another at the end), then a row per contestant
+/// with the values rounded as classic shows them.
 pub fn csv(rows: &[Contestant]) -> String {
     let total: f64 = rows.iter().map(|c| c.score).sum();
     let mut header: Vec<&str> = COLUMNS.to_vec();
     header.insert(3, "Score %");
+    header.push("Engine");
     let mut out = header.join(",");
     out.push('\n');
     for c in rows {
@@ -146,6 +147,7 @@ pub fn csv(rows: &[Contestant]) -> String {
             c.firsts.to_string(),
             c.seconds.to_string(),
             c.thirds.to_string(),
+            robocode_s_engine::ENGINE_VERSION.to_string(),
         ];
         out.push_str(&line.join(","));
         out.push('\n');
@@ -311,13 +313,13 @@ mod tests {
         assert_eq!(
             lines[0],
             "Rank,Robot Name,Total Score,Score %,Survival,Surv Bonus,Bullet Dmg,\
-             Bullet Bonus,Ram Dmg * 2,Ram Bonus,1sts,2nds,3rds"
+             Bullet Bonus,Ram Dmg * 2,Ram Bonus,1sts,2nds,3rds,Engine"
         );
         assert_eq!(
             lines[1],
-            "1,\"odd, \"\"name\"\"\",750,75,375,0,0,0,0,0,9,0,0"
+            "1,\"odd, \"\"name\"\"\",750,75,375,0,0,0,0,0,9,0,0,1"
         );
-        assert_eq!(lines[2], "2,sample.Fire,250,25,125,0,0,0,0,0,1,0,0");
+        assert_eq!(lines[2], "2,sample.Fire,250,25,125,0,0,0,0,0,1,0,0,1");
         assert_eq!(lines.len(), 3);
     }
 }

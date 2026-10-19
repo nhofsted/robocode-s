@@ -15,6 +15,7 @@ use std::f64::consts::PI;
 
 /// A decoded track: the field size, a placeholder name per robot and every turn.
 pub struct Decoded {
+    pub engine_version: u32,
     pub width: f64,
     pub height: f64,
     pub robots: Vec<v1::RobotStatics>,
@@ -167,6 +168,7 @@ fn snapshots(track: &Track) -> Decoded {
         });
     }
     Decoded {
+        engine_version: track.engine_version,
         width: track.width as f64,
         height: track.height as f64,
         robots,
@@ -189,6 +191,7 @@ mod tests {
             ..Default::default()
         };
         Track {
+            engine_version: 1,
             width: 800,
             height: 600,
             gun_cooling_milli: 100,

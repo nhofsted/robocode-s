@@ -51,7 +51,12 @@ fn main() -> ExitCode {
     let mut failed = 0;
     for file in &files {
         match robocode_s_difftest::live::live_battle(Path::new(file), &host, &jars, &work) {
-            Ok(summary) => println!("OK   {file}: {summary}"),
+            Ok(summary) => {
+                println!(
+                    "OK   {file}: {summary}, engine {}",
+                    robocode_s_engine::ENGINE_VERSION
+                )
+            }
             // A known classic race (engine-spec §15.3): reported, not a failure.
             Err(e) if e.starts_with(robocode_s_difftest::RACE) => println!("RACE {file}: {e}"),
             Err(e) => {

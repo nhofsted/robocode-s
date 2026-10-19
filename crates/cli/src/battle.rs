@@ -287,6 +287,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "seed": seed,
             "rounds": local.outcome.rounds,
             "deterministic": !o.classic,
+            "engineVersion": robocode_s_engine::ENGINE_VERSION,
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "results": results::json(&rows),
         });
@@ -298,8 +299,9 @@ pub fn run(o: &Options) -> Result<(), String> {
             "deterministic"
         };
         println!(
-            "{} rounds, seed {seed}, {mode} mode\n",
-            local.outcome.rounds
+            "{} rounds, seed {seed}, {mode} mode, engine {}\n",
+            local.outcome.rounds,
+            robocode_s_engine::ENGINE_VERSION
         );
         print!("{}", results::table(&rows));
     }

@@ -6,12 +6,13 @@ Once a day, the rankings Lambda (design §12.6) publishes the rumble's state as 
 
 | Path | Type | Written |
 |---|---|---|
-| `/data/v1/rumbles.json` | `RumbleIndex`: all rumbles with bot and battle counts | daily |
-| `/data/v1/rankings/<rumble>.json` | `Rankings`: one row per bot, sorted by APS | daily |
+| `/data/v1/rumbles.json` | `RumbleIndex`: all rumbles with bot and battle counts and the engine version they rank | daily |
+| `/data/v1/rankings/<rumble>.json` | `Rankings`: one row per bot, sorted by APS, and the engine version they rank | daily |
 | `/data/v1/bots/<bot id>.json` | `BotDetails`: metadata, versions, and per rumble the metrics, all pairings and its history since the first version (daily for a year, weekly before) | daily, for bots whose numbers changed |
 
 - **Rumble ids** are the division (`1v1`, `melee`, `teams`, `twinduel`), plus `-mini`, `-micro` or `-nano` for the weight-class rumbles (`1v1-micro`).
 - **Bot ids** are the robot's fully qualified class name without version (`sample.Walls`). A bot's ranked version is in the file; metrics and pairings belong to the current version, the history spans all versions (each day records the version ranked then).
+- **Engine version:** rumble and ranking files carry `engineVersion` (design §4.4). Results of different engine versions are never mixed: the files rank only the current one. When it changes, the rankings start from scratch as the new version's pairings fill; older versions' aggregates are kept in the backend but not published.
 - **All metrics** (APS, PWIN, survival, Glicko-2, ANPP, Vote) come from the same daily run, so they are always consistent with each other.
 
 ## Rules
