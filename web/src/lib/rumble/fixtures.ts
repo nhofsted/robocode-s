@@ -61,6 +61,9 @@ interface RumbleState {
 	details: Map<BotId, BotRumble>;
 }
 
+/** The engine version the fixtures pretend to rank. */
+const ENGINE_VERSION = 1;
+
 const DIVISIONS: { division: Division; classes: WeightClass[]; rounds: number; field: number }[] = [
 	{ division: '1v1', classes: ['mega', 'mini', 'micro', 'nano'], rounds: 35, field: 800 },
 	{ division: 'melee', classes: ['mega', 'mini', 'micro', 'nano'], rounds: 35, field: 1000 },
@@ -138,6 +141,7 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			schema: SCHEMA_VERSION,
 			rumble,
 			generatedAt,
+			engineVersion: ENGINE_VERSION,
 			bots: r.rows
 		};
 	};
@@ -407,7 +411,8 @@ function buildRumble(
 			bots: n,
 			battles: Math.round(metrics.reduce((t, m) => t + m.battles, 0) / 2),
 			rounds: d.rounds,
-			battlefield: { width: d.field, height: d.field === 800 ? 600 : d.field }
+			battlefield: { width: d.field, height: d.field === 800 ? 600 : d.field },
+			engineVersion: ENGINE_VERSION
 		},
 		members,
 		rows,

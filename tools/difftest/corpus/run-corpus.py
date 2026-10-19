@@ -18,6 +18,12 @@ ROOT = Path(__file__).resolve().parents[3]
 ORACLE_TIMEOUT = 15 * 60
 
 
+def engine_version():
+    """The engine version under test (design §4.4), from the engine crate."""
+    source = (ROOT / "crates/engine/src/lib.rs").read_text()
+    return int(re.search(r"pub const ENGINE_VERSION: u32 = (\d+);", source).group(1))
+
+
 def plan(manifest, seed, duels, melees, team_battles, cover_all=False):
     rng = random.Random(seed)
     # Excluded robots stay in the manifest with the reason, e.g. robots whose battles
@@ -186,8 +192,10 @@ def main():
         battles = [b for b in battles if b["name"] in names]
     (out / "plan.json").write_text(json.dumps(battles, indent=1) + "\n")
     total_rounds = sum(b["rounds"] for b in battles)
-    print(f"{len(battles)} battles, {total_rounds} rounds; {args.oracle_jobs} classic and {args.jobs} live jobs",
-          flush=True)
+    engine = engine_version()
+    (out / "engine-version.txt").write_text(f"{engine}\n")
+    print(f"{len(battles)} battles, {total_rounds} rounds; {args.oracle_jobs} classic and {args.jobs} live jobs; "
+          f"engine version {engine}", flush=True)
 
     results = {}
     start = time.time()
@@ -249,7 +257,7 @@ def main():
             m = re.search(r"; round (\d+) turn", result)
             verified += int(m.group(1)) if m else 0
     print(f"\n{len(battles)} battles: " + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items())))
-    print(f"{verified} of {total_rounds} rounds verified identical; details in {out}")
+    print(f"{verified} of {total_rounds} rounds verified identical (engine version {engine}); details in {out}")
     return 0 if kinds.get("OK", 0) + kinds.get("RACE", 0) == len(battles) else 1
 
 

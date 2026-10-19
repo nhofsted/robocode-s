@@ -36,6 +36,8 @@ export interface RumbleSummary {
 	battles: number;
 	rounds: number;
 	battlefield: { width: number; height: number };
+	/** The engine version whose results are ranked (design §4.4, §12.6). */
+	engineVersion: number;
 }
 
 /** The ranking metrics, all derived from the pairing statistics (design §12.6). */
@@ -67,6 +69,8 @@ export interface Rankings {
 	schema: typeof SCHEMA_VERSION;
 	rumble: RumbleId;
 	generatedAt: string;
+	/** The engine version whose results are ranked; results of other versions are not mixed in. */
+	engineVersion: number;
 	/** Sorted by APS, best first. */
 	bots: RankingRow[];
 }

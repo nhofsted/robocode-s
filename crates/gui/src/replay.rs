@@ -18,7 +18,7 @@ use crate::track;
 use crate::view::{self, Camera, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
-use robocode_s_server::recording::{Frame, Recording, Replay, round_result};
+use robocode_s_server::recording::{Frame, Recording, Replay, engine_warning, round_result};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,6 +49,8 @@ pub struct ReplayView {
     properties: Vec<(usize, usize, Vec<v1::DebugProperty>)>,
     turns: usize,
     unverified: usize,
+    /// Set when it was recorded with another engine version than this one.
+    engine_warning: Option<String>,
     results: Vec<v1::Results>,
     /// The shown turn.
     position: usize,
@@ -216,6 +218,7 @@ impl ReplayView {
             properties,
             turns,
             unverified,
+            engine_warning: recording.engine_warning(),
             results,
             position: 0,
             current: None,
@@ -252,6 +255,7 @@ impl ReplayView {
             output: Vec::new(),
             properties: Vec::new(),
             unverified: 0,
+            engine_warning: engine_warning(decoded.engine_version),
             results: Vec::new(),
             position: 0,
             current: None,
@@ -483,6 +487,7 @@ impl ReplayView {
                 let round = self.round_of(self.position);
                 let turn = self.current.as_ref().map(|s| s.turn);
                 let (rounds, unverified) = (self.rounds, self.unverified);
+                let engine_warning = self.engine_warning.clone();
                 let mut go_to = None;
                 let seed = match &self.source {
                     Source::Recording { seed, .. } => Some(seed.to_string()),
@@ -522,6 +527,11 @@ impl ReplayView {
                                 Color32::LIGHT_RED,
                                 format!("{unverified} turns differ from the recording"),
                             );
+                        }
+                        if let Some(warning) = &engine_warning {
+                            ui.add_space(10.0);
+                            ui.colored_label(Color32::GOLD, "Other engine version")
+                                .on_hover_text(warning);
                         }
                     },
                     |ui| {

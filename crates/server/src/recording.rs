@@ -10,7 +10,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use prost::Message;
-use robocode_s_engine::Battle;
+use robocode_s_engine::{Battle, ENGINE_VERSION};
 use robocode_s_protocol::v1::{self, recording_entry::Entry};
 use robocode_s_protocol::{read_message, write_message};
 use std::fs::File;
@@ -67,6 +67,17 @@ pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
         })
 }
 
+/// The warning for a recording or track made with engine version `recorded` (design §4.4);
+/// none for 0 (unknown) or the current version.
+pub fn engine_warning(recorded: u32) -> Option<String> {
+    (recorded != 0 && recorded != ENGINE_VERSION).then(|| {
+        format!(
+            "recorded with engine version {recorded}, this is version {ENGINE_VERSION}: \
+             the replay may differ from the battle"
+        )
+    })
+}
+
 /// A recording read into memory.
 #[derive(Debug, Clone)]
 pub struct Recording {
@@ -100,6 +111,12 @@ impl Recording {
             header,
             entries: entries.into(),
         })
+    }
+
+    /// A warning when it was recorded with another engine version than this one: its replay
+    /// may differ. 0 (recorded before engine versions) is not warned about.
+    pub fn engine_warning(&self) -> Option<String> {
+        engine_warning(self.header.engine_version)
     }
 
     /// Number of rounds (from the rules).
@@ -228,5 +245,18 @@ pub fn round_result(battle: &Battle) -> v1::RoundResult {
             .zip(battle.results())
             .map(|(r, results)| convert::results(&r.setup.name, &results))
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warns_only_about_another_engine_version() {
+        assert_eq!(engine_warning(0), None);
+        assert_eq!(engine_warning(ENGINE_VERSION), None);
+        let warning = engine_warning(ENGINE_VERSION + 1).unwrap();
+        assert!(warning.contains("engine version"), "{warning}");
     }
 }

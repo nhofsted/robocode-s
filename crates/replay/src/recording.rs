@@ -69,6 +69,8 @@ pub fn tracks(lines: &[Value]) -> Vec<Track> {
             Some("roundStart") => {
                 ids.clear();
                 tracks.push(Track {
+                    // Classic's oracle recordings come from no robocode-s engine.
+                    engine_version: 0,
                     width: header["width"].as_i64().unwrap(),
                     height: header["height"].as_i64().unwrap(),
                     gun_cooling_milli: (number(&header["gunCoolingRate"]) * 1000.0).round() as i64,
