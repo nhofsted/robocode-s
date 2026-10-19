@@ -1994,8 +1994,8 @@ fn sandbox_row(ui: &mut egui::Ui, settings: &mut Settings) {
     let chosen = settings.sandbox();
     ui.label("Sandbox").on_hover_text(
         "What the robots run in: they are code from anyone. os is the system's own \
-         sandbox (on Linux seccomp, and Landlock where the kernel has it): no network, \
-         and only the robot's files. bwrap is bubblewrap, if installed. none is a plain \
+         sandbox (on Linux seccomp, and Landlock where the kernel has it; on Windows an \
+         AppContainer and a Job Object): no network, and only the robot's files. bwrap is bubblewrap, if installed. none is a plain \
          process, with all your rights.",
     );
     ui.horizontal(|ui| {

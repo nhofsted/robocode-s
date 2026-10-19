@@ -15,7 +15,6 @@ use robocode_s_server::{
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -408,6 +407,9 @@ fn parse_list(text: &str) -> Vec<Listed> {
         .collect()
 }
 
+/// The heap of a sandboxed `--describe` run, which bounds its memory as a robot's does.
+const DESCRIBE_MEMORY_MB: u32 = 1024;
+
 /// Runs the robot host's `--describe` and returns its output.
 fn run_describe(
     host: &JavaHost,
@@ -432,17 +434,20 @@ fn run_describe(
     };
     let mut read = vec![lib.clone()];
     read.extend(jars.iter().cloned());
-    let mut command = crate::sandboxed(&host, read, &home).map_err(|e| {
+    let mut sandboxed = crate::sandboxed(&host, read, &home, DESCRIBE_MEMORY_MB).map_err(|e| {
         format!(
             "starting {} in sandbox {}: {e}",
             java.display(),
             host.sandbox
         )
     })?;
+    let command = &mut sandboxed.command;
     if host.sandbox != Sandbox::None {
-        command.args(crate::sandbox::jvm_flags(&home));
+        command
+            .arg(format!("-Xmx{DESCRIBE_MEMORY_MB}m"))
+            .args(crate::sandbox::jvm_flags(&home));
     }
-    crate::no_window(&mut command)
+    crate::no_window(command)
         .args(MODULE_OPENINGS)
         .arg("-cp")
         .arg(lib.join("*"))
@@ -456,9 +461,8 @@ fn run_describe(
     for robot in robots {
         command.arg("--robot").arg(robot);
     }
-    let output = command
-        .current_dir(&home)
-        .stdin(Stdio::null())
+    command.current_dir(&home);
+    let output = sandboxed
         .output()
         .map_err(|e| format!("starting {}: {e}", java.display()))?;
     if !output.status.success() {
