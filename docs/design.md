@@ -184,7 +184,7 @@ server -> robot : RoundOver / BattleOver
 | Mode | Use case | Isolation | Notes |
 |---|---|---|---|
 | **Local process** | Development, fast rumble runs with trusted robots | Low: OS process only. Memory limited through runtime flags (e.g. `-Xmx`); optionally Job Objects on Windows or cgroups on Linux. | The JRE is **downloaded on demand**: on first use, a pinned Eclipse Temurin JRE for the platform is fetched into the robocode-s data dir and its checksum verified. Other runtimes follow the same pattern where possible. |
-| **OS sandbox** (ADR 0019) | Default where available; untrusted robots, the rumble | High: no network, filesystem limited to its grants, memory and process limits | Built in: Landlock and seccomp on Linux, an AppContainer and a Job Object on Windows. None on macOS yet. |
+| **OS sandbox** (ADR 0019) | Default where available; untrusted robots, the rumble | High: no network, filesystem limited to its grants, memory and process limits | Built in: on Linux seccomp everywhere and Landlock where the kernel has it (bubblewrap as an option), on Windows an AppContainer and a Job Object. None on macOS yet. |
 | **Container** (ADR 0019) | Untrusted robots, remote agents, macOS | High: CPU, memory, pids, read-only rootfs, no network | Optional; requires Docker (Docker Desktop on Windows/macOS). |
 | **Remote agent** | Distributed tournaments, spreading load | Whatever the remote host's launcher provides | `runner` in agent mode, authenticated to the server. |
 | *WASM (future)* | Native and new-language robots | High, plus deterministic fuel metering | wasmtime embedded in the runner (§14). |
