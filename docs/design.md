@@ -234,6 +234,23 @@ The tests (`sandbox::windows::tests`) start a copy of the test binary in the san
 
 The tests (`sandbox::docker::tests`, the real-Docker ones ignored) check the arguments (Linux and Windows path forms, read-only and writable mounts, the refusal texts, the image against `jre::RELEASE`); in a container the JRE reports the pinned release, `/sys/class/net` has only `lo`, the root and mounts are read-only, there are no capabilities, the home is writable with the user's ownership, and the container is gone after its end and after a kill. `tests/docker.rs` (ignored) fights a deterministic battle in `docker`, `os` and `none` with the same results, and leaves no container. `ROBOCODES_SANDBOX=docker live` (difftest) replays recordings identically. Windows and macOS (Docker Desktop) are untested for real: only the arguments are.
 
+### 6.7 Installed layout and release archives (#71)
+
+A release is one archive per platform (`robocode-s-<version>-<platform>`: Windows x64 `.zip`; Linux x64 and arm64, macOS arm64 and x64 `.tar.gz`; macOS is built on a Mac, see `tools/release/release.sh`), holding the programs and what they need:
+
+```
+robocode-s(.exe)  robocode-s-gui(.exe)
+lib/robot-host/       installDist's lib: classic's jars and ours, as separate files (classic finds its modules by jar name)
+lib/agent/java-determinism.jar
+robots/               the sample robots' jar
+share/                Linux: robocode-s.desktop, the icon, install-desktop.sh
+LICENSE  THIRD-PARTY-NOTICES.txt  README.txt
+```
+
+The sounds and images are built into the GUI. `runner::local::install_dir()` is the one place that knows the layout (constants `INSTALLED_*`): the folder of the executable, its symlinks resolved (so Linux packages can put the tree in `/usr/lib/robocode-s/` and link `/usr/bin/robocode-s*`), or, in a macOS app bundle (`Contents/MacOS/`), `Contents/Resources`; it counts when `lib/robot-host` and `lib/agent` are there. `Environment::from_env` then uses these paths and the default robot folder (`robots`, also the GUI's default robot folder), unless the `ROBOCODES_*` variables or options name others; in a source tree (nothing of the layout next to the executable) the paths stay relative to the current folder, as the repository builds them. The data folder (the JRE, battle homes) is then the user's, never inside the installation: `$XDG_DATA_HOME/robocode-s` (else `~/.local/share/robocode-s`) on Linux, `~/Library/Application Support/robocode-s` on macOS, `%LOCALAPPDATA%\robocode-s` on Windows (`runner::local::user_data_dir`); in a source tree it is `target/robocodes-data`. The sandboxes need nothing beyond absolute paths: Landlock grants and Docker mounts take the paths they are given (the host lib, the agent, the robots, the JRE), and the Windows ACL grants need an NTFS folder the user can change the security of (a folder the user owns, such as an archive unpacked on a drive or `%LOCALAPPDATA%\Programs`; an installation in `Program Files` needs the installer to grant the AppContainer `robocode-s.robot` read and execute there, since a user can't).
+
+`tools/release/release.sh` is the release gate and builder, as there is no CI (checks, builds, archives, `SHA256SUMS`, `gh release create`); `tools/release/notices.py` writes `THIRD-PARTY-NOTICES.txt` from `cargo metadata` and the license texts in `tools/release/licenses`. Linux binaries are built with `cargo-zigbuild` for glibc 2.31, so they run on Ubuntu 20.04, Debian 11 and later. The programs are unsigned (Windows SmartScreen, macOS Gatekeeper: the README says how to get past them).
+
 ## 7. Time budgets and determinism
 
 ### 7.1 Classic mode (default)
@@ -512,6 +529,7 @@ robocode-s/
 │   └── c/
 ├── docker/                   # runner images, relay
 ├── tools/difftest/
+├── tools/release/            # release script, third-party notices, archive texts
 └── docs/
     ├── design.md
     └── adr/                  # architecture decision records

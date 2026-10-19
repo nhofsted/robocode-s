@@ -585,6 +585,97 @@ pub fn battle_statics(robots: &[Described]) -> Vec<v1::RobotStatics> {
         .collect()
 }
 
+/// The installed layout (design §6.7), the one place that knows it; packages reuse it.
+/// Under the root: the robot host's `lib` directory ...
+pub const INSTALLED_HOST_LIB: &str = "lib/robot-host";
+/// ... the determinism agent's folder and jar ...
+pub const INSTALLED_AGENT_DIR: &str = "lib/agent";
+pub const INSTALLED_AGENT_JAR: &str = "lib/agent/java-determinism.jar";
+/// ... and the sample robots.
+pub const INSTALLED_ROBOTS: &str = "robots";
+
+/// The root of the installation this program runs from (design §6.7), if it runs from
+/// one; `None` in a source tree, where the paths are relative to the current folder.
+/// The executable's path has its symlinks resolved (Linux packages link
+/// `/usr/bin/robocode-s` to `/usr/lib/robocode-s/robocode-s`). The root is the
+/// executable's folder (a release archive, a per-user Windows install, a Linux package)
+/// or, in a macOS app bundle (`X.app/Contents/MacOS/robocode-s-gui`), the bundle's
+/// `Contents/Resources`; it is taken when `lib/robot-host` and `lib/agent` are in it.
+pub fn install_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // On Windows `canonicalize` gives `\\?\` paths, which some of what reads them
+    // (ACL entries, Java) handle badly; the executable's path has no links there.
+    let exe = if cfg!(windows) {
+        exe
+    } else {
+        exe.canonicalize().ok()?
+    };
+    install_root(exe.parent()?)
+}
+
+/// [`install_dir`] for an executable in `exe_dir`.
+pub fn install_root(exe_dir: &Path) -> Option<PathBuf> {
+    let bundle = exe_dir
+        .file_name()
+        .is_some_and(|n| n == "MacOS")
+        .then(|| exe_dir.parent().map(|c| c.join("Resources")))
+        .flatten();
+    [Some(exe_dir.to_path_buf()), bundle]
+        .into_iter()
+        .flatten()
+        .find(|root| {
+            root.join(INSTALLED_HOST_LIB).is_dir() && root.join(INSTALLED_AGENT_DIR).is_dir()
+        })
+}
+
+/// The folder of the sample robots: the archive's `robots`, else a built source tree's.
+pub fn default_robot_dir() -> PathBuf {
+    match install_dir() {
+        Some(dir) => dir.join(INSTALLED_ROBOTS),
+        None => "robots/samples/build/libs".into(),
+    }
+}
+
+/// The sample robots' jars: those in the archive's `robots` folder, else a built source
+/// tree's.
+pub fn default_robot_jars() -> Vec<PathBuf> {
+    let dir = default_robot_dir();
+    let mut jars: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jar"))
+        .collect();
+    jars.sort();
+    if jars.is_empty() {
+        jars.push("robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar".into());
+    }
+    jars
+}
+
+/// The platform's folder for what a user installation keeps (the downloaded JRE, the
+/// robots' homes): `$XDG_DATA_HOME/robocode-s` (else `~/.local/share/robocode-s`) on
+/// Linux, `~/Library/Application Support/robocode-s` on macOS, `%LOCALAPPDATA%\robocode-s`
+/// on Windows (NTFS, as the `os` sandbox's ACL entries need).
+pub fn user_data_dir() -> Option<PathBuf> {
+    let var = |name: &str| {
+        std::env::var_os(name)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let base = if cfg!(windows) {
+        var("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library/Application Support"))
+    } else {
+        var("XDG_DATA_HOME")
+            .filter(|p| p.is_absolute())
+            .or_else(|| var("HOME").map(|h| h.join(".local/share")))
+    }?;
+    Some(base.join("robocode-s"))
+}
+
 /// Where the Java side, the robots and the battle files are.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Environment {
@@ -620,18 +711,25 @@ impl Environment {
                     .collect()
             })
             .unwrap_or_default();
+        let installed = install_dir();
+        let in_install = |rel: &str| installed.as_ref().map(|d| d.join(rel));
         Self {
             java: var("ROBOCODES_JAVA"),
             host_lib: var("ROBOCODES_HOST_LIB")
+                .or_else(|| in_install(INSTALLED_HOST_LIB))
                 .unwrap_or_else(|| "clients/java-compat/build/install/robot-host/lib".into()),
-            agent_jar: var("ROBOCODES_AGENT_JAR").unwrap_or_else(|| {
-                "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
-            }),
-            data: var("ROBOCODES_DATA").unwrap_or_else(|| "target/robocodes-data".into()),
-            jars: if jars.is_empty() {
-                vec!["robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar".into()]
-            } else {
+            agent_jar: var("ROBOCODES_AGENT_JAR")
+                .or_else(|| in_install(INSTALLED_AGENT_JAR))
+                .unwrap_or_else(|| {
+                    "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar".into()
+                }),
+            data: var("ROBOCODES_DATA")
+                .or_else(|| installed.as_ref().and_then(|_| user_data_dir()))
+                .unwrap_or_else(|| "target/robocodes-data".into()),
+            jars: if !jars.is_empty() {
                 jars
+            } else {
+                default_robot_jars()
             },
             sandbox: Sandbox::default(),
         }
@@ -947,6 +1045,33 @@ pub fn lookup_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_root_finds_archive_and_bundle_layouts() {
+        let dir = std::env::temp_dir().join(format!("robocodes-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let make = |root: &Path| {
+            std::fs::create_dir_all(root.join(INSTALLED_HOST_LIB)).unwrap();
+            std::fs::create_dir_all(root.join(INSTALLED_AGENT_DIR)).unwrap();
+        };
+        // An archive (or package): the executable's folder.
+        make(&dir.join("archive"));
+        assert_eq!(
+            install_root(&dir.join("archive")),
+            Some(dir.join("archive"))
+        );
+        // A macOS bundle: Contents/Resources.
+        make(&dir.join("X.app/Contents/Resources"));
+        std::fs::create_dir_all(dir.join("X.app/Contents/MacOS")).unwrap();
+        assert_eq!(
+            install_root(&dir.join("X.app/Contents/MacOS")),
+            Some(dir.join("X.app/Contents/Resources"))
+        );
+        // A source tree's target folder: none.
+        std::fs::create_dir_all(dir.join("target/release")).unwrap();
+        assert_eq!(install_root(&dir.join("target/release")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn stale_listing_homes_are_removed() {

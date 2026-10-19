@@ -38,10 +38,12 @@ Robots and runtime:
   --jar PATH             robot jar, or a class folder (an IDE's output, read in
                          place: robots there are named with classic's `*`, e.g.
                          `my.Robot*`); repeatable (default: $ROBOCODES_ROBOT_JARS,
-                         else the sample robots of a built source tree)
+                         else the archive's robots, or the sample robots of a
+                         built source tree)
   --memory MB            heap per robot JVM (default 512)
-  --data DIR             data directory: JRE, battle files ($ROBOCODES_DATA,
-                         default target/robocodes-data)
+  --data DIR             data directory: JRE, battle files ($ROBOCODES_DATA;
+                         default: the user data folder from a release archive,
+                         else target/robocodes-data)
   --java PATH            Java executable ($ROBOCODES_JAVA; default: pinned JRE)
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
