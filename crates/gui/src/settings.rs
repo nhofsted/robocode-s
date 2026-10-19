@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn a_sandbox_this_platform_lacks_gives_the_default() {
-        let s = Settings::parse(r#"{"sandbox": "docker"}"#).unwrap();
+        let s = Settings::parse(r#"{"sandbox": "chroot"}"#).unwrap();
         assert_eq!(s.sandbox(), Sandbox::default());
         let s = Settings::parse(r#"{"sandbox": "none"}"#).unwrap();
         assert_eq!(s.sandbox(), Sandbox::None);

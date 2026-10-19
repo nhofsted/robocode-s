@@ -3,10 +3,14 @@
 //! The sandbox robot processes run in (ADR 0019, design §6.1). `--sandbox` has the same
 //! values on every platform; each platform has some of them.
 
+mod docker;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(windows)]
 mod windows;
+
+pub use docker::pulling as docker_pulling;
+pub(crate) use docker::{HOME as CONTAINER_HOME, container_path};
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -23,7 +27,7 @@ pub enum Sandbox {
     /// Bubblewrap, where it is installed (Linux): namespaces that show the robot only its
     /// grants, with the seccomp filter and rlimits of `Os`.
     Bwrap,
-    /// A container (#70).
+    /// A container of the pinned Temurin JRE image, with no network (#70): needs Docker.
     Docker,
     /// A plain process.
     None,
@@ -45,7 +49,7 @@ impl Sandbox {
     pub fn unavailable(self) -> Option<String> {
         match self {
             Self::None => None,
-            Self::Docker => Some("the docker sandbox isn't there yet (#70)".into()),
+            Self::Docker => docker::unavailable(),
             #[cfg(target_os = "linux")]
             Self::Os => linux::os_unavailable(),
             #[cfg(target_os = "linux")]
@@ -75,7 +79,17 @@ impl Sandbox {
             Self::Os | Self::Bwrap => linux::report(self),
             #[cfg(windows)]
             Self::Os => "os (AppContainer, Job Object)".into(),
+            Self::Docker => "docker (eclipse-temurin 21.0.12.1, no network)".into(),
             _ => self.name().into(),
+        }
+    }
+
+    /// What robots need before they start: for `docker` the image, pulled on first use
+    /// (the pull takes a while: [`docker_pulling`] says so).
+    pub fn prepare(self) -> Result<(), String> {
+        match self {
+            Self::Docker => docker::prepare(),
+            _ => Ok(()),
         }
     }
 }
@@ -256,6 +270,8 @@ fn kept(name: &str) -> bool {
 /// Windows' `os` can't be started by `Command`: the runner starts it itself.
 pub(crate) struct Sandboxed {
     pub command: Command,
+    /// The name of the container `command` starts (`docker`).
+    container: Option<String>,
     #[cfg(windows)]
     contained: Option<Grants>,
 }
@@ -265,6 +281,17 @@ impl Sandboxed {
     pub fn plain(program: &Path) -> Self {
         Self {
             command: Command::new(program),
+            container: None,
+            #[cfg(windows)]
+            contained: None,
+        }
+    }
+
+    /// The container `name`, which `command` (`docker run`) starts.
+    pub fn container(command: Command, name: String) -> Self {
+        Self {
+            command,
+            container: Some(name),
             #[cfg(windows)]
             contained: None,
         }
@@ -296,7 +323,7 @@ impl Sandboxed {
             stdin: child.stdin.take().map(|p| Box::new(p) as _),
             stdout: child.stdout.take().map(|p| Box::new(p) as _),
             stderr: child.stderr.take().map(|p| Box::new(p) as _),
-            process: Process::Plain(child),
+            process: Process::Plain(child, self.container),
         })
     }
 
@@ -335,7 +362,8 @@ pub(crate) struct Child {
 }
 
 enum Process {
-    Plain(std::process::Child),
+    /// A process, or the `docker` program of a container (named).
+    Plain(std::process::Child, Option<String>),
     #[cfg(windows)]
     Contained(windows::Process),
 }
@@ -343,7 +371,7 @@ enum Process {
 impl Child {
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         match &mut self.process {
-            Process::Plain(p) => p.wait(),
+            Process::Plain(p, _) => p.wait(),
             #[cfg(windows)]
             Process::Contained(p) => p.wait(),
         }
@@ -351,7 +379,7 @@ impl Child {
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         match &mut self.process {
-            Process::Plain(p) => p.try_wait(),
+            Process::Plain(p, _) => p.try_wait(),
             #[cfg(windows)]
             Process::Contained(p) => p.try_wait(),
         }
@@ -359,7 +387,13 @@ impl Child {
 
     pub fn kill(&mut self) -> io::Result<()> {
         match &mut self.process {
-            Process::Plain(p) => p.kill(),
+            Process::Plain(p, container) => {
+                // Killing `docker` leaves the container running.
+                if let Some(name) = container {
+                    docker::kill(name);
+                }
+                p.kill()
+            }
             #[cfg(windows)]
             Process::Contained(p) => p.kill(),
         }
@@ -376,18 +410,27 @@ pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::
         return Ok(Sandboxed::plain(program));
     }
     std::fs::create_dir_all(grants.home.join("tmp"))?;
+    if sandbox == Sandbox::Docker {
+        // `docker` needs its own environment (the engine's address, its settings); the
+        // container gets what `docker run` names.
+        let (command, name) = docker::command(grants)?;
+        return Ok(Sandboxed::container(command, name));
+    }
     let mut sandboxed = match sandbox {
         #[cfg(target_os = "linux")]
         Sandbox::Os => Sandboxed {
             command: linux::os_command(program, grants, true)?,
+            container: None,
         },
         #[cfg(target_os = "linux")]
         Sandbox::Bwrap => Sandboxed {
             command: linux::bwrap_command(program, grants)?,
+            container: None,
         },
         #[cfg(windows)]
         Sandbox::Os => Sandboxed {
             command: Command::new(program),
+            container: None,
             contained: Some(grants.clone()),
         },
         _ => Sandboxed::plain(program),
@@ -408,11 +451,13 @@ mod tests {
     #[test]
     fn platforms_refuse_the_sandboxes_they_lack() {
         assert_eq!("none".parse(), Ok(Sandbox::None));
-        let docker = "docker".parse::<Sandbox>().unwrap_err();
-        assert!(
-            docker.contains("#70") && docker.contains("none"),
-            "{docker}"
-        );
+        // Docker is there or refused with the reason, which says what is there instead.
+        if let Err(docker) = "docker".parse::<Sandbox>() {
+            assert!(
+                docker.contains("docker") && docker.contains("none"),
+                "{docker}"
+            );
+        }
         assert!(
             "chroot"
                 .parse::<Sandbox>()

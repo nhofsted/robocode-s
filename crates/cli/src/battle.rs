@@ -48,8 +48,10 @@ Robots and runtime:
   --sandbox KIND         what robots run in (ADR 0019): os (Linux: seccomp, and
                          Landlock where the kernel has it; Windows: an
                          AppContainer and a Job Object), bwrap (bubblewrap,
-                         if installed), docker (not yet), none (a plain
-                         process); default os where there is one, else none
+                         if installed), docker (a container of the Temurin
+                         JRE image, no network; needs Docker, pulls the image
+                         the first time), none (a plain process); default os
+                         where there is one, else none
 
 Output:
   --json                 results as JSON instead of a table
@@ -405,11 +407,11 @@ mod tests {
         use robocode_s_runner::Sandbox;
         let o = Options::parse(&args("a.B --sandbox none")).unwrap();
         assert_eq!(o.env.sandbox, Sandbox::None);
-        let docker = Options::parse(&args("a.B --sandbox docker")).unwrap_err();
-        assert!(
-            docker.starts_with("--sandbox: ") && docker.contains("#70"),
-            "{docker}"
-        );
+        // Docker is there or refused with the reason.
+        match Options::parse(&args("a.B --sandbox docker")) {
+            Ok(o) => assert_eq!(o.env.sandbox, Sandbox::Docker),
+            Err(e) => assert!(e.starts_with("--sandbox: docker"), "{e}"),
+        }
         let os = Options::parse(&args("a.B --sandbox os"));
         if cfg!(any(target_os = "linux", windows)) {
             assert_eq!(os.unwrap().env.sandbox, Sandbox::Os);
