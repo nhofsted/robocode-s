@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: EPL-2.0 -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-robocode-s-recording">
+    <comment>robocode-s battle recording</comment>
+    <icon name="robocode-s"/>
+    <glob pattern="*.rsr"/>
+    <glob pattern="*.rec"/>
+  </mime-type>
+  <mime-type type="application/x-robocode-s-track">
+    <comment>robocode-s website replay track</comment>
+    <icon name="robocode-s"/>
+    <glob pattern="*.track"/>
+  </mime-type>
+</mime-info>

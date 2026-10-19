@@ -7,3 +7,5 @@ Icon=robocode-s
 Terminal=false
 Categories=Game;Simulation;
 StartupWMClass=robocode-s
+Keywords=robocode;battle;tank;replay;
+MimeType=application/x-robocode-s-recording;application/x-robocode-s-track;

@@ -11,10 +11,8 @@ Starting
 @START@
 
 The GUI needs a graphics driver (Vulkan or OpenGL). The Java runtime for the
-robots (Eclipse Temurin 21, about 50 MB) is downloaded on the first battle; this
-folder holds the robot host, the determinism agent and the sample robots
-(robots/), and the programs find them next to themselves. The folder can be
-moved or deleted as a whole.
+robots (Eclipse Temurin 21, about 50 MB) is downloaded on the first battle.
+@LAYOUT@
 
 Examples:
   robocode-s battle sample.Fire,sample.Walls,sampleteam.MyFirstTeam --rounds 10
