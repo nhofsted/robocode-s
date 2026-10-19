@@ -1,0 +1,15 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: robocode-s
+Upstream-Contact: Nick Hofstede <nick.hofstede@gmail.com>
+Source: https://github.com/nhofsted/robocode-s
+
+Files: *
+Copyright: 2025-2026 Nick Hofstede and robocode-s contributors
+ 2001-2025 Mathew A. Nelson and Robocode contributors
+License: EPL-2.0
+ The full text of the Eclipse Public License 2.0 is in
+ /usr/share/doc/robocode-s/LICENSE.
+ .
+ The programs statically include many Rust libraries, and the package holds
+ Java libraries (the robot host); their copyright notices and licenses are
+ listed in /usr/share/doc/robocode-s/THIRD-PARTY-NOTICES.txt.

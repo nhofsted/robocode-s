@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Folders scanned for robot jars.
+    /// Folders scanned for robot jars. Not saved while it is the default (the sample
+    /// robots of the installation), so that moving or upgrading the installation
+    /// doesn't leave a stale folder in the file.
+    #[serde(skip_serializing_if = "is_default_folders")]
     pub robot_folders: Vec<PathBuf>,
     /// What robots run in, by name (`--sandbox`, ADR 0019); see [`Settings::sandbox`].
     pub sandbox: String,
@@ -45,6 +48,11 @@ pub struct Settings {
     /// The most frames a second the animations draw; 0 for the display's refresh rate
     /// (see [`crate::pace`]).
     pub frame_rate: u32,
+}
+
+#[allow(clippy::ptr_arg)] // the signature serde's `skip_serializing_if` wants
+fn is_default_folders(folders: &Vec<PathBuf>) -> bool {
+    *folders == [robocode_s_runner::local::default_robot_dir()]
 }
 
 /// The battle rules besides the rounds and the battlefield size (classic's `BattleRules`).
@@ -280,6 +288,20 @@ mod tests {
         assert_eq!(s.robot_folders, Settings::default().robot_folders);
         assert_eq!(s.rules.inactivity_time, 450);
         assert_eq!(s.sandbox(), Sandbox::default());
+    }
+
+    #[test]
+    fn the_default_robot_folder_is_not_saved() {
+        let text = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(!text.contains("robot_folders"), "{text}");
+        let s = Settings::parse(&text).unwrap();
+        assert_eq!(s.robot_folders, Settings::default().robot_folders);
+        let changed = Settings {
+            robot_folders: vec!["/mine".into()],
+            ..Settings::default()
+        };
+        let text = serde_json::to_string(&changed).unwrap();
+        assert!(text.contains("/mine"), "{text}");
     }
 
     #[test]
