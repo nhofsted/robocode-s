@@ -441,11 +441,25 @@ fn run_describe(
             host.sandbox
         )
     })?;
+    // A container sees the paths mounted at other ones.
+    let (lib, jars_seen, home_seen) = if host.sandbox == Sandbox::Docker {
+        let seen = |i, p: &PathBuf| crate::sandbox::container_path(i, p);
+        (
+            seen(0, &lib),
+            jars.iter()
+                .enumerate()
+                .map(|(i, j)| seen(1 + i, j))
+                .collect(),
+            PathBuf::from(crate::sandbox::CONTAINER_HOME),
+        )
+    } else {
+        (lib, jars.clone(), home.clone())
+    };
     let command = &mut sandboxed.command;
     if host.sandbox != Sandbox::None {
         command
             .arg(format!("-Xmx{DESCRIBE_MEMORY_MB}m"))
-            .args(crate::sandbox::jvm_flags(&home));
+            .args(crate::sandbox::jvm_flags(&home_seen));
     }
     crate::no_window(command)
         .args(MODULE_OPENINGS)
@@ -454,8 +468,8 @@ fn run_describe(
         .arg("io.github.nhofsted.robocodes.compat.RobotHost")
         .arg("--describe")
         .arg("--home")
-        .arg(&home);
-    for jar in &jars {
+        .arg(&home_seen);
+    for jar in &jars_seen {
         command.arg("--jar").arg(jar);
     }
     for robot in robots {
@@ -623,7 +637,8 @@ impl Environment {
         }
     }
 
-    /// Checks the paths and finds Java (downloading the pinned JRE if needed).
+    /// Checks the paths and finds Java (downloading the pinned JRE if needed; for the docker
+    /// sandbox, pulling its image instead).
     pub fn host(&self, deterministic: bool) -> Result<JavaHost, String> {
         if let Some(why) = self.sandbox.unavailable() {
             return Err(why);
@@ -645,7 +660,10 @@ impl Environment {
                 self.agent_jar.display()
             ));
         }
+        self.sandbox.prepare()?;
         let java = match &self.java {
+            // The container has its own Java.
+            _ if self.sandbox == Sandbox::Docker => PathBuf::from("java"),
             Some(java) => java.clone(),
             None => crate::jre::java(&self.data).map_err(|e| format!("no Java runtime: {e}"))?,
         };

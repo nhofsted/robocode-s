@@ -7,7 +7,7 @@ pub mod jre;
 pub mod local;
 mod sandbox;
 
-pub use sandbox::Sandbox;
+pub use sandbox::{Sandbox, docker_pulling};
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -160,9 +160,14 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         read.push(host.agent_jar.clone());
     }
     read.extend(launch.jars.iter().cloned());
+    // A container sees the paths mounted at other ones.
+    let (seen_host, seen_launch) = match host.sandbox {
+        Sandbox::Docker => container_view(&host, &launch),
+        _ => (host.clone(), launch.clone()),
+    };
     let mut sandboxed = sandboxed(&host, read, &launch.home, launch.memory_mb)?;
     no_window(&mut sandboxed.command)
-        .args(jvm_args(&host, &launch))
+        .args(jvm_args(&seen_host, &seen_launch))
         .current_dir(&launch.home);
     let stdio = match &launch.transport {
         Transport::Stdio => true,
@@ -254,6 +259,16 @@ pub(crate) fn sandboxed(
     if host.sandbox == Sandbox::None {
         return Ok(sandbox::Sandboxed::plain(&host.java));
     }
+    if host.sandbox == Sandbox::Docker {
+        // The container has its own Java.
+        let grants = sandbox::Grants {
+            runtime: PathBuf::new(),
+            read,
+            home: home.to_path_buf(),
+            memory_mb,
+        };
+        return sandbox::command(Sandbox::Docker, &host.java, &grants);
+    }
     let (java, runtime) = sandbox::java_runtime(&host.java)?;
     read.extend(sandbox::linked_from(&runtime));
     let grants = sandbox::Grants {
@@ -263,6 +278,27 @@ pub(crate) fn sandboxed(
         memory_mb,
     };
     sandbox::command(host.sandbox, &java, &grants)
+}
+
+/// The host and the launch with the paths a container has them at: [`sandbox::container_path`]
+/// of the read grants `launch` makes (the robot host's `lib`, the agent if deterministic,
+/// the jars).
+fn container_view(host: &JavaHost, launch: &RobotLaunch) -> (JavaHost, RobotLaunch) {
+    let agent = usize::from(launch.deterministic);
+    let seen = JavaHost {
+        lib_dir: sandbox::container_path(0, &host.lib_dir),
+        agent_jar: sandbox::container_path(1, &host.agent_jar),
+        ..host.clone()
+    };
+    let jars = launch.jars.iter().enumerate();
+    let seen_launch = RobotLaunch {
+        jars: jars
+            .map(|(i, jar)| sandbox::container_path(1 + agent + i, jar))
+            .collect(),
+        home: PathBuf::from(sandbox::CONTAINER_HOME),
+        ..launch.clone()
+    };
+    (seen, seen_launch)
 }
 
 /// A relative executable path with a directory part becomes absolute; a bare name like

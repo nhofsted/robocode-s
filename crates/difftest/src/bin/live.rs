@@ -37,6 +37,10 @@ fn main() -> ExitCode {
         },
         Err(_) => Sandbox::default(),
     };
+    if let Err(e) = sandbox.prepare() {
+        eprintln!("ROBOCODES_SANDBOX: {e}");
+        return ExitCode::FAILURE;
+    }
     eprintln!("sandbox {}", sandbox.report());
     let host = JavaHost {
         java,
