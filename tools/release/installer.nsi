@@ -108,10 +108,15 @@ Section /o "Desktop shortcut" SecDesktop
 SectionEnd
 
 Section "Add to PATH (robocode-s in Command Prompt and PowerShell)" SecPath
+  ClearErrors
   ReadRegStr $0 HKCU "${ENV_KEY}" "Path"
   StrLen $1 $0
   ; NSIS strings hold 1024 characters: a longer PATH would be cut, so it is left alone.
-  ${If} $1 > 900
+  ; A PATH too long to read at all reads as "" with the error flag, as does a missing
+  ; one: either way it is left alone rather than replaced.
+  ${If} ${Errors}
+    DetailPrint "The user's PATH couldn't be read; robocode-s was not added to it."
+  ${ElseIf} $1 > 900
     DetailPrint "The user's PATH is too long to be changed safely; robocode-s was not added to it."
   ${Else}
     ${StrStr} $2 ";$0;" ";$INSTDIR;"
@@ -195,23 +200,29 @@ Section "Uninstall"
   ; The PATH entry, if this installation added it.
   ReadRegDWORD $0 HKCU "${APP_KEY}" "PathAdded"
   ${If} $0 == 1
+    ClearErrors
     ReadRegStr $0 HKCU "${ENV_KEY}" "Path"
-    ${UnStrRep} $1 ";$0;" ";$INSTDIR;" ";"
-    StrCpy $2 $1 1
-    ${If} $2 == ";"
-      StrCpy $1 $1 "" 1
-    ${EndIf}
-    StrCpy $2 $1 1 -1
-    ${If} $2 == ";"
-      StrCpy $1 $1 -1
-    ${EndIf}
-    ${If} $1 != $0
-      ${If} $1 == ""
-        DeleteRegValue HKCU "${ENV_KEY}" "Path"
-      ${Else}
-        WriteRegExpandStr HKCU "${ENV_KEY}" "Path" "$1"
+    ; Unreadable (grown past NSIS's 1024 characters since, or gone): left alone, not cut.
+    ${If} ${Errors}
+      DetailPrint "The user's PATH couldn't be read; remove $INSTDIR from it by hand."
+    ${Else}
+      ${UnStrRep} $1 ";$0;" ";$INSTDIR;" ";"
+      StrCpy $2 $1 1
+      ${If} $2 == ";"
+        StrCpy $1 $1 "" 1
       ${EndIf}
-      SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+      StrCpy $2 $1 1 -1
+      ${If} $2 == ";"
+        StrCpy $1 $1 -1
+      ${EndIf}
+      ${If} $1 != $0
+        ${If} $1 == ""
+          DeleteRegValue HKCU "${ENV_KEY}" "Path"
+        ${Else}
+          WriteRegExpandStr HKCU "${ENV_KEY}" "Path" "$1"
+        ${EndIf}
+        SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 
