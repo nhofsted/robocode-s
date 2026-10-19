@@ -46,7 +46,8 @@ Robots and runtime:
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
   --sandbox KIND         what robots run in (ADR 0019): os (Linux: seccomp, and
-                         Landlock where the kernel has it), bwrap (bubblewrap,
+                         Landlock where the kernel has it; Windows: an
+                         AppContainer and a Job Object), bwrap (bubblewrap,
                          if installed), docker (not yet), none (a plain
                          process); default os where there is one, else none
 
@@ -410,7 +411,7 @@ mod tests {
             "{docker}"
         );
         let os = Options::parse(&args("a.B --sandbox os"));
-        if cfg!(target_os = "linux") {
+        if cfg!(any(target_os = "linux", windows)) {
             assert_eq!(os.unwrap().env.sandbox, Sandbox::Os);
             assert_eq!(Options::defaults().env.sandbox, Sandbox::Os);
         } else {

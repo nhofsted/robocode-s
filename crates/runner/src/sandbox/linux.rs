@@ -821,6 +821,7 @@ mod tests {
             runtime: exe.parent().unwrap().to_path_buf(),
             read: Vec::new(),
             home: dir.join("home"),
+            memory_mb: 64,
         };
         let output = sandbox(&exe, &grants)
             .unwrap()

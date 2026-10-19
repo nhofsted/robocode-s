@@ -9,9 +9,9 @@ mod sandbox;
 
 pub use sandbox::Sandbox;
 
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -117,10 +117,15 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
 
 /// A running robot process.
 pub struct RobotProcess {
-    child: Child,
-    pipes: Option<(ChildStdout, ChildStdin)>,
+    child: sandbox::Child,
+    pipes: Option<(RobotStdout, RobotStdin)>,
     stderr: Arc<Mutex<String>>,
 }
+
+/// What a robot writes: its stdout.
+pub type RobotStdout = Box<dyn Read + Send>;
+/// What a robot reads: its stdin.
+pub type RobotStdin = Box<dyn Write + Send>;
 
 /// How much of a robot's error output is kept for diagnosis.
 const STDERR_TAIL: usize = 8 * 1024;
@@ -155,19 +160,18 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         read.push(host.agent_jar.clone());
     }
     read.extend(launch.jars.iter().cloned());
-    let mut command = sandboxed(&host, read, &launch.home)?;
-    no_window(&mut command)
+    let mut sandboxed = sandboxed(&host, read, &launch.home, launch.memory_mb)?;
+    no_window(&mut sandboxed.command)
         .args(jvm_args(&host, &launch))
-        .current_dir(&launch.home)
-        .stderr(Stdio::piped());
-    match &launch.transport {
-        Transport::Stdio => command.stdin(Stdio::piped()).stdout(Stdio::piped()),
-        Transport::Tcp { token, .. } => command
-            .env(TOKEN_ENV, token)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null()),
+        .current_dir(&launch.home);
+    let stdio = match &launch.transport {
+        Transport::Stdio => true,
+        Transport::Tcp { token, .. } => {
+            sandboxed.command.env(TOKEN_ENV, token);
+            false
+        }
     };
-    let mut child = command.spawn()?;
+    let mut child = sandboxed.spawn(stdio, stdio)?;
     let pipes = child.stdout.take().zip(child.stdin.take());
     let stderr = Arc::new(Mutex::new(String::new()));
     if let Some(pipe) = child.stderr.take() {
@@ -196,7 +200,7 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
 
 impl RobotProcess {
     /// The robot's stdout and stdin of a [`Transport::Stdio`] launch, once.
-    pub fn take_pipes(&mut self) -> Option<(ChildStdout, ChildStdin)> {
+    pub fn take_pipes(&mut self) -> Option<(RobotStdout, RobotStdin)> {
         self.pipes.take()
     }
 
@@ -239,15 +243,16 @@ pub(crate) fn no_window(command: &mut Command) -> &mut Command {
     command
 }
 
-/// A command that starts the host's `java` in its sandbox, which lets it read `read` and
-/// read and write `home`.
+/// The host's `java` in its sandbox, which lets it read `read` and read and write `home`,
+/// with a heap of `memory_mb` (`-Xmx`).
 pub(crate) fn sandboxed(
     host: &JavaHost,
     mut read: Vec<PathBuf>,
     home: &Path,
-) -> io::Result<Command> {
+    memory_mb: u32,
+) -> io::Result<sandbox::Sandboxed> {
     if host.sandbox == Sandbox::None {
-        return Ok(Command::new(&host.java));
+        return Ok(sandbox::Sandboxed::plain(&host.java));
     }
     let (java, runtime) = sandbox::java_runtime(&host.java)?;
     read.extend(sandbox::linked_from(&runtime));
@@ -255,6 +260,7 @@ pub(crate) fn sandboxed(
         runtime,
         read,
         home: home.to_path_buf(),
+        memory_mb,
     };
     sandbox::command(host.sandbox, &java, &grants)
 }
@@ -323,6 +329,7 @@ mod tests {
         };
         let args = jvm_args(&host, &launch);
         assert!(args.contains(&"-Djava.awt.headless=true".to_string()));
-        assert!(args.contains(&"-Djava.io.tmpdir=/tmp/h/tmp".to_string()));
+        let tmp = Path::new("/tmp/h").join("tmp");
+        assert!(args.contains(&format!("-Djava.io.tmpdir={}", tmp.display())));
     }
 }

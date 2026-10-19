@@ -5,18 +5,20 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(windows)]
+mod windows;
 
 use std::fmt;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 
 /// Where a robot process runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sandbox {
     /// The operating system's own sandbox: on Linux no new privileges, seccomp and rlimits,
-    /// and Landlock where the kernel has it.
+    /// and Landlock where the kernel has it; on Windows an AppContainer and a Job Object.
     Os,
     /// Bubblewrap, where it is installed (Linux): namespaces that show the robot only its
     /// grants, with the seccomp filter and rlimits of `Os`.
@@ -49,7 +51,7 @@ impl Sandbox {
             #[cfg(target_os = "linux")]
             Self::Bwrap => linux::bwrap_unavailable(),
             #[cfg(windows)]
-            Self::Os => Some("the os sandbox isn't there yet on Windows (#69)".into()),
+            Self::Os => windows::os_unavailable(),
             #[cfg(not(any(target_os = "linux", windows)))]
             Self::Os => Some("this platform has no os sandbox".into()),
             #[cfg(not(target_os = "linux"))]
@@ -65,12 +67,14 @@ impl Sandbox {
             .collect()
     }
 
-    /// What robots in this sandbox run with: on Linux its layers, e.g.
-    /// `os (seccomp, Landlock ABI 7)`.
+    /// What robots in this sandbox run with: its layers, e.g.
+    /// `os (seccomp, Landlock ABI 7)` on Linux, `os (AppContainer, Job Object)` on Windows.
     pub fn report(self) -> String {
         match self {
             #[cfg(target_os = "linux")]
             Self::Os | Self::Bwrap => linux::report(self),
+            #[cfg(windows)]
+            Self::Os => "os (AppContainer, Job Object)".into(),
             _ => self.name().into(),
         }
     }
@@ -123,7 +127,6 @@ impl FromStr for Sandbox {
 
 /// What a sandboxed program may use besides the system's libraries and settings.
 #[derive(Debug, Clone)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // until Windows' `os` (#69)
 pub(crate) struct Grants {
     /// Read and execute: the Java runtime (the directory above its `bin`).
     pub runtime: PathBuf,
@@ -131,6 +134,9 @@ pub(crate) struct Grants {
     pub read: Vec<PathBuf>,
     /// Read and write: the robot's home, with its data files and temporary files.
     pub home: PathBuf,
+    /// The JVM's heap (`-Xmx`): Windows' job lets the process commit that and some more.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub memory_mb: u32,
 }
 
 /// The `java` executable `java` (a path, or a name on the PATH) and the runtime it is in.
@@ -152,6 +158,9 @@ pub(crate) fn java_runtime(java: &Path) -> io::Result<(PathBuf, PathBuf)> {
             })?
     };
     let real = exe.canonicalize()?;
+    // Windows' canonical paths are verbatim (`\\?\C:\...`); Java takes the plain ones.
+    #[cfg(windows)]
+    let real = windows::plain(&real);
     let runtime = real
         .parent()
         .and_then(Path::parent)
@@ -186,7 +195,11 @@ pub(crate) fn linked_from(runtime: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             match entry.file_type() {
                 Ok(t) if t.is_symlink() => {
-                    if let Ok(real) = path.canonicalize()
+                    #[cfg(windows)]
+                    let real = path.canonicalize().map(|p| windows::plain(&p));
+                    #[cfg(not(windows))]
+                    let real = path.canonicalize();
+                    if let Ok(real) = real
                         && !real.starts_with(runtime)
                         && !found.contains(&real)
                     {
@@ -213,31 +226,179 @@ pub(crate) fn jvm_flags(home: &Path) -> [String; 3] {
 
 /// The environment variables a sandboxed program keeps: the user's others may hold
 /// secrets (tokens, keys), and the display's.
+#[cfg(not(windows))]
 fn kept(name: &str) -> bool {
     matches!(name, "PATH" | "HOME" | "LANG" | "LANGUAGE" | "TZ") || name.starts_with("LC_")
 }
 
-/// A command that starts `program` in `sandbox` with `grants`; the caller adds the
-/// arguments and the rest. `none` is a plain command.
-pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::Result<Command> {
+/// On Windows, whatever their case, with what its programs need: the system's folders
+/// and the processors. `PATH`, `TEMP` and `TMP` are the sandbox's own.
+#[cfg(windows)]
+fn kept(name: &str) -> bool {
+    const KEPT: [&str; 10] = [
+        "SystemRoot",
+        "windir",
+        "SystemDrive",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "LOCALAPPDATA",
+        "HOME",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+    ];
+    KEPT.iter().any(|k| k.eq_ignore_ascii_case(name))
+        || name.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("LC_"))
+}
+
+/// A program to start in a sandbox ([`command`]): its arguments, environment and
+/// directory go on `command`, [`Sandboxed::spawn`] and [`Sandboxed::output`] start it.
+/// Windows' `os` can't be started by `Command`: the runner starts it itself.
+pub(crate) struct Sandboxed {
+    pub command: Command,
+    #[cfg(windows)]
+    contained: Option<Grants>,
+}
+
+impl Sandboxed {
+    /// A plain process (`none`).
+    pub fn plain(program: &Path) -> Self {
+        Self {
+            command: Command::new(program),
+            #[cfg(windows)]
+            contained: None,
+        }
+    }
+
+    /// Starts the program with its stdin and stdout piped or else null, and its stderr
+    /// piped.
+    pub fn spawn(mut self, stdin: bool, stdout: bool) -> io::Result<Child> {
+        #[cfg(windows)]
+        if let Some(grants) = &self.contained {
+            let (process, [stdin, stdout, stderr]) =
+                windows::spawn(&self.command, grants, [stdin, stdout])?;
+            let boxed = |pipe: Option<std::fs::File>| pipe.map(Box::new);
+            return Ok(Child {
+                process: Process::Contained(process),
+                stdin: boxed(stdin).map(|p| p as Box<dyn Write + Send>),
+                stdout: boxed(stdout).map(|p| p as Box<dyn Read + Send>),
+                stderr: boxed(stderr).map(|p| p as Box<dyn Read + Send>),
+            });
+        }
+        let null_or_piped = |piped| if piped { Stdio::piped() } else { Stdio::null() };
+        let mut child = self
+            .command
+            .stdin(null_or_piped(stdin))
+            .stdout(null_or_piped(stdout))
+            .stderr(Stdio::piped())
+            .spawn()?;
+        Ok(Child {
+            stdin: child.stdin.take().map(|p| Box::new(p) as _),
+            stdout: child.stdout.take().map(|p| Box::new(p) as _),
+            stderr: child.stderr.take().map(|p| Box::new(p) as _),
+            process: Process::Plain(child),
+        })
+    }
+
+    /// Runs the program to its end, its stdin null, and returns its output.
+    pub fn output(mut self) -> io::Result<Output> {
+        #[cfg(windows)]
+        if self.contained.is_some() {
+            let mut child = self.spawn(false, true)?;
+            let read = |pipe: Option<Box<dyn Read + Send>>| {
+                std::thread::spawn(move || {
+                    let mut bytes = Vec::new();
+                    if let Some(mut pipe) = pipe {
+                        let _ = pipe.read_to_end(&mut bytes);
+                    }
+                    bytes
+                })
+            };
+            let (stdout, stderr) = (read(child.stdout.take()), read(child.stderr.take()));
+            let status = child.wait()?;
+            return Ok(Output {
+                status,
+                stdout: stdout.join().unwrap_or_default(),
+                stderr: stderr.join().unwrap_or_default(),
+            });
+        }
+        self.command.stdin(Stdio::null()).output()
+    }
+}
+
+/// A started program; its pipes are for the caller to take.
+pub(crate) struct Child {
+    process: Process,
+    pub stdin: Option<Box<dyn Write + Send>>,
+    pub stdout: Option<Box<dyn Read + Send>>,
+    pub stderr: Option<Box<dyn Read + Send>>,
+}
+
+enum Process {
+    Plain(std::process::Child),
+    #[cfg(windows)]
+    Contained(windows::Process),
+}
+
+impl Child {
+    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        match &mut self.process {
+            Process::Plain(p) => p.wait(),
+            #[cfg(windows)]
+            Process::Contained(p) => p.wait(),
+        }
+    }
+
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match &mut self.process {
+            Process::Plain(p) => p.try_wait(),
+            #[cfg(windows)]
+            Process::Contained(p) => p.try_wait(),
+        }
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        match &mut self.process {
+            Process::Plain(p) => p.kill(),
+            #[cfg(windows)]
+            Process::Contained(p) => p.kill(),
+        }
+    }
+}
+
+/// `program` in `sandbox` with `grants`; the caller adds the arguments and the rest.
+/// `none` is a plain process.
+pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::Result<Sandboxed> {
     if let Some(why) = sandbox.unavailable() {
         return Err(io::Error::new(io::ErrorKind::Unsupported, why));
     }
     if sandbox == Sandbox::None {
-        return Ok(Command::new(program));
+        return Ok(Sandboxed::plain(program));
     }
     std::fs::create_dir_all(grants.home.join("tmp"))?;
-    let mut command = match sandbox {
+    let mut sandboxed = match sandbox {
         #[cfg(target_os = "linux")]
-        Sandbox::Os => linux::os_command(program, grants, true)?,
+        Sandbox::Os => Sandboxed {
+            command: linux::os_command(program, grants, true)?,
+        },
         #[cfg(target_os = "linux")]
-        Sandbox::Bwrap => linux::bwrap_command(program, grants)?,
-        _ => Command::new(program),
+        Sandbox::Bwrap => Sandboxed {
+            command: linux::bwrap_command(program, grants)?,
+        },
+        #[cfg(windows)]
+        Sandbox::Os => Sandboxed {
+            command: Command::new(program),
+            contained: Some(grants.clone()),
+        },
+        _ => Sandboxed::plain(program),
     };
-    command
+    sandboxed
+        .command
         .env_clear()
         .envs(std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(kept)));
-    Ok(command)
+    #[cfg(windows)]
+    windows::environment(&mut sandboxed.command, grants);
+    Ok(sandboxed)
 }
 
 #[cfg(test)]
@@ -259,16 +420,18 @@ mod tests {
                 .contains("os, bwrap, docker, none")
         );
         let os = "os".parse::<Sandbox>();
-        if cfg!(target_os = "linux") {
+        if cfg!(any(target_os = "linux", windows)) {
             assert_eq!(os, Ok(Sandbox::Os));
             assert_eq!(Sandbox::default(), Sandbox::Os);
         } else {
             let why = os.unwrap_err();
             assert!(why.contains("here robots run in: none"), "{why}");
-            assert!(!cfg!(windows) || why.contains("#69"), "{why}");
             assert_eq!(Sandbox::default(), Sandbox::None);
+        }
+        if !cfg!(target_os = "linux") {
             let bwrap = "bwrap".parse::<Sandbox>().unwrap_err();
             assert!(bwrap.contains("only on Linux"), "{bwrap}");
+            assert!(bwrap.ends_with("here robots run in: os, none") == cfg!(windows));
         }
     }
 
