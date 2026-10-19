@@ -1,0 +1,81 @@
+robocode-s: third-party notices
+===============================
+
+robocode-s is licensed under the Eclipse Public License 2.0 (the file LICENSE).
+This file lists what else a release archive contains or uses, and under which
+licenses. The texts of the licenses are below.
+
+
+1. Robot host (lib/robot-host)
+------------------------------
+
+The robot host runs classic Java robots. It is robocode-s's own code (the
+java-compat and java-determinism jars, EPL-2.0) together with these libraries,
+unmodified, as separate files:
+
+  robocode.api, robocode.core, robocode.host, robocode.repository,
+  robocode.battle 1.11.1
+      Classic Robocode, Copyright (c) 2001-2025 Mathew A. Nelson and Robocode
+      contributors. Eclipse Public License 1.0 (text below).
+      Source: https://github.com/robo-code/robocode (tag 1.11.1);
+      https://robocode.sourceforge.io/
+      Binaries: Maven Central, net.sf.robocode.
+
+  protobuf-java 4.31.1
+      Copyright 2008 Google Inc. All rights reserved. BSD 3-Clause License
+      (text below). https://github.com/protocolbuffers/protobuf
+
+  asm, asm-commons, asm-tree 9.10.1
+      Copyright (c) 2000-2011 INRIA, France Telecom. All rights reserved.
+      BSD 3-Clause License (text below). https://asm.ow2.io/
+
+  picocontainer 2.15.2
+      Copyright (c) PicoContainer Organization. All rights reserved.
+      BSD License (3-clause; text below). http://www.picocontainer.com/
+
+  kotlin-stdlib 2.4.0
+      Copyright JetBrains s.r.o. and Kotlin Programming Language contributors.
+      Apache License 2.0 (text below). https://kotlinlang.org/
+
+  annotations 13.0 (JetBrains)
+      Copyright JetBrains s.r.o. Apache License 2.0 (text below).
+      https://github.com/JetBrains/intellij-community
+
+Each jar's license is as its published metadata (the Maven POM or the jar's
+manifest) states it.
+
+
+2. Sample robots (robots)
+-------------------------
+
+The 27 classic sample robots (packages sample, sampleex, samplesentry and
+sampleteam), Copyright (c) 2001-2025 Mathew A. Nelson and Robocode
+contributors. Originally made available under the Eclipse Public License 1.0;
+distributed here under the Eclipse Public License 2.0 (the file LICENSE), as
+section 7 of the EPL-1.0 permits. Each source file keeps its copyright line and
+notes the change of license.
+
+
+3. Images, sounds and the icon (built into the programs)
+--------------------------------------------------------
+
+The robot, explosion and floor images, the sound effects and the application
+icon of the GUI are classic Robocode 1.11.1's own, unmodified (the icon with
+its black background made transparent), Copyright (c) 2001-2025 Mathew A. Nelson
+and Robocode contributors. Originally under the Eclipse Public License 1.0;
+distributed here under the Eclipse Public License 2.0, as for the sample robots.
+
+
+4. Java runtime (not included)
+------------------------------
+
+Robots run on a Java runtime, which is not part of this archive: on first use
+robocode-s downloads Eclipse Temurin 21 (a JRE), checks its SHA-256 and keeps it
+in its data folder. Eclipse Temurin is licensed under the GNU General Public
+License, version 2, with the Classpath Exception (https://adoptium.net/). With
+`--sandbox docker` the official eclipse-temurin image is pulled instead.
+
+
+5. Rust libraries (linked into robocode-s and robocode-s-gui)
+-------------------------------------------------------------
+

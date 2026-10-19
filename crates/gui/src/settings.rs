@@ -73,8 +73,9 @@ impl Default for Rules {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            // The samples of a built source tree, as `Environment::from_env` assumes.
-            robot_folders: vec!["robots/samples/build/libs".into()],
+            // The samples of the release archive or of a built source tree, as
+            // `Environment::from_env` assumes.
+            robot_folders: vec![robocode_s_runner::local::default_robot_dir()],
             sandbox: Sandbox::default().name().into(),
             scan_arcs: false,
             colored_bullets: true,

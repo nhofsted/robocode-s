@@ -10,6 +10,10 @@ A reimplementation of [Robocode](https://robocode.sourceforge.io/) with a Rust b
 
 > Status: early design phase. See [docs/design.md](docs/design.md).
 
+## Installing
+
+Release archives (one per platform, from the [releases page](https://github.com/nhofsted/robocode-s/releases)) hold both programs, the robot host, the determinism agent and the sample robots: unpack one anywhere and run `robocode-s-gui` or `robocode-s` from it; the programs find their files next to themselves, from any current folder (and through symlinks). The Java runtime for the robots is downloaded on first use into the user's data folder (`~/.local/share/robocode-s`, `~/Library/Application Support/robocode-s`, `%LOCALAPPDATA%\robocode-s`), never into the unpacked folder. The archives' `README.txt` says more: the sandbox of each platform, the unsigned programs (Windows SmartScreen, macOS `xattr -dr com.apple.quarantine .`), the Linux menu entry (`share/install-desktop.sh`). Linux binaries need glibc 2.31 or newer. `tools/release/release.sh build` makes the archives (design §6.7). The rest of this page is about building from the source tree.
+
 ## Building
 
 Requirements: Rust (stable, via [rustup](https://rustup.rs)), a C toolchain, and JDK 21.
@@ -60,7 +64,7 @@ CARGO_TARGET_DIR=target/windows cargo build --release -p robocode-s-gui --target
 # target/windows/x86_64-pc-windows-gnu/release/robocode-s-gui.exe
 ```
 
-It finds the robot host and the sample robots relative to the folder it is started in, as from the repository: copy `clients/java-compat/build/install/`, `clients/java-determinism/build/libs/` and `robots/samples/build/libs/` there in the same layout (or set `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR` and the robot folders). The pinned JRE is downloaded into `target\robocodes-data` there on first use. The `os` sandbox grants its robots the JRE, the robot host, the agent, the robots' jars and folders and their homes (in the data folder) by ACL entries, so these must be on NTFS: not on FAT, and not in WSL's files (`\\wsl$\...`) when the Windows program is started from WSL. The entries on the JRE and the robot host's folders stay (they let only robocode-s's own AppContainer, `robocode-s.robot`, read them); the homes' go with them.
+A release archive has all this next to the program (see Installing); a program built by hand finds the robot host and the sample robots relative to the folder it is started in, as from the repository: copy `clients/java-compat/build/install/`, `clients/java-determinism/build/libs/` and `robots/samples/build/libs/` there in the same layout (or set `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR` and the robot folders). The pinned JRE is downloaded into `target\robocodes-data` there on first use. The `os` sandbox grants its robots the JRE, the robot host, the agent, the robots' jars and folders and their homes (in the data folder) by ACL entries, so these must be on NTFS: not on FAT, and not in WSL's files (`\\wsl$\...`) when the Windows program is started from WSL. The entries on the JRE and the robot host's folders stay (they let only robocode-s's own AppContainer, `robocode-s.robot`, read them); the homes' go with them.
 
 ## Repository layout
 
