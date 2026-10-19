@@ -6,7 +6,7 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
-use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Transport, launch};
+use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{
@@ -15,7 +15,7 @@ use robocode_s_server::{
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -416,10 +416,32 @@ fn run_describe(
     home: &Path,
 ) -> Result<String, String> {
     std::fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
-    let lib = std::path::absolute(&host.lib_dir).map_err(|e| e.to_string())?;
+    let absolute = |p: &Path| std::path::absolute(p).map_err(|e| e.to_string());
+    let lib = absolute(&host.lib_dir)?;
+    let home = absolute(home)?;
+    let jars = jars
+        .iter()
+        .map(|j| absolute(j))
+        .collect::<Result<Vec<_>, _>>()?;
     // Java runs in `home`, so a relative path to it must become absolute first.
     let java = crate::absolute_if_path(&host.java).map_err(|e| e.to_string())?;
-    let mut command = Command::new(&java);
+    // It loads the robots' classes: the same sandbox as a battle.
+    let host = JavaHost {
+        java: java.clone(),
+        ..host.clone()
+    };
+    let mut read = vec![lib.clone()];
+    read.extend(jars.iter().cloned());
+    let mut command = crate::sandboxed(&host, read, &home).map_err(|e| {
+        format!(
+            "starting {} in sandbox {}: {e}",
+            java.display(),
+            host.sandbox
+        )
+    })?;
+    if host.sandbox != Sandbox::None {
+        command.args(crate::sandbox::jvm_flags(&home));
+    }
     crate::no_window(&mut command)
         .args(MODULE_OPENINGS)
         .arg("-cp")
@@ -427,17 +449,15 @@ fn run_describe(
         .arg("io.github.nhofsted.robocodes.compat.RobotHost")
         .arg("--describe")
         .arg("--home")
-        .arg(std::path::absolute(home).map_err(|e| e.to_string())?);
-    for jar in jars {
-        command
-            .arg("--jar")
-            .arg(std::path::absolute(jar).map_err(|e| e.to_string())?);
+        .arg(&home);
+    for jar in &jars {
+        command.arg("--jar").arg(jar);
     }
     for robot in robots {
         command.arg("--robot").arg(robot);
     }
     let output = command
-        .current_dir(home)
+        .current_dir(&home)
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("starting {}: {e}", java.display()))?;
@@ -561,6 +581,8 @@ pub struct Environment {
     /// Robot jars, and class folders (an IDE's output, e.g. `bin`): classic reads those
     /// in place as development paths, so a recompiled robot is new in the next battle.
     pub jars: Vec<PathBuf>,
+    /// What the robots run in; the platform's default unless chosen.
+    pub sandbox: Sandbox,
 }
 
 impl Environment {
@@ -593,11 +615,15 @@ impl Environment {
             } else {
                 jars
             },
+            sandbox: Sandbox::default(),
         }
     }
 
     /// Checks the paths and finds Java (downloading the pinned JRE if needed).
     pub fn host(&self, deterministic: bool) -> Result<JavaHost, String> {
+        if let Some(why) = self.sandbox.unavailable() {
+            return Err(why);
+        }
         for jar in &self.jars {
             if !jar.is_file() && !jar.is_dir() {
                 return Err(format!("robot jar or folder not found: {}", jar.display()));
@@ -623,6 +649,7 @@ impl Environment {
             java,
             lib_dir: self.host_lib.clone(),
             agent_jar: self.agent_jar.clone(),
+            sandbox: self.sandbox,
         })
     }
 }

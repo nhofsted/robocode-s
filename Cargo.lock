@@ -2697,6 +2697,7 @@ name = "robocode-s-runner"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "libc",
  "robocode-s-engine",
  "robocode-s-protocol",
  "robocode-s-server",

@@ -5,6 +5,7 @@
 //! `~/Library/Application Support/robocode-s/gui.json` on macOS and
 //! `%APPDATA%\robocode-s\gui.json` on Windows; `ROBOCODES_GUI_CONFIG` overrides it.
 
+use robocode_s_runner::Sandbox;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,8 @@ use std::path::{Path, PathBuf};
 pub struct Settings {
     /// Folders scanned for robot jars.
     pub robot_folders: Vec<PathBuf>,
+    /// What robots run in, by name (`--sandbox`, ADR 0019); see [`Settings::sandbox`].
+    pub sandbox: String,
     /// Draw each robot's radar scan arc.
     pub scan_arcs: bool,
     /// Bullets in the robots' bullet colours rather than all in one.
@@ -72,6 +75,7 @@ impl Default for Settings {
         Self {
             // The samples of a built source tree, as `Environment::from_env` assumes.
             robot_folders: vec!["robots/samples/build/libs".into()],
+            sandbox: Sandbox::default().name().into(),
             scan_arcs: false,
             colored_bullets: true,
             robot_names: true,
@@ -146,6 +150,12 @@ impl Settings {
         aside.push(".tmp");
         std::fs::write(&aside, text + "\n").map_err(fail)?;
         std::fs::rename(&aside, &path).map_err(fail)
+    }
+
+    /// The sandbox chosen, if this platform has it (a file from another one may name one
+    /// it doesn't); else the platform's default.
+    pub fn sandbox(&self) -> Sandbox {
+        self.sandbox.parse().unwrap_or_default()
     }
 
     /// Where the robots are: per robot folder its `.jar` files, then the folder itself if
@@ -268,12 +278,22 @@ mod tests {
         assert_eq!(s.width, Settings::default().width);
         assert_eq!(s.robot_folders, Settings::default().robot_folders);
         assert_eq!(s.rules.inactivity_time, 450);
+        assert_eq!(s.sandbox(), Sandbox::default());
+    }
+
+    #[test]
+    fn a_sandbox_this_platform_lacks_gives_the_default() {
+        let s = Settings::parse(r#"{"sandbox": "docker"}"#).unwrap();
+        assert_eq!(s.sandbox(), Sandbox::default());
+        let s = Settings::parse(r#"{"sandbox": "none"}"#).unwrap();
+        assert_eq!(s.sandbox(), Sandbox::None);
     }
 
     #[test]
     fn round_trips() {
         let s = Settings {
             robot_folders: vec!["/robots".into(), "more".into()],
+            sandbox: "none".into(),
             scan_arcs: true,
             colored_bullets: false,
             robot_names: false,

@@ -5,9 +5,10 @@
 //!
 //! Paths come from the environment, with defaults for a built source tree:
 //! `ROBOCODES_JAVA` (else the pinned JRE is downloaded into `ROBOCODES_DATA`),
-//! `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_ROBOT_JARS` (path list).
+//! `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_ROBOT_JARS` (path list),
+//! `ROBOCODES_SANDBOX` (else the platform's default).
 
-use robocode_s_runner::{JavaHost, jre};
+use robocode_s_runner::{JavaHost, Sandbox, jre};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -25,6 +26,18 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The platform's default sandbox, or `ROBOCODES_SANDBOX`: a sandbox changes no battle.
+    let sandbox = match std::env::var("ROBOCODES_SANDBOX") {
+        Ok(name) => match name.parse::<Sandbox>() {
+            Ok(sandbox) => sandbox,
+            Err(e) => {
+                eprintln!("ROBOCODES_SANDBOX: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Err(_) => Sandbox::default(),
+    };
+    eprintln!("sandbox {}", sandbox.report());
     let host = JavaHost {
         java,
         lib_dir: env_path(
@@ -35,6 +48,7 @@ fn main() -> ExitCode {
             "ROBOCODES_AGENT_JAR",
             "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar",
         ),
+        sandbox,
     };
     let jars: Vec<PathBuf> = std::env::var_os("ROBOCODES_ROBOT_JARS")
         .map(|v| {

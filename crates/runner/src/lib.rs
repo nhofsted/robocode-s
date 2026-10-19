@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Launches robot processes (design §6). For now the local-process launcher: one JVM per
-//! robot running the robocode-s robot host (`clients/java-compat`).
+//! Launches robot processes (design §6): one JVM per robot running the robocode-s robot
+//! host (`clients/java-compat`), in a [`Sandbox`] (ADR 0019).
 
 pub mod jre;
 pub mod local;
+mod sandbox;
+
+pub use sandbox::Sandbox;
 
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -22,6 +25,8 @@ pub struct JavaHost {
     pub lib_dir: PathBuf,
     /// The determinism agent jar (ADR 0009).
     pub agent_jar: PathBuf,
+    /// What robot hosts run in, battles and listings alike: they load robot code.
+    pub sandbox: Sandbox,
 }
 
 /// How a launched robot talks to the server.
@@ -77,6 +82,9 @@ pub const STRICT_MATH_FLAGS: [&str; 2] = [
 /// The JVM arguments for a robot.
 pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     let mut args = vec![format!("-Xmx{}m", launch.memory_mb)];
+    if host.sandbox != Sandbox::None {
+        args.extend(sandbox::jvm_flags(&launch.home));
+    }
     args.extend(MODULE_OPENINGS.map(String::from));
     if launch.deterministic {
         args.extend(STRICT_MATH_FLAGS.map(String::from));
@@ -117,14 +125,21 @@ pub struct RobotProcess {
 /// How much of a robot's error output is kept for diagnosis.
 const STDERR_TAIL: usize = 8 * 1024;
 
-/// Starts a robot JVM. Paths may be relative to the current directory; the robot runs
-/// in its home directory, so they are made absolute first.
+/// Starts a robot JVM in the host's sandbox. Paths may be relative to the current
+/// directory; the robot runs in its home directory, so they are made absolute first.
 pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess> {
+    if host.sandbox != Sandbox::None && matches!(launch.transport, Transport::Tcp { .. }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a robot in a sandbox has no network: it talks over stdio",
+        ));
+    }
     std::fs::create_dir_all(&launch.home)?;
     let host = JavaHost {
         java: absolute_if_path(&host.java)?,
         lib_dir: std::path::absolute(&host.lib_dir)?,
         agent_jar: std::path::absolute(&host.agent_jar)?,
+        sandbox: host.sandbox,
     };
     let launch = RobotLaunch {
         jars: launch
@@ -135,7 +150,12 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         home: std::path::absolute(&launch.home)?,
         ..launch.clone()
     };
-    let mut command = Command::new(&host.java);
+    let mut read = vec![host.lib_dir.clone()];
+    if launch.deterministic {
+        read.push(host.agent_jar.clone());
+    }
+    read.extend(launch.jars.iter().cloned());
+    let mut command = sandboxed(&host, read, &launch.home)?;
     no_window(&mut command)
         .args(jvm_args(&host, &launch))
         .current_dir(&launch.home)
@@ -219,6 +239,26 @@ pub(crate) fn no_window(command: &mut Command) -> &mut Command {
     command
 }
 
+/// A command that starts the host's `java` in its sandbox, which lets it read `read` and
+/// read and write `home`.
+pub(crate) fn sandboxed(
+    host: &JavaHost,
+    mut read: Vec<PathBuf>,
+    home: &Path,
+) -> io::Result<Command> {
+    if host.sandbox == Sandbox::None {
+        return Ok(Command::new(&host.java));
+    }
+    let (java, runtime) = sandbox::java_runtime(&host.java)?;
+    read.extend(sandbox::linked_from(&runtime));
+    let grants = sandbox::Grants {
+        runtime,
+        read,
+        home: home.to_path_buf(),
+    };
+    sandbox::command(host.sandbox, &java, &grants)
+}
+
 /// A relative executable path with a directory part becomes absolute; a bare name like
 /// `java` is left for the PATH lookup.
 fn absolute_if_path(p: &Path) -> io::Result<PathBuf> {
@@ -244,6 +284,7 @@ mod tests {
             java: "java".into(),
             lib_dir: "/opt/host/lib".into(),
             agent_jar: "/opt/agent.jar".into(),
+            sandbox: Sandbox::None,
         };
         let mut launch = RobotLaunch {
             transport: Transport::Tcp {
@@ -274,5 +315,14 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("DisableIntrinsic") || a.contains("javaagent"))
         );
+        assert!(!args.iter().any(|a| a.contains("headless")));
+        // A sandboxed robot host has no display and its temporary files in its home.
+        let host = JavaHost {
+            sandbox: Sandbox::Os,
+            ..host
+        };
+        let args = jvm_args(&host, &launch);
+        assert!(args.contains(&"-Djava.awt.headless=true".to_string()));
+        assert!(args.contains(&"-Djava.io.tmpdir=/tmp/h/tmp".to_string()));
     }
 }
