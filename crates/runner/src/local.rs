@@ -628,11 +628,14 @@ pub fn install_root(exe_dir: &Path) -> Option<PathBuf> {
         })
 }
 
+/// The sample robots' folder in a built source tree (relative to its root).
+pub const SOURCE_ROBOTS: &str = "robots/samples/build/libs";
+
 /// The folder of the sample robots: the archive's `robots`, else a built source tree's.
 pub fn default_robot_dir() -> PathBuf {
     match install_dir() {
         Some(dir) => dir.join(INSTALLED_ROBOTS),
-        None => "robots/samples/build/libs".into(),
+        None => SOURCE_ROBOTS.into(),
     }
 }
 

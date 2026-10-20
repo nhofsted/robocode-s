@@ -143,7 +143,23 @@ impl Settings {
     }
 
     fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
+        let mut settings: Self = serde_json::from_str(text)?;
+        settings.find_samples(&robocode_s_runner::local::default_robot_dir());
+        Ok(settings)
+    }
+
+    /// Points a source tree's sample folder at `samples`, this program's: files written
+    /// before the default folder was left out of them name it, and an installation has
+    /// its samples elsewhere.
+    fn find_samples(&mut self, samples: &Path) {
+        let source = Path::new(robocode_s_runner::local::SOURCE_ROBOTS);
+        for folder in &mut self.robot_folders {
+            if folder == source {
+                *folder = samples.to_path_buf();
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        self.robot_folders.retain(|f| seen.insert(f.clone()));
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -302,6 +318,23 @@ mod tests {
         };
         let text = serde_json::to_string(&changed).unwrap();
         assert!(text.contains("/mine"), "{text}");
+    }
+
+    #[test]
+    fn a_source_trees_sample_folder_becomes_the_installations() {
+        let mut s = Settings {
+            robot_folders: vec![
+                "robots/samples/build/libs".into(),
+                "/mine".into(),
+                "/install/robots".into(),
+            ],
+            ..Settings::default()
+        };
+        s.find_samples(Path::new("/install/robots"));
+        assert_eq!(
+            s.robot_folders,
+            [PathBuf::from("/install/robots"), "/mine".into()]
+        );
     }
 
     #[test]
