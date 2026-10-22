@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import Battlefield from '#lib/components/Battlefield.svelte';
 	import { REPO_URL } from '#lib/site.ts';
+	import { VERSION } from '#lib/release.ts';
 
 	const milestones: { id: string; name: string; state: 'done' | 'active' | 'planned' }[] = [
 		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
@@ -44,7 +45,8 @@
 			robots run unmodified, turn for turn identical to classic Robocode.
 		</p>
 		<p class="ctas">
-			<a class="button" href={resolve('/docs/getting-started')}>Get started</a>
+			<a class="button" href={resolve('/download')}>Download</a>
+			<a class="button secondary" href={resolve('/docs/getting-started')}>Get started</a>
 			<a class="button secondary" href={resolve('/rankings')}>Rankings</a>
 		</p>
 	</div>
@@ -85,12 +87,12 @@
 	<section class="status panel">
 		<h2>Where we are</h2>
 		<p>
-			robocode-s is in development. Classic Java robots, the samples and real RoboRumble bots
+			robocode-s {VERSION} is out. Classic Java robots, the samples and real RoboRumble bots
 			alike, fight identically to classic: headless from the command line, or in the desktop
 			GUI with debug painting, recordings and replays. Robots run sandboxed, locally or on
-			other machines, and battles are deterministic by default. Installers for Windows, Linux
-			and macOS are built; there is no release to download yet, and until then you build it
-			from source. Follow along on <a href={REPO_URL}>GitHub</a>.
+			other machines, and battles are deterministic by default. Download it for Windows and Linux
+			from the <a href={resolve('/download')}>download page</a>; on macOS you build it from
+			source for now. Follow along on <a href={REPO_URL}>GitHub</a>.
 		</p>
 		<ol class="milestones">
 			{#each milestones as m (m.id)}
