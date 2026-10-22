@@ -319,7 +319,7 @@ cmd_build() {
   local cv; cv="$(cargo_version)"
   version="${version:-$cv}"
   [ "$version" = "$cv" ] || echo "warning: --version $version differs from Cargo.toml's $cv (the programs report $cv)" >&2
-  [ -z "$(git status --porcelain)" ] || echo "warning: the working tree has uncommitted changes" >&2
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || echo "warning: the working tree has uncommitted changes" >&2
   [ "$skip_checks" = 1 ] && echo "warning: checks skipped" >&2 || checks
   say "Java parts"
   ./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
@@ -453,7 +453,7 @@ cmd_upload() {
   local dir="${ROBOCODES_DIST_ROOT:-$ROOT/target/release-dist}/$version"
   [ -f "$dir/SHA256SUMS" ] || die "no $dir/SHA256SUMS: run build --version $version first"
   (cd "$dir" && sha256sum --check --quiet SHA256SUMS) || die "the archives don't match SHA256SUMS"
-  [ -z "$(git status --porcelain)" ] || die "uncommitted changes"
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || die "uncommitted changes to tracked files (git status)"
   git branch -r --contains HEAD | grep -q . || die "HEAD is not pushed"
   local files=(); local f
   for f in "$dir"/*; do files+=("$f"); done

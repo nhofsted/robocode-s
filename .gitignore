@@ -27,3 +27,6 @@ clients/dotnet/**/obj/
 
 # Gradle
 .kotlin/
+
+# Claude Code worktrees
+.claude/worktrees/
