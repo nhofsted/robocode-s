@@ -8,7 +8,7 @@ A reimplementation of [Robocode](https://robocode.sourceforge.io/) with a Rust b
 - Runs on **Windows, Linux and macOS**
 - **Distributed RoboRumble** with a serverless AWS backend and a web interface that replays battles in the browser
 
-> Status: the engine, the Java robot host, the CLI and the GUI work; robots run sandboxed, locally or on remote agents (milestones M1–M3). No release is published yet: build from source (below). Next: other robot languages (M4) and the rumble (M5). See [docs/design.md](docs/design.md).
+> Status: the engine, the Java robot host, the CLI and the GUI work; robots run sandboxed, locally or on remote agents (milestones M1–M3). No release is published yet: build from source (below). Next: the rumble (M4), then robots in Python (M5). See [docs/design.md](docs/design.md).
 
 ## Installing
 

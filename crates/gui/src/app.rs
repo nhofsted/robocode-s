@@ -1457,12 +1457,12 @@ impl App {
         });
     }
 
-    /// The Run Rumble tab (M5); its tab is disabled until then.
+    /// The Run Rumble tab (M4); its tab is disabled until then.
     fn rumble_page(&mut self, root: &mut egui::Ui) {
         self.page(root, |_, ui| {
             ui.heading("Run Rumble");
             ui.add_space(8.0);
-            ui.label(RichText::new("Coming with the rumble client (M5).").weak());
+            ui.label(RichText::new("Coming with the rumble client (M4).").weak());
         });
     }
 

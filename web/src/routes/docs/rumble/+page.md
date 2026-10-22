@@ -5,7 +5,7 @@ description: How the robocode-s rumble works - divisions, weight classes, rankin
 
 The robocode-s rumble is a continuously running league. Every bot fights every other bot in its rumbles, again and again, and the rankings on this site are averages over all those battles. It follows the tradition of classic [RoboRumble](https://robowiki.net/wiki/RoboRumble), with a new backend, a new website, battle replays in the browser, and results that can be checked.
 
-> **Status:** the rumble starts with milestone M5. The [rankings](/rankings) shown now are generated sample data, so the website can be built ahead of the backend. Everything below describes the design; numbers marked *initial* will be tuned once real battles flow.
+> **Status:** the rumble starts with milestone M4. The [rankings](/rankings) shown now are generated sample data, so the website can be built ahead of the backend. Everything below describes the design; numbers marked *initial* will be tuned once real battles flow.
 
 ## Divisions and weight classes
 
@@ -67,6 +67,6 @@ See [Developing a robot](/docs/robot-development#package-it) for how to package 
 
 ## Replays
 
-> **Status:** milestone M5b.
+> **Status:** milestone M6.
 
 Every pairing page will have a **watch** button that plays a battle in the browser, with the same engine that ran it, compiled to WebAssembly. The rumble keeps recordings of five rounds won by each side for every matchup with at least one top-50 bot. Any other round can be requested: a volunteer re-runs that battle (same seed, same result) and uploads the round.

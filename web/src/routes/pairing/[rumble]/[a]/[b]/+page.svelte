@@ -113,7 +113,7 @@
 			the battle compiled to WebAssembly. The rumble keeps five rounds won by each side for every
 			matchup with a top-50 bot; other rounds are re-run by a volunteer on request.
 		</p>
-		<button disabled>Replays arrive with milestone M5b</button>
+		<button disabled>Replays arrive with milestone M6</button>
 	</section>
 </div>
 
