@@ -13,9 +13,10 @@ use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{LocalBattle, run_local_battle};
+use robocode_s_server::net::Stream;
+use robocode_s_server::tls::Fingerprint;
 use robocode_s_server::watch::Watcher;
 use robocode_s_server::{BattleOutcome, convert};
-use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -44,7 +45,7 @@ pub struct Live {
     /// and seed come with its `BattleInfo`.
     pub watching: Option<String>,
     /// The watched battle's connection, to end it when the battle is closed.
-    connection: Arc<Mutex<Option<TcpStream>>>,
+    connection: Arc<Mutex<Option<Stream>>>,
     pub latest: Option<v1::TurnSnapshot>,
     /// The snapshot before `latest`, for the scan arcs.
     pub previous: Option<v1::TurnSnapshot>,
@@ -104,8 +105,14 @@ impl Live {
     }
 
     /// Watches the battle on the server at `address` (`host:port`) as an observer, with
-    /// the observer `token` (empty for none). The controls go to that server.
-    pub fn watch(ctx: &egui::Context, address: String, token: String) -> Self {
+    /// the observer `token` (empty for none), over TLS when its certificate is pinned
+    /// (`pin`) or it isn't on loopback. The controls go to that server.
+    pub fn watch(
+        ctx: &egui::Context,
+        address: String,
+        token: String,
+        pin: Option<Fingerprint>,
+    ) -> Self {
         let (updates_tx, updates) = mpsc::channel();
         let (controls, controls_rx) = mpsc::channel();
         let connection = Arc::new(Mutex::new(None));
@@ -113,7 +120,7 @@ impl Live {
         let ctx = ctx.clone();
         let watched = address.clone();
         thread::spawn(move || {
-            let result = Watcher::connect(&address, &token).and_then(|watcher| {
+            let result = Watcher::connect(&address, &token, pin).and_then(|watcher| {
                 let handle = watcher.handle().map_err(|e| e.to_string())?;
                 if let Ok(mut shared) = shared.lock() {
                     *shared = handle.try_clone().ok();
@@ -122,7 +129,7 @@ impl Live {
                 watcher.run(Some(controls_rx), |msg| {
                     // Closed meanwhile: leave the battle.
                     if tx.send(Update::Message(Box::new(msg.clone()))).is_err() {
-                        let _ = handle.shutdown(Shutdown::Both);
+                        let _ = handle.shutdown();
                     }
                     crate::pace::next_frame(&repaint);
                 })
@@ -294,7 +301,7 @@ impl Drop for Live {
             if let Ok(connection) = self.connection.lock()
                 && let Some(stream) = connection.as_ref()
             {
-                let _ = stream.shutdown(Shutdown::Both);
+                let _ = stream.shutdown();
             }
         } else if self.outcome.is_none() {
             self.control(v1::observer_control::Control::Abort(true));

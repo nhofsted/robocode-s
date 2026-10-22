@@ -15,7 +15,7 @@ pub mod v1 {
 }
 
 /// The protocol version implemented by this crate.
-pub const PROTOCOL_VERSION: v1::ProtocolVersion = v1::ProtocolVersion { major: 1, minor: 0 };
+pub const PROTOCOL_VERSION: v1::ProtocolVersion = v1::ProtocolVersion { major: 1, minor: 1 };
 
 /// Messages larger than this are refused (16 MiB).
 pub const MAX_MESSAGE_SIZE: usize = 16 << 20;
@@ -139,6 +139,59 @@ mod tests {
             read_message::<ClientMessage>(&mut stream.as_slice()).unwrap(),
             Some(hello)
         );
+    }
+
+    #[test]
+    fn runner_messages_roundtrip() {
+        let launch = ServerMessage {
+            msg: Some(server_message::Msg::LaunchRobot(v1::LaunchRobot {
+                robot_id: "2".into(),
+                session_token: "t".into(),
+                robot_name: "sample.Fire (2)".into(),
+                lookup_name: "sample.Fire".into(),
+                battle_seed: -7,
+                deterministic: true,
+                memory_limit_mb: 512,
+                jars: vec![v1::JarRef {
+                    name: "samples.jar".into(),
+                    sha256: "ab".repeat(32),
+                    size: 47_612,
+                }],
+                ..Default::default()
+            })),
+        };
+        let part = ServerMessage {
+            msg: Some(server_message::Msg::JarData(v1::JarData {
+                sha256: "ab".repeat(32),
+                offset: 1 << 20,
+                data: vec![0x50, 0x4b, 3, 4],
+                last: true,
+            })),
+        };
+        let hello = ClientMessage {
+            msg: Some(client_message::Msg::Hello(Hello {
+                version: Some(PROTOCOL_VERSION),
+                role: Role::Runner as i32,
+                token: "agent".into(),
+                runner: Some(v1::RunnerInfo {
+                    engine_version: 1,
+                    deterministic_rules: 1,
+                    platform: "JVM 21".into(),
+                    slots: 4,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        };
+        let mut stream = Vec::new();
+        write_message(&mut stream, &launch).unwrap();
+        write_message(&mut stream, &part).unwrap();
+        let mut reader = stream.as_slice();
+        assert_eq!(read_message(&mut reader).unwrap(), Some(launch));
+        assert_eq!(read_message(&mut reader).unwrap(), Some(part));
+        let mut stream = Vec::new();
+        write_message(&mut stream, &hello).unwrap();
+        assert_eq!(read_message(&mut stream.as_slice()).unwrap(), Some(hello));
     }
 
     #[test]

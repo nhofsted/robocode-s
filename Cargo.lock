@@ -2715,8 +2715,11 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "prost",
+ "ring",
  "robocode-s-engine",
  "robocode-s-protocol",
+ "rustls",
+ "webpki-roots",
 ]
 
 [[package]]

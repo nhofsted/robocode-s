@@ -6,11 +6,14 @@ use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::local::{Environment, prepare, random_seed, run_local_battle_with};
-use robocode_s_server::Observers;
-use robocode_s_server::ServerConfig;
+use robocode_s_runner::remote::run_remote_battle;
+use robocode_s_server::agents::AgentListener;
+use robocode_s_server::net::is_loopback;
+use robocode_s_server::tls::Identity;
+use robocode_s_server::{Observers, ServerConfig};
 use std::fs::File;
 use std::io::{IsTerminal, Write};
-use std::net::{TcpListener, ToSocketAddrs};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -60,15 +63,30 @@ Output:
   --record FILE          record the battle (replay with `robocode-s replay FILE`)
   --paint                ask every robot for its debug painting (stored by --record)
 
+Runner agents (robots on other machines, `robocode-s agent`):
+  --agents ADDR          listen for runner agents on ADDR (PORT, or HOST:PORT;
+                         HOST defaults to 127.0.0.1) and run the robots on them,
+                         round robin; this machine still describes them
+  --agent-token TOKEN    agents must present TOKEN ($ROBOCODES_AGENT_TOKEN);
+                         required with --agents
+  --wait-agents N        wait for at least N agents (default 1)
+  --agent-wait S         for up to S seconds (default 60)
+
 Watching (the GUI's Watch Battle tab, Remote Server):
   --observe ADDR         let observers watch on ADDR (PORT, or HOST:PORT; HOST
                          defaults to 127.0.0.1); the battle starts once the first
                          one connected. Observers control the battle as the GUI
                          does (pause, speed, stop, kill, input).
   --observe-token TOKEN  observers must present TOKEN ($ROBOCODES_OBSERVE_TOKEN);
-                         required unless ADDR is a loopback address. The
-                         connection is not encrypted: use a network you trust,
-                         or an SSH tunnel to a loopback address
+                         required unless ADDR is a loopback address
+
+TLS (--agents and --observe): a listener that isn't on loopback uses TLS,
+with a self-signed certificate made once in the data directory; its
+fingerprint is printed, for clients to pin (--fingerprint).
+  --tls                  TLS on loopback too
+  --tls-cert FILE        a certificate chain (PEM) instead, e.g. from a CA,
+  --tls-key FILE         and its key (PEM); clients without a fingerprint
+                         check it against the Mozilla roots
 ";
 
 /// The parsed command line.
@@ -89,6 +107,16 @@ pub struct Options {
     pub observe: Option<String>,
     /// The token observers present; empty: none (loopback only).
     pub observe_token: String,
+    /// `--agents`: where runner agents connect (`host:port`).
+    pub agents: Option<String>,
+    pub agent_token: String,
+    /// Agents to wait for, and for how long.
+    pub wait_agents: usize,
+    pub agent_wait: Duration,
+    /// TLS on loopback too.
+    pub tls: bool,
+    /// A certificate chain and key (PEM) instead of the self-signed certificate.
+    pub tls_cert: Option<(PathBuf, PathBuf)>,
 }
 
 impl Options {
@@ -107,12 +135,19 @@ impl Options {
             paint: false,
             observe: None,
             observe_token: std::env::var("ROBOCODES_OBSERVE_TOKEN").unwrap_or_default(),
+            agents: None,
+            agent_token: std::env::var("ROBOCODES_AGENT_TOKEN").unwrap_or_default(),
+            wait_agents: 1,
+            agent_wait: Duration::from_secs(60),
+            tls: false,
+            tls_cert: None,
         }
     }
 
     pub fn parse(args: &[String]) -> Result<Self, String> {
         let mut o = Self::defaults();
         let mut jars = Vec::new();
+        let (mut cert, mut key) = (None, None);
         let mut args = args.iter();
         while let Some(arg) = args.next() {
             let mut value = |name: &str| {
@@ -160,6 +195,13 @@ impl Options {
                 "--paint" => o.paint = true,
                 "--observe" => o.observe = Some(observe_address(&value(arg)?)),
                 "--observe-token" => o.observe_token = value(arg)?,
+                "--agents" => o.agents = Some(observe_address(&value(arg)?)),
+                "--agent-token" => o.agent_token = value(arg)?,
+                "--wait-agents" => o.wait_agents = number(arg, value(arg)?)?,
+                "--agent-wait" => o.agent_wait = Duration::from_secs(number(arg, value(arg)?)?),
+                "--tls" => o.tls = true,
+                "--tls-cert" => cert = Some(PathBuf::from(value(arg)?)),
+                "--tls-key" => key = Some(PathBuf::from(value(arg)?)),
                 a if a.starts_with("--") => return Err(format!("unknown option {a}")),
                 robot => o.robots.extend(
                     robot
@@ -173,6 +215,19 @@ impl Options {
         if !jars.is_empty() {
             o.env.jars = jars;
         }
+        o.tls_cert = match (cert, key) {
+            (Some(c), Some(k)) => Some((c, k)),
+            (None, None) => None,
+            _ => return Err("--tls-cert and --tls-key go together".into()),
+        };
+        if o.agents.is_some() && o.agent_token.is_empty() {
+            return Err("--agents needs a token for the agents: --agent-token (or \
+                 $ROBOCODES_AGENT_TOKEN)"
+                .into());
+        }
+        if o.wait_agents < 1 {
+            return Err("--wait-agents must be at least 1".into());
+        }
         if o.robots.is_empty() {
             return Err("no robots given".into());
         }
@@ -181,7 +236,7 @@ impl Options {
         }
         if let Some(address) = &o.observe
             && o.observe_token.is_empty()
-            && !is_loopback(address)?
+            && !is_loopback(address).map_err(|e| format!("--observe {e}"))?
         {
             return Err(format!(
                 "--observe {address} is reachable from other machines: give observers a \
@@ -200,32 +255,81 @@ fn observe_address(text: &str) -> String {
     }
 }
 
-/// Whether every address `address` stands for is a loopback one.
-fn is_loopback(address: &str) -> Result<bool, String> {
-    let addresses: Vec<_> = address
-        .to_socket_addrs()
-        .map_err(|e| format!("--observe {address}: {e}"))?
-        .collect();
-    Ok(!addresses.is_empty() && addresses.iter().all(|a| a.ip().is_loopback()))
+/// The server's certificate for a listener on `address`: TLS off loopback, or with
+/// `--tls` or `--tls-cert`; made once in the data directory unless given.
+fn identity(
+    o: &Options,
+    address: &str,
+    cache: &mut Option<Identity>,
+) -> Result<Option<Identity>, String> {
+    let loopback = is_loopback(address)?;
+    if loopback && !o.tls && o.tls_cert.is_none() {
+        return Ok(None);
+    }
+    if cache.is_none() {
+        *cache = Some(match &o.tls_cert {
+            Some((cert, key)) => Identity::from_pem(cert, key)?,
+            None => Identity::load_or_create(&o.env.data)?,
+        });
+    }
+    Ok(cache.clone())
+}
+
+/// How a client reaches a listener bound to `bound`.
+fn reach(bound: std::net::SocketAddr) -> String {
+    if bound.ip().is_unspecified() {
+        format!("THIS-HOST:{}", bound.port())
+    } else {
+        bound.to_string()
+    }
 }
 
 pub fn run(o: &Options) -> Result<(), String> {
     let seed = o.seed.unwrap_or_else(random_seed);
+    let mut certificate = None;
     // Bound first, so that a taken port fails before any robot starts.
+    let agents = match &o.agents {
+        Some(address) => {
+            let tls = identity(o, address, &mut certificate)?;
+            let listener = AgentListener::bind(address, tls, o.agent_token.clone())
+                .map_err(|e| format!("--agents {address}: {e}"))?;
+            let bound = listener.local_addr();
+            match listener.fingerprint() {
+                Some(f) => eprintln!(
+                    "Listening for agents on {bound}, certificate {f} (robocode-s agent \
+                     --server {} --fingerprint {f})",
+                    reach(bound)
+                ),
+                None => eprintln!(
+                    "Listening for agents on {bound} (robocode-s agent --server {})",
+                    reach(bound)
+                ),
+            }
+            Some(listener)
+        }
+        None => None,
+    };
     let observers = match &o.observe {
         Some(address) => {
+            let tls = identity(o, address, &mut certificate)?;
             let listener =
                 TcpListener::bind(address).map_err(|e| format!("--observe {address}: {e}"))?;
             let bound = listener.local_addr().map_err(|e| e.to_string())?;
-            let watch = if bound.ip().is_unspecified() {
-                format!("THIS-HOST:{}", bound.port())
-            } else {
-                bound.to_string()
-            };
-            eprintln!("Waiting for an observer on {bound} (robocode-s-gui --watch {watch})");
+            let watch = reach(bound);
+            match &tls {
+                Some(t) => eprintln!(
+                    "Waiting for an observer on {bound}, certificate {f} (robocode-s-gui \
+                     --watch {watch} --fingerprint {f})",
+                    f = t.fingerprint
+                ),
+                None => {
+                    eprintln!("Waiting for an observer on {bound} (robocode-s-gui --watch {watch})")
+                }
+            }
             Some(Observers {
                 listener,
                 token: o.observe_token.clone(),
+                tls,
                 wait: true,
             })
         }
@@ -258,7 +362,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         }
         rx
     });
-    let local = run_local_battle_with(&host, &battle, observers, controls, |msg| match msg {
+    let on_message = |msg: &server_message::Msg| match msg {
         server_message::Msg::TurnSnapshot(s) => {
             for (i, r) in s.robots.iter().enumerate() {
                 if r.output.is_empty() {
@@ -281,7 +385,23 @@ pub fn run(o: &Options) -> Result<(), String> {
             eprint!("\rround {}/{rounds}", r.round + 1);
         }
         _ => {}
-    })?;
+    };
+    let mut placements = Vec::new();
+    let local = match &agents {
+        Some(agents) => {
+            let remote = run_remote_battle(
+                &battle,
+                agents,
+                (o.wait_agents, o.agent_wait),
+                observers,
+                controls,
+                on_message,
+            )?;
+            placements = remote.agents;
+            remote.local
+        }
+        None => run_local_battle_with(&host, &battle, observers, controls, on_message)?,
+    };
     if progress {
         eprint!("\r\x1b[K");
     }
@@ -301,6 +421,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "deterministic": !o.classic,
             "engineVersion": robocode_s_engine::ENGINE_VERSION,
             "sandbox": host.sandbox.report(),
+            "agents": placements,
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "results": results::json(&rows),
         });
@@ -317,6 +438,12 @@ pub fn run(o: &Options) -> Result<(), String> {
             robocode_s_engine::ENGINE_VERSION,
             host.sandbox.report()
         );
+        for (robot, agent) in statics.iter().zip(&placements) {
+            println!("{} ran on {agent}", robot.name);
+        }
+        if !placements.is_empty() {
+            println!();
+        }
         print!("{}", results::table(&rows));
     }
     if !noisy.is_empty() {
@@ -364,6 +491,23 @@ mod tests {
         if std::env::var_os("ROBOCODES_OBSERVE_TOKEN").is_none_or(|t| t.is_empty()) {
             assert!(open.unwrap_err().contains("--observe-token"));
         }
+    }
+
+    #[test]
+    fn agents_need_a_token() {
+        if std::env::var_os("ROBOCODES_AGENT_TOKEN").is_none_or(|t| t.is_empty()) {
+            let e = Options::parse(&args("sample.Fire --agents 7655")).unwrap_err();
+            assert!(e.contains("--agent-token"), "{e}");
+        }
+        let o = Options::parse(&args(
+            "sample.Fire --agents 0.0.0.0:7655 --agent-token t --wait-agents 2 --tls",
+        ))
+        .unwrap();
+        assert_eq!(o.agents.as_deref(), Some("0.0.0.0:7655"));
+        assert_eq!((o.wait_agents, o.tls), (2, true));
+        assert!(Options::parse(&args("sample.Fire --tls-cert c.pem")).is_err());
+        let o = Options::parse(&args("sample.Fire --tls-cert c.pem --tls-key k.pem")).unwrap();
+        assert_eq!(o.tls_cert, Some(("c.pem".into(), "k.pem".into())));
     }
 
     #[test]

@@ -43,6 +43,8 @@ pub struct Settings {
     /// The last battle watched (Watch Battle, Remote Server): its address. Its token is
     /// not saved.
     pub watch: String,
+    /// Its certificate's fingerprint (`sha256:...`), if it was given; empty: none.
+    pub watch_fingerprint: String,
     /// The energy and CPU graphs show the whole battle rather than the round.
     pub graphs_battle: bool,
     /// The most frames a second the animations draw; 0 for the display's refresh rate
@@ -101,6 +103,7 @@ impl Default for Settings {
             height: 600,
             rules: Rules::default(),
             watch: "localhost:7654".into(),
+            watch_fingerprint: String::new(),
             graphs_battle: false,
             frame_rate: 0,
         }
@@ -338,6 +341,7 @@ mod tests {
                 sentry_border: 150,
             },
             watch: "server:7654".into(),
+            watch_fingerprint: format!("sha256:{}", ["0F"; 32].join(":")),
             graphs_battle: true,
             frame_rate: 60,
         };

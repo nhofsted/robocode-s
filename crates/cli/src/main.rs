@@ -2,6 +2,7 @@
 
 //! `robocode-s` command-line interface.
 
+mod agent;
 mod battle;
 mod replay;
 mod results;
@@ -14,9 +15,11 @@ usage: robocode-s <command> [options]
 Commands:
   battle     run a headless battle and print the results
   replay     re-run a recorded battle, verify it and print the results
+  agent      run robots for battles on other machines (a runner agent)
   --version  print the version, engine version and protocol version
 
-`robocode-s battle --help` describes the battle options.
+`robocode-s battle --help` describes the battle options, `robocode-s agent --help`
+the agent's.
 ";
 
 fn main() -> ExitCode {
@@ -45,6 +48,22 @@ fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("robocode-s battle: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("agent") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", agent::USAGE);
+                return ExitCode::SUCCESS;
+            }
+            let result = agent::Options::parse(&args[1..])
+                .map_err(|e| format!("{e}\n\n{}", agent::USAGE))
+                .and_then(|o| agent::run_agent(&o));
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("robocode-s agent: {e}");
                     ExitCode::FAILURE
                 }
             }

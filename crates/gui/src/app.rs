@@ -20,6 +20,7 @@ use robocode_s_runner::local::{
     Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
 };
 use robocode_s_runner::{JavaHost, Sandbox, docker_pulling};
+use robocode_s_server::tls::Fingerprint;
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -40,10 +41,11 @@ pub struct Setup {
     pub paint: bool,
     pub turns_per_second: u32,
     pub rules: Rules,
-    /// A battle to watch (Watch Battle, Remote Server): the server's address (`host:port`)
-    /// and observer token.
+    /// A battle to watch (Watch Battle, Remote Server): the server's address (`host:port`),
+    /// observer token and certificate fingerprint (`sha256:...`, empty for none).
     pub watch: String,
     pub watch_token: String,
+    pub watch_fingerprint: String,
 }
 
 impl Setup {
@@ -62,6 +64,7 @@ impl Setup {
             rules: settings.rules,
             watch: settings.watch.clone(),
             watch_token: String::new(),
+            watch_fingerprint: settings.watch_fingerprint.clone(),
         }
     }
 
@@ -177,6 +180,8 @@ struct Starting {
     watching: Option<String>,
     /// What its robots run in ([`Sandbox::report`]); `None` when watched.
     sandbox: Option<String>,
+    /// A watched battle's pinned certificate.
+    pin: Option<String>,
 }
 
 /// A battle with what comes before it: the loading screen while it starts, then the
@@ -787,6 +792,7 @@ impl App {
             error: None,
             watching: None,
             sandbox: Some(self.env.sandbox.report()),
+            pin: None,
         });
         self.launched = Some(s);
         self.error = None;
@@ -805,11 +811,25 @@ impl App {
             self.remote_error = Some("Give the address of the battle to watch.".into());
             return;
         }
-        if self.settings.watch != address {
+        let fingerprint = self.setup.watch_fingerprint.trim().to_string();
+        let pin = if fingerprint.is_empty() {
+            None
+        } else {
+            match fingerprint.parse::<Fingerprint>() {
+                Ok(pin) => Some(pin),
+                Err(e) => {
+                    self.remote_error = Some(e);
+                    return;
+                }
+            }
+        };
+        if self.settings.watch != address || self.settings.watch_fingerprint != fingerprint {
             self.settings.watch = address.clone();
+            self.settings.watch_fingerprint = fingerprint;
             self.settings_unsaved = Some(ctx.input(|i| i.time));
         }
-        let mut live = Live::watch(ctx, address.clone(), self.setup.watch_token.clone());
+        let token = self.setup.watch_token.clone();
+        let mut live = Live::watch(ctx, address.clone(), token, pin);
         live.camera = self.camera;
         live.set_speed(self.setup.turns_per_second);
         self.remote.starting = Some(Starting {
@@ -824,6 +844,7 @@ impl App {
             error: None,
             watching: Some(address),
             sandbox: None,
+            pin: pin.map(|p| p.to_string()),
         });
         self.selected = 0;
         self.remote.live = Some(Box::new(live));
@@ -1015,6 +1036,13 @@ impl App {
                 if let Some(sandbox) = &starting.sandbox {
                     ui.label(
                         RichText::new(format!("robots in sandbox {sandbox}"))
+                            .small()
+                            .weak(),
+                    );
+                }
+                if let Some(pin) = &starting.pin {
+                    ui.label(
+                        RichText::new(format!("TLS, certificate {pin}"))
                             .small()
                             .weak(),
                     );
@@ -1355,6 +1383,21 @@ impl App {
                     )
                     .on_hover_text("The battle's --observe-token, if it has one");
                     ui.end_row();
+                    ui.label("Fingerprint");
+                    let field = ui
+                        .add(
+                            egui::TextEdit::singleline(&mut app.setup.watch_fingerprint)
+                                .hint_text("sha256:… (none on loopback)")
+                                .desired_width(420.0),
+                        )
+                        .on_hover_text(
+                            "The certificate fingerprint the battle prints with --observe \
+                             (sha256:AB:CD:…): the connection uses TLS and trusts only \
+                             that certificate. Off loopback, without one, the certificate \
+                             must be a CA's.",
+                        );
+                    watch |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.end_row();
                     ui.label("");
                     ui.horizontal(|ui| {
                         let button = egui::Button::new("Watch").min_size(egui::vec2(90.0, 0.0));
@@ -1369,7 +1412,8 @@ impl App {
                         egui::Label::new(
                             RichText::new(
                                 "A battle run with robocode-s battle --observe PORT, on this \
-                                 machine or another. Leaving it leaves the battle running.",
+                                 machine or another (over TLS: give the fingerprint it \
+                                 prints). Leaving it leaves the battle running.",
                             )
                             .weak(),
                         )
