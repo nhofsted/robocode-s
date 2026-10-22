@@ -1,0 +1,64 @@
+# Builds the macOS apps of a release on GitHub's macOS runners (the macOS SDK isn't
+# available elsewhere) and, if asked, attaches them to the release. Run by hand only:
+# Actions → macOS release build → Run workflow, or
+#   gh workflow run macos.yml -f version=0.1.0 -f attach=true
+name: macOS release build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (the tag is v<version>)
+        required: true
+      ref:
+        description: Commit, branch or tag to build (default the release's tag)
+        required: false
+        default: ""
+      attach:
+        description: Attach the apps to the GitHub release v<version> and add them to its SHA256SUMS
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || format('v{0}', inputs.version) }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      # release.sh uses GNU tar (deterministic archives) and coreutils (sha256sum).
+      - name: GNU tools
+        run: |
+          brew install gnu-tar coreutils
+          echo "$(brew --prefix gnu-tar)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+      - name: Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build
+        run: tools/release/release.sh build --version "$VERSION" --targets macos-aarch64,macos-x86_64 --skip-checks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: robocode-s-${{ inputs.version }}-macos
+          path: target/release-dist/${{ inputs.version }}/
+      - name: Attach to the release
+        if: inputs.attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="target/release-dist/$VERSION"
+          tag="v$VERSION"
+          # The release's SHA256SUMS, with the macOS files' lines replaced or added.
+          gh release download "$tag" --pattern SHA256SUMS --dir release-sums
+          grep -v -- "-macos-" release-sums/SHA256SUMS > SHA256SUMS || true
+          (cd "$dir" && grep -- "-macos-" SHA256SUMS) >> SHA256SUMS
+          sort -k2 -o SHA256SUMS SHA256SUMS
+          gh release upload "$tag" --clobber "$dir"/*-macos-* SHA256SUMS
