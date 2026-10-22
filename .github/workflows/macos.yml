@@ -35,12 +35,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      # release.sh uses GNU tar (deterministic archives) and coreutils (sha256sum).
+      # release.sh is written for GNU tools: tar (deterministic archives), sed, grep
+      # and coreutils (sha256sum); macOS has BSD ones.
       - name: GNU tools
         run: |
-          brew install gnu-tar coreutils
-          echo "$(brew --prefix gnu-tar)/libexec/gnubin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          brew install gnu-tar gnu-sed grep coreutils
+          for f in gnu-tar gnu-sed grep coreutils; do
+            echo "$(brew --prefix "$f")/libexec/gnubin" >> "$GITHUB_PATH"
+          done
       - name: Rust targets
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - name: Build
