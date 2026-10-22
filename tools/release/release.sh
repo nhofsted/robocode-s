@@ -47,7 +47,7 @@
 #   linux-aarch64   aarch64-unknown-linux-gnu   cargo-zigbuild + zig, glibc 2.31
 #   windows-x86_64  x86_64-pc-windows-gnu       MinGW-w64 (x86_64-w64-mingw32-gcc)
 #   macos-aarch64   aarch64-apple-darwin        needs the macOS SDK: not buildable from Linux
-#   macos-x86_64    x86_64-apple-darwin         (zig does not ship the frameworks); built on a Mac
+#   macos-x86_64    x86_64-apple-darwin         (zig does not ship the frameworks); built on a Mac, or by .github/workflows/macos.yml
 #                                               with `cargo build`, or here if SDKROOT names an SDK
 #
 # Tools to install once:
