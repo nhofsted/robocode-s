@@ -49,6 +49,10 @@ sudo dnf install robocode-s`;
 				winget: <code>winget install NickHofstede.robocode-s</code> once it's accepted (submitted to
 				<a href="https://github.com/microsoft/winget-pkgs/pull/459630">winget-pkgs</a>, in review).
 			</p>
+			<p class="warn">
+				<strong>Unsigned.</strong> The installer and the programs are not code-signed, so SmartScreen
+				says "Windows protected your PC": choose "More info", then "Run anyway".
+			</p>
 		</section>
 
 		<section class="panel">
@@ -81,6 +85,12 @@ sudo dnf install robocode-s`;
 				<code>.tar.gz</code> unpacks anywhere; run <code>robocode-s-gui</code> or
 				<code>robocode-s</code> from it.
 			</p>
+			<p class="warn">
+				<strong>Unsigned.</strong> The programs are not code-signed. Linux doesn't warn, but a
+				downloaded <code>.deb</code>, <code>.rpm</code> or <code>.tar.gz</code> isn't
+				signature-checked: use the repositories above (signed), or check the file against
+				<a href={SHA256SUMS_URL}>SHA256SUMS</a>.
+			</p>
 		</section>
 
 		<section class="panel">
@@ -88,16 +98,17 @@ sudo dnf install robocode-s`;
 			<p>No macOS build yet. Build it from source: see
 				<a href={resolve('/docs/getting-started#or-build-robocode-s-from-source')}>Getting started</a>.
 				Homebrew follows once there is a build.</p>
+			<p class="warn">
+				<strong>Unsigned.</strong> The app is not signed or notarized, so Gatekeeper refuses it after
+				a download: right-click it and choose Open, or "Open Anyway" in System Settings, Privacy &amp;
+				Security.
+			</p>
 		</section>
 	</div>
 
 	<section class="notes">
 		<h2>Before you run it</h2>
 		<ul>
-			<li>
-				<strong>Unsigned.</strong> The files are not code-signed. Windows SmartScreen says
-				"Windows protected your PC": choose "More info", then "Run anyway".
-			</li>
 			<li>
 				<strong>First run downloads Java.</strong> The robots' Java runtime (about 50 MB) is
 				fetched on first use into your user data folder, not into the installation.
@@ -128,11 +139,11 @@ sudo dnf install robocode-s`;
 		color: var(--text-2);
 	}
 	.cards {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+		display: flex;
+		flex-direction: column;
 		gap: 1rem;
+		max-width: 48rem;
 		margin-top: 1.5rem;
-		align-items: start;
 	}
 	.panel {
 		padding: 0.2rem 1.3rem 1.2rem;
@@ -144,6 +155,13 @@ sudo dnf install robocode-s`;
 	}
 	.req {
 		color: var(--muted);
+	}
+	.warn {
+		margin-top: 1rem;
+		padding: 0.6rem 0.8rem;
+		border-left: 3px solid var(--amber);
+		background: var(--panel-2);
+		border-radius: var(--radius);
 	}
 	.size {
 		color: var(--muted);
