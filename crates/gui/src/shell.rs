@@ -57,7 +57,7 @@ impl Tab {
     /// Why a tab can't be opened yet.
     fn disabled(self) -> Option<&'static str> {
         match self {
-            Tab::Rumble => Some("Coming with the rumble client (M5)"),
+            Tab::Rumble => Some("Coming with the rumble client (M4)"),
             _ => None,
         }
     }

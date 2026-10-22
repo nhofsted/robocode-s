@@ -38,7 +38,7 @@ Nobody watching a replay can see bit-exactness. Exactness matters for verificati
 
 - Measured on the oracle corpus (`replay-size`): **3.46 bytes per turn** overall; top 1v1 bots 3.3–3.8. That is about 3.5 KB for a 900-turn round and 20 KB for a 6,000-turn BeepBoop vs DrussGT round, **10–11× smaller** than lossless intents. Top 10-bot melee: 8 bytes per turn.
 - Most of what remains is real decisions: where the gun aims (GF guns re-aim every turn), speed changes and turns. Coarser angles save less than a bit per halving.
-- The browser viewer doesn't need the engine. M5b becomes a canvas player for tracks. Scrubbing decodes the round once and then jumps between its frames.
+- The browser viewer doesn't need the engine. M6 (then M5b) becomes a canvas player for tracks. Scrubbing decodes the round once and then jumps between its frames.
 - A rumble replay can't be re-simulated or shown with debug paint. To debug, authors reproduce the battle locally from its seed (exact) and record it with the desktop GUI.
 - The desktop GUI's Replay Battle plays tracks too, beside its full recordings: it tells them apart by the first byte (gzip's `1f` for a recording, the version for a track), so a version must never be `0x1f`. No extra magic number is needed.
 - Version 2 stores the engine version after the version byte, as a LEB128 integer, before the coded stream. Version 1 tracks still decode, with engine version 0 (unknown).

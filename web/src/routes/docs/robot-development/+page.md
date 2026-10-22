@@ -3,7 +3,7 @@ title: Developing a robot
 description: How to set up, test, debug and release a Robocode robot with robocode-s, from the first build to the rumble.
 ---
 
-This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages (milestone M4) are not started and will get their own sections.
+This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages (Python in milestone M5; .NET, Rust, C/C++ and Kotlin in M8) are not started and will get their own sections.
 
 > **Status:** running, testing and debugging battles works today from the command line and the GUI (see [Getting started](/docs/getting-started)). The parts marked *planned* depend on the rumble (M5) or on tools still to come.
 
@@ -98,7 +98,7 @@ One caveat: debugger features that run your code (watch expressions, `toString()
 
 **Replay what happened.** `robocode-s replay FILE` (or the GUI's Watch Battle) re-runs a recording turn for turn, with the robots' output and debug painting.
 
-**Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. Replays in the browser (M5b) show what happened; a local re-run under your debugger shows why.
+**Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. Replays in the browser (M6) show what happened; a local re-run under your debugger shows why.
 
 ## Deterministic mode
 
@@ -131,7 +131,7 @@ The rumble identifies a robot as `classname version` (here `yourinitials.Kestrel
 
 ## Release it to the rumble
 
-> **Status:** planned with the rumble (M5). See [The rumble](/docs/rumble) for how it will work.
+> **Status:** planned with the rumble (M4). See [The rumble](/docs/rumble) for how it will work.
 
 1. **Sign in with GitHub** on this site and submit your jar, or a URL the rumble mirrors it from. Choose the divisions to enter.
 2. **Static checks** run on upload: jar structure, the properties file, the robot class, codesize.
