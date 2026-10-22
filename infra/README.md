@@ -5,7 +5,7 @@ AWS CDK (TypeScript) for the rumble (design §12, ADR 0007), in its own AWS acco
 | Stack | Region | Contents |
 |---|---|---|
 | `RobocodeS-Cert` | us-east-1 | ACM certificate for `rumble.planethofstede.be` (CloudFront needs us-east-1) |
-| `RobocodeS-Site` | eu-west-1 | S3 bucket, CloudFront distribution, the page-request function, the site and the sample data |
+| `RobocodeS-Site` | eu-west-1 | S3 bucket, CloudFront distribution, the page-request function, the site and the sample data; the packages bucket (`packages/*`: the apt and dnf repositories, filled by `tools/release/repo.py`, not by CDK) |
 
 The account itself (member account, Identity Center access, guardrail SCP, budget, CDK bootstrap) is set up once by [`account/setup.sh`](account/setup.sh).
 
@@ -39,3 +39,7 @@ The `planethofstede.be` zone stays in the management account (ADR 0016), so two 
 ## Caching
 
 CloudFront follows the objects' `Cache-Control`: hashed assets under `_app/immutable/` for a year (kept across deploys), pages for 5 minutes, data files for an hour. Every deploy invalidates `/*`. Unknown paths get `200.html` with status 404, so the site shows its error page and data requests keep their 404.
+
+## Package repositories
+
+`https://rumble.planethofstede.be/packages/` is a second bucket (`PackagesBucketName` output; kept when the stack is deleted; versioned) behind a `packages/*` behavior of the same distribution: no new DNS record, no new certificate. The behavior has no page-request function (apt's `InRelease` has no extension) and no compression. `tools/release/repo.py upload` (design §6.9) puts the objects under the `packages/` prefix and reads `PackagesBucketName` and `DistributionId` from this stack's outputs. The first `pnpm deploy` after this change adds the bucket and the behavior; the repositories stay empty until the owner runs `release.sh publish`.

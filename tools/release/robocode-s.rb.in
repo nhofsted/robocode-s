@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: EPL-2.0
 #
-# Homebrew cask template for robocode-s (not published anywhere): `release.sh cask VERSION`
+# Homebrew cask template for robocode-s: `release.sh cask VERSION`
 # fills in the version and the checksums of target/release-dist/VERSION/SHA256SUMS. It
 # belongs in a tap of its own (a repository homebrew-robocode-s with Casks/robocode-s.rb), after
 # the GitHub release v@VERSION@ exists: `brew install --cask nhofsted/robocode-s/robocode-s`.

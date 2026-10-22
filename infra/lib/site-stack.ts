@@ -3,7 +3,7 @@
 // writes data/v1/ into the bucket. Until then the bucket holds the synthetic sample data.
 
 import { fileURLToPath } from 'node:url';
-import { CfnOutput, Duration, Size, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, Duration, RemovalPolicy, Size, Stack, type StackProps } from 'aws-cdk-lib';
 import type { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
 	CachePolicy,
@@ -49,6 +49,18 @@ export class SiteStack extends Stack {
 			code: FunctionCode.fromFile({ filePath: repoPath('infra/lib/page-requests.js') })
 		});
 
+		// The apt and dnf repositories (design §6.9), under /packages/ of the same domain: no new
+		// DNS record or certificate. tools/release/repo.py uploads into packages/ of this bucket.
+		// Not deployed from CDK: the packages and their signed metadata come from the owner's machine.
+		const packagesBucket = new Bucket(this, 'PackagesBucket', {
+			blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+			encryption: BucketEncryption.S3_MANAGED,
+			enforceSSL: true,
+			removalPolicy: RemovalPolicy.RETAIN,
+			versioned: true,
+			lifecycleRules: [{ noncurrentVersionExpiration: Duration.days(30) }]
+		});
+
 		// Caching follows the objects' Cache-Control, set per deployment below.
 		const distribution = new Distribution(this, 'Distribution', {
 			comment: 'robocode-s site',
@@ -65,6 +77,18 @@ export class SiteStack extends Stack {
 				functionAssociations: [
 					{ function: pageRequests, eventType: FunctionEventType.VIEWER_REQUEST }
 				]
+			},
+			additionalBehaviors: {
+				// No page-request function: apt's `InRelease` and the like have no extension and must
+				// not become `.html`. Caching follows the objects' Cache-Control (index files 5 minutes,
+				// packages immutable); no compression, the .gz and .deb files are already compressed.
+				'packages/*': {
+					origin: S3BucketOrigin.withOriginAccessControl(packagesBucket),
+					viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+					cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+					responseHeadersPolicy: ResponseHeadersPolicy.SECURITY_HEADERS,
+					compress: false
+				}
 			},
 			// S3 answers 403 for missing objects (no list permission). Unknown pages render the
 			// site's error page from 200.html; the status stays 404, which the data loader expects.
@@ -114,5 +138,13 @@ export class SiteStack extends Stack {
 			description: `CNAME target for ${props.domain}`
 		});
 		new CfnOutput(this, 'BucketName', { value: bucket.bucketName });
+		new CfnOutput(this, 'PackagesBucketName', {
+			value: packagesBucket.bucketName,
+			description: 'tools/release/repo.py upload: s3://<this>/packages/'
+		});
+		new CfnOutput(this, 'DistributionId', {
+			value: distribution.distributionId,
+			description: 'tools/release/repo.py upload: the invalidation'
+		});
 	}
 }

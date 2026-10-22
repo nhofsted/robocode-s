@@ -7,6 +7,7 @@
 #   tools/release/release.sh smoke ARCHIVE.tar.gz | PACKAGE.deb | PACKAGE.rpm | SETUP.exe
 #   tools/release/release.sh cask VERSION
 #   tools/release/release.sh upload VERSION [--publish]
+#   tools/release/release.sh publish VERSION [--dry-run]
 #
 # build   runs the checks (cargo fmt, clippy -D warnings for Linux and Windows,
 #         cargo test, gradle build), builds the release binaries of every target
@@ -33,6 +34,12 @@
 # upload  creates the GitHub release vVERSION (a draft unless --publish) from
 #         target/release-dist/<version>/ with `gh release create`. Nothing else
 #         in this script publishes anything. The commit must be pushed.
+# publish walks through every publication of a release, in order, and asks y/N before each:
+#         1. the GitHub release (upload --publish)   2. the apt and dnf repositories (repo.py:
+#         build with the signing key, upload to S3, invalidate CloudFront)   3. the winget pull
+#         request (winget.py --submit)   4. the Homebrew tap (tap.sh). Anything but y skips the
+#         step. --dry-run shows the steps and what each would run, and runs none of them.
+#         Needs: gh signed in, ROBOCODES_GPG_KEY and AWS_PROFILE (default robocode-s) for step 2.
 #
 # Targets (platform names in the archives):
 #   linux-x86_64    x86_64-unknown-linux-gnu    cargo-zigbuild + zig: glibc 2.31 baseline
@@ -431,7 +438,7 @@ cmd_smoke() {
 # Prints the Homebrew cask (tools/release/robocode-s.rb.in) for the macOS packages of VERSION.
 cmd_cask() {
   local version="${1:?VERSION}" dir sum_a sum_x
-  dir="$ROOT/target/release-dist/$version"
+  dir="${ROBOCODES_DIST_ROOT:-$ROOT/target/release-dist}/$version"
   sum_a="$(sed -n "s/^\([0-9a-f]*\)  robocode-s-$version-macos-aarch64.app.zip\$/\1/p" "$dir/SHA256SUMS")"
   sum_x="$(sed -n "s/^\([0-9a-f]*\)  robocode-s-$version-macos-x86_64.app.zip\$/\1/p" "$dir/SHA256SUMS")"
   [ -n "$sum_a$sum_x" ] || die "no macOS .app.zip in $dir/SHA256SUMS (they are built on a Mac, or with SDKROOT set)"
@@ -443,7 +450,7 @@ cmd_upload() {
   local version="${1:?VERSION}"; shift
   local draft=--draft
   [ "${1:-}" = --publish ] && draft=""
-  local dir="$ROOT/target/release-dist/$version"
+  local dir="${ROBOCODES_DIST_ROOT:-$ROOT/target/release-dist}/$version"
   [ -f "$dir/SHA256SUMS" ] || die "no $dir/SHA256SUMS: run build --version $version first"
   (cd "$dir" && sha256sum --check --quiet SHA256SUMS) || die "the archives don't match SHA256SUMS"
   [ -z "$(git status --porcelain)" ] || die "uncommitted changes"
@@ -454,7 +461,48 @@ cmd_upload() {
     --title "robocode-s $version" --generate-notes $draft "${files[@]}"
 }
 
+confirm() {
+  local ans
+  read -r -p "$1 [y/N] " ans || ans=n
+  [ "$ans" = y ] || [ "$ans" = Y ]
+}
+
+cmd_publish() {
+  local version="${1:?VERSION}" dry=0 tools="$ROOT/tools/release"
+  [ "${2:-}" = --dry-run ] && dry=1
+  local n=0 names=("GitHub release v$version (public, with all files)"
+    "apt and dnf repositories on https://rumble.planethofstede.be/packages/ (signed with ROBOCODES_GPG_KEY)"
+    "winget pull request to microsoft/winget-pkgs (NickHofstede.robocode-s $version)"
+    "Homebrew tap nhofsted/homebrew-robocode-s (cask $version)")
+  step() {
+    n=$((n + 1))
+    local title="${names[$((n - 1))]}"; shift
+    echo; echo "== Step $n of 4: $title"
+    if [ $dry = 1 ]; then
+      echo "   would run: $*"
+      return 0
+    fi
+    if confirm "Publish step $n (${title%% (*})?"; then "$@"; else echo "   skipped"; fi
+  }
+  if [ $dry = 1 ]; then
+    echo "DRY RUN: nothing is run or sent."
+    step upload "$0" upload "$version" --publish
+    step repo "$tools/repo.py" build "$version" --pull '&&' "$tools/repo.py" upload --for-real
+    step winget "$tools/winget.py" "$version" --submit --for-real
+    step tap "$tools/tap.sh" "$version" --for-real
+    echo; echo "The commands each step runs, printed by the tools themselves:"
+    "$tools/repo.py" upload || true
+    return 0
+  fi
+  step upload "$0" upload "$version" --publish
+  step_repo() { python3 -I "$tools/repo.py" build "$version" --pull && python3 -I "$tools/repo.py" upload && confirm "Upload for real?" && python3 -I "$tools/repo.py" upload --for-real; }
+  step repo step_repo
+  step winget python3 -I "$tools/winget.py" "$version" --submit --for-real
+  step tap "$tools/tap.sh" "$version" --for-real
+}
+
 case "${1:-}" in
+  publish) shift; cmd_publish "$@" ;;
   build) shift; cmd_build "$@" ;;
   smoke) shift; cmd_smoke "$@" ;;
   cask) shift; cmd_cask "$@" ;;
