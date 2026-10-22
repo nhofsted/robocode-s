@@ -12,6 +12,6 @@ robocode-s is a reimplementation of [Robocode](https://robocode.sourceforge.io/)
 - **[The rumble](/docs/rumble)**: divisions, weight classes, how scores are computed, and how battles are run and checked.
 - **[Community and links](/docs/community)**: the RoboWiki, LiteRumble, the Google Group, Facebook and Reddit: where the Robocode community learns, competes and talks.
 
-> **Status:** robocode-s is in development. Version 0.1.0 is out for Windows and Linux ([download](/download)); on macOS you build it from source. Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
+> **Status:** robocode-s is in development. Version 0.1.0 is out for Windows, Linux and macOS ([download](/download)). Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
 
 Building robocode-s itself and the engine internals are documented in the repository: the [engine specification](https://github.com/nhofsted/robocode-s/blob/main/docs/engine-spec.md) and the [architecture decision records](https://github.com/nhofsted/robocode-s/blob/main/docs/adr/README.md).

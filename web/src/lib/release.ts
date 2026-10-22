@@ -32,6 +32,19 @@ export const LINUX = {
 	]
 };
 
+export const MACOS = {
+	aarch64: [
+		file('macos-aarch64.dmg', 17_842_344, 'Disk image (.dmg)'),
+		file('macos-aarch64.app.zip', 16_680_144, 'App (.app.zip)'),
+		file('macos-aarch64.tar.gz', 16_615_509, 'Archive (.tar.gz)')
+	],
+	x86_64: [
+		file('macos-x86_64.dmg', 18_507_665, 'Disk image (.dmg)'),
+		file('macos-x86_64.app.zip', 17_251_465, 'App (.app.zip)'),
+		file('macos-x86_64.tar.gz', 17_178_436, 'Archive (.tar.gz)')
+	]
+};
+
 export const SHA256SUMS_URL = `${DOWNLOAD_BASE}/SHA256SUMS`;
 
 export const url = (a: Asset) => `${DOWNLOAD_BASE}/${a.name}`;

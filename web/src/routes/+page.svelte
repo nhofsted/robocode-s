@@ -90,9 +90,8 @@
 			robocode-s {VERSION} is out. Classic Java robots, the samples and real RoboRumble bots
 			alike, fight identically to classic: headless from the command line, or in the desktop
 			GUI with debug painting, recordings and replays. Robots run sandboxed, locally or on
-			other machines, and battles are deterministic by default. Download it for Windows and Linux
-			from the <a href={resolve('/download')}>download page</a>; on macOS you build it from
-			source for now. Follow along on <a href={REPO_URL}>GitHub</a>.
+			other machines, and battles are deterministic by default. Download it for Windows, Linux
+			and macOS from the <a href={resolve('/download')}>download page</a>. Follow along on <a href={REPO_URL}>GitHub</a>.
 		</p>
 		<ol class="milestones">
 			{#each milestones as m (m.id)}

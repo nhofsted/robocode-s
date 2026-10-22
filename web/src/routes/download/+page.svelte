@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { REPO_URL } from '#lib/site.ts';
-	import { VERSION, RELEASE_URL, WINDOWS, LINUX, SHA256SUMS_URL, url, mb } from '#lib/release.ts';
+	import { VERSION, RELEASE_URL, WINDOWS, LINUX, MACOS, SHA256SUMS_URL, url, mb } from '#lib/release.ts';
 
 	const PKG = 'https://rumble.planethofstede.be/packages';
 	const apt = `sudo install -d -m 0755 /etc/apt/keyrings
@@ -16,14 +16,14 @@ sudo dnf install robocode-s`;
 	<title>Download · robocode-s</title>
 	<meta
 		name="description"
-		content="Download robocode-s {VERSION} for Windows and Linux, or install it from the apt and dnf repositories."
+		content="Download robocode-s {VERSION} for Windows, Linux and macOS, or install it from the apt and dnf repositories."
 	/>
 </svelte:head>
 
 <div class="container page">
 	<h1>Download robocode-s</h1>
 	<p class="lead">
-		Version {VERSION}, for Windows and Linux. <a href={RELEASE_URL}>Release notes</a> ·
+		Version {VERSION}, for Windows, Linux and macOS. <a href={RELEASE_URL}>Release notes</a> ·
 		<a href={SHA256SUMS_URL}>SHA256SUMS</a>. New here? Start with
 		<a href={resolve('/docs/getting-started')}>Getting started</a>.
 	</p>
@@ -95,13 +95,40 @@ sudo dnf install robocode-s`;
 
 		<section class="panel">
 			<h2>macOS</h2>
-			<p>No macOS build yet. Build it from source: see
-				<a href={resolve('/docs/getting-started#or-build-robocode-s-from-source')}>Getting started</a>.
-				Homebrew follows once there is a build.</p>
+			<p class="req">Apple Silicon (arm64) or Intel (x86-64).</p>
+			<p>
+				<a class="button" href={url(MACOS.aarch64[0])}>Download for Apple Silicon</a>
+				<span class="size mono">{mb(MACOS.aarch64[0].size)}</span>
+			</p>
+			<p>
+				<a class="button" href={url(MACOS.x86_64[0])}>Download for Intel</a>
+				<span class="size mono">{mb(MACOS.x86_64[0].size)}</span>
+			</p>
+			<p>
+				Open the <code>.dmg</code> and drag <code>robocode-s.app</code> to Applications. The command
+				line is <code>robocode-s.app/Contents/MacOS/robocode-s</code>.
+			</p>
+			<table>
+				<thead><tr><th>File</th><th>Apple Silicon</th><th>Intel</th></tr></thead>
+				<tbody>
+					{#each MACOS.aarch64 as a, i (a.name)}
+						{@const b = MACOS.x86_64[i]}
+						<tr>
+							<td class="mono">{a.label}</td>
+							<td><a href={url(a)}>download</a> <span class="size mono">{mb(a.size)}</span></td>
+							<td><a href={url(b)}>download</a> <span class="size mono">{mb(b.size)}</span></td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+			<p>
+				A double-clicked recording opens the window but not the recording yet: open it from the
+				window (Open, or drop the file on it).
+			</p>
 			<p class="warn">
 				<strong>Unsigned.</strong> The app is not signed or notarized, so Gatekeeper refuses it after
 				a download: right-click it and choose Open, or "Open Anyway" in System Settings, Privacy &amp;
-				Security.
+				Security. Or, once: <code>xattr -dr com.apple.quarantine /Applications/robocode-s.app</code>.
 			</p>
 		</section>
 	</div>
