@@ -153,7 +153,7 @@ impl GameType {
 }
 
 /// The most robot JVMs kept started between battles.
-const MAX_WARM_HOSTS: usize = 10;
+const MAX_WARM_HOSTS: usize = 2;
 
 /// `--battle`: robots and teams separated by commas.
 pub fn parse_robots(text: &str) -> Vec<String> {
@@ -797,7 +797,12 @@ impl App {
         let warm = robots.len().min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
             let warm = pool.as_ref().map(|pool| (pool, warm));
-            let _ = tx.send(prepare_with(&env, &robots, config, 512, warm));
+            // Cancelled meanwhile: nobody fights the battle, which leaves its folder.
+            if let Err(mpsc::SendError(Ok((_, battle)))) =
+                tx.send(prepare_with(&env, &robots, config, 512, warm))
+            {
+                battle.remove_dir();
+            }
             repaint.request_repaint();
         });
         self.local.starting = Some(Starting {
@@ -1579,9 +1584,9 @@ impl App {
                     }
                     sandbox_row(ui, &mut app.settings);
                     ui.label("Warm robots").on_hover_text(
-                        "Keeps the JVMs of the next battle's robots started while you watch \
-                         and between battles, so that it starts sooner (about half a second \
-                         less). Each idle JVM takes about 90 MB.",
+                        "Keeps the JVMs of up to two of the next battle's robots started \
+                         while you watch and between battles, so that it starts sooner \
+                         (about half a second less). Each idle JVM takes about 90 MB.",
                     );
                     ui.checkbox(&mut app.settings.warm_hosts, "Keep robot JVMs started");
                     ui.end_row();

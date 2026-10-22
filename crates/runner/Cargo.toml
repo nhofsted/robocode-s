@@ -20,8 +20,9 @@ robocode-s-engine.workspace = true
 robocode-s-protocol.workspace = true
 robocode-s-server.workspace = true
 
-# The Linux sandbox (`src/sandbox/linux.rs`): seccomp, Landlock and rlimits.
-[target.'cfg(target_os = "linux")'.dependencies]
+# The Linux sandbox (`src/sandbox/linux.rs`): seccomp, Landlock and rlimits; whether a
+# process runs (`src/housekeeping.rs`).
+[target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
 
 # The Windows sandbox (`src/sandbox/windows.rs`): an AppContainer, ACLs and a Job Object.

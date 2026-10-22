@@ -317,16 +317,20 @@ public final class RobotHost {
      * Gives classic's repository the robots: jars are copied into {@code home/robots},
      * class folders (an IDE's output) become classic's development paths, read in place.
      * The robots directory starts empty, so jars and the robot database of an earlier
-     * listing in the same home are not found again.
+     * listing in the same home are not found again; but for {@code robots/.data}, the
+     * robot's data files, which the runner puts there before the robot starts.
      *
      * @return the jars by the file name of their copy
      */
     private static Map<String, Path> copyJars(List<Path> jars, Path home) throws IOException {
         Path robots = home.resolve("robots");
         if (Files.isDirectory(robots)) {
+            Path data = robots.resolve(".data");
             try (var paths = Files.walk(robots)) {
                 for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) {
-                    Files.delete(p);
+                    if (!p.equals(robots) && !p.startsWith(data)) {
+                        Files.delete(p);
+                    }
                 }
             }
         }

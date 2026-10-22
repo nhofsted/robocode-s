@@ -7,6 +7,7 @@
 use crate::{RACE, classic_race, compare_snapshot, load, rounds, rules, setups, states};
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
+use robocode_s_runner::housekeeping::keep_battles;
 use robocode_s_runner::local::{LocalBattle, LocalRobot, lookup_name, run_local_battle};
 use robocode_s_runner::pool::Pool;
 use robocode_s_server::ServerConfig;
@@ -80,6 +81,8 @@ pub fn live_battle(
         robots,
         jars: jars.to_vec(),
         dir: work.join(&battle_name),
+        // Battles that must repeat the oracle's start with no data files from earlier ones.
+        data: None,
         memory_mb: 512,
         pool: pool.cloned(),
     };
@@ -98,8 +101,9 @@ pub fn live_battle(
             stderr.push_str(&format!("\n--- robot {i} ({}) stderr:\n{tail}", names[i]));
         }
     }
-    // Each robot's console output, for diagnosis: `<work>/<battle>/output-<i>.txt`.
-    for i in 0..names.len() {
+    // Each robot's console output, for diagnosis: `<work>/<battle>/output-<i>.txt`, in a
+    // battle's folder that stays (`ROBOCODES_KEEP_BATTLES`).
+    for i in (0..names.len()).filter(|_| keep_battles()) {
         let mut text = String::new();
         for s in &snapshots {
             if let Some(r) = s.robots.get(i).filter(|r| !r.output.is_empty()) {

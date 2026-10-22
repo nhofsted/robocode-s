@@ -16,6 +16,7 @@
 //! GUI, a rumble loop, a runner agent), or while something else is waited for (the CLI
 //! describes the robots while their hosts start).
 
+use crate::housekeeping::copy_data_in;
 use crate::{JavaHost, RobotLaunch, RobotProcess, Sandbox, Transport, launch};
 use robocode_s_protocol::v1;
 use robocode_s_protocol::write_message;
@@ -210,6 +211,7 @@ impl Pool {
             seed: 0,
             deterministic: key.deterministic,
             memory_mb: key.memory_mb,
+            data: None,
         };
         Ok(Warm {
             process: launch(host, &spec)?,
@@ -239,7 +241,7 @@ impl Drop for Pool {
         for warm in slots.into_values().flat_map(|s| s.ready) {
             warm.discard();
         }
-        // Not a directory with homes of hosts that played: those stay, as battles' do.
+        // The homes of hosts that played go when their robots end; this one only if they have.
         let _ = std::fs::remove_dir(&self.dir);
     }
 }
@@ -257,8 +259,15 @@ impl Warm {
         let _ = std::fs::remove_dir_all(&self.home);
     }
 
-    /// Gives the host its robot: the jars go into its home, then the assignment.
+    /// Gives the host its robot: its data files and the jars go into its home, then the
+    /// assignment. The home goes with the process, and the data files are taken back.
     fn assign(mut self, spec: &RobotLaunch) -> io::Result<RobotProcess> {
+        if let Some(data) = &spec.data {
+            let had = copy_data_in(data, &self.home)?;
+            if let Some(cleanup) = self.process.cleanup.as_mut() {
+                cleanup.data = Some((data.clone(), had));
+            }
+        }
         let staged = self.home.join("jars");
         std::fs::create_dir_all(&staged)?;
         let mut jars = Vec::new();
@@ -367,6 +376,7 @@ mod tests {
             seed: 1,
             deterministic: false,
             memory_mb: 256,
+            data: None,
         };
         assert_eq!(pool.idle(), 0);
         assert!(pool.take(&h, 256, false).is_none());
@@ -421,6 +431,7 @@ mod tests {
             seed: 0,
             deterministic: true,
             memory_mb: 256,
+            data: None,
         };
         let args = crate::jvm_args(&h, &spec);
         let tail = &args[args.iter().position(|a| a == "--stdio").unwrap()..];

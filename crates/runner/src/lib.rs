@@ -4,6 +4,7 @@
 //! host (`clients/java-compat`), in a [`Sandbox`] (ADR 0019).
 
 pub mod agent;
+pub mod housekeeping;
 pub mod jre;
 pub mod local;
 pub mod pool;
@@ -68,6 +69,10 @@ pub struct RobotLaunch {
     /// Deterministic mode: StrictMath semantics and seeded randomness (ADR 0003, 0009).
     pub deterministic: bool,
     pub memory_mb: u32,
+    /// The robot's persistent data folder ([`housekeeping::robot_data_dir`]): its files
+    /// are put in the home before the robot starts and taken back when it has ended
+    /// (design §6.5). `None`: the robot starts with none and they are not kept.
+    pub data: Option<PathBuf>,
 }
 
 /// The environment variable the robot host reads its token from.
@@ -131,6 +136,15 @@ pub struct RobotProcess {
     child: sandbox::Child,
     pipes: Option<(RobotStdout, RobotStdin)>,
     stderr: Arc<Mutex<String>>,
+    /// What to do once it has ended, once.
+    cleanup: Option<Cleanup>,
+}
+
+/// What follows a robot's end: its data files are taken from its home, which goes.
+struct Cleanup {
+    home: PathBuf,
+    /// The persistent data folder, and whether the robot was given files from it.
+    data: Option<(PathBuf, bool)>,
 }
 
 /// What a robot writes: its stdout.
@@ -151,6 +165,10 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         ));
     }
     std::fs::create_dir_all(&launch.home)?;
+    let had_data = match &launch.data {
+        Some(data) => housekeeping::copy_data_in(data, &launch.home)?,
+        None => false,
+    };
     let host = JavaHost {
         java: absolute_if_path(&host.java)?,
         lib_dir: std::path::absolute(&host.lib_dir)?,
@@ -211,6 +229,10 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         child,
         pipes,
         stderr,
+        cleanup: Some(Cleanup {
+            home: launch.home.clone(),
+            data: launch.data.clone().map(|d| (d, had_data)),
+        }),
     })
 }
 
@@ -232,6 +254,27 @@ impl RobotProcess {
         self.child.kill()
     }
 
+    /// Ends the robot if it still runs, keeps its data files and removes its home (unless
+    /// `ROBOCODES_KEEP_BATTLES` says to keep it). Done once; dropping the process does it.
+    pub fn finish(&mut self) {
+        if let Ok(None) = self.child.try_wait() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        let Some(cleanup) = self.cleanup.take() else {
+            return;
+        };
+        if let Some((data, had)) = &cleanup.data
+            && let Err(e) = housekeeping::copy_data_out(&cleanup.home, data, *had)
+        {
+            robocode_s_server::log_perf(format_args!(
+                "robot data files in {}: {e}",
+                data.display()
+            ));
+        }
+        housekeeping::remove_home(&cleanup.home);
+    }
+
     /// The last part of the robot's error output.
     pub fn stderr_tail(&self) -> String {
         self.stderr.lock().unwrap().clone()
@@ -240,10 +283,7 @@ impl RobotProcess {
 
 impl Drop for RobotProcess {
     fn drop(&mut self) {
-        if let Ok(None) = self.child.try_wait() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
+        self.finish();
     }
 }
 
@@ -350,6 +390,7 @@ mod tests {
             seed: 42,
             deterministic: true,
             memory_mb: 256,
+            data: None,
         };
         let args = jvm_args(&host, &launch);
         assert!(args.contains(&STRICT_MATH_FLAGS[1].to_string()));

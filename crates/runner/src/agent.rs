@@ -6,6 +6,7 @@
 //! its own to the server, as that robot. After a battle, or when the connection drops,
 //! it connects again. The server's side is [`crate::remote`].
 
+use crate::housekeeping::{remove_stale_runs, robot_data_dir};
 use crate::pool::{Pool, launch_with};
 use crate::remote::{MAX_JAR_SIZE, sha256_hex};
 use crate::{JavaHost, RobotLaunch, RobotProcess, RobotStdin, RobotStdout, Transport};
@@ -42,8 +43,11 @@ pub struct AgentConfig {
     pub pin: Option<Fingerprint>,
     /// Robots at once; 0: no limit.
     pub slots: u32,
-    /// Its jar cache (`jars/<sha256>/<name>`) and robot homes (`battles`).
+    /// Its jar cache (`jars/<sha256>/<name>`), robot homes (`battles`) and the robots'
+    /// data files (`robot-data`, unless `fresh_data`).
     pub dir: PathBuf,
+    /// Robots start with no data files and keep none (`--fresh-data`).
+    pub fresh_data: bool,
 }
 
 /// Starts robots for the agent.
@@ -70,8 +74,8 @@ impl Robot for RobotProcess {
     }
 
     fn kill(&mut self) {
-        let _ = RobotProcess::kill(self);
-        let _ = self.wait();
+        // Its data files are kept and its home goes.
+        self.finish();
     }
 
     fn exit_code(&mut self) -> Option<i32> {
@@ -107,6 +111,8 @@ impl JvmLauncher {
     /// battle, and again after each battle. The server decides the heap and the mode at
     /// each launch, and hosts that don't fit are replaced.
     pub fn new(host: JavaHost, dir: &Path, warm: usize) -> Result<Self, String> {
+        remove_stale_runs(&dir.join("battles"));
+        remove_stale_runs(&dir.join("pool"));
         let (jvm, rules) = crate::local::host_info(&host, &dir.join("describe"))?;
         let platform = format!(
             "{jvm}, {} {}, sandbox {}",
@@ -115,7 +121,7 @@ impl JvmLauncher {
             host.sandbox.report()
         );
         let pool = (warm > 0).then(|| {
-            let pool = Pool::new(dir.join("pool"));
+            let pool = Pool::new(dir.join("pool").join(std::process::id().to_string()));
             pool.warm(&host, USUAL_MEMORY_MB, true, warm);
             Warm {
                 pool,
@@ -457,6 +463,8 @@ impl Battle<'_> {
             seed: launch.battle_seed,
             deterministic: launch.deterministic,
             memory_mb: launch.memory_limit_mb.max(64),
+            data: (!self.config.fresh_data)
+                .then(|| robot_data_dir(&self.config.dir.join("robot-data"), &launch.lookup_name)),
         };
         let mut robot = self
             .launcher
