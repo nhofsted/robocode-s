@@ -1,19 +1,29 @@
 ---
 title: Getting started
-description: What you can do with robocode-s today, building it from source, running battles, and what installing will look like at the first release.
+description: What you can do with robocode-s today: installing, building it from source, and running battles.
 ---
 
-> **Status:** there is no release to download yet; the first one is coming, and the owner decides when. Until then you build robocode-s from source, which works today on Linux, Windows and macOS. Installers and archives are built and tested; this page says how installing will work.
+> **Status:** version 0.1.0 is out for Windows and Linux; macOS is built from source for now.
+
+## Install robocode-s
+
+The [download page](/download) has the Windows installer, the apt and dnf repositories, and the `.deb`, `.rpm` and archive files for Linux x86-64 and arm64. A short version:
+
+- **Windows:** run the setup program. It installs for your user, without administrator rights, with a Start menu entry and an optional `PATH` entry. It is not code-signed: SmartScreen says "Windows protected your PC", so choose "More info", then "Run anyway". There is also a `.zip` to unpack on an NTFS drive.
+- **Debian, Ubuntu, Fedora, RHEL, Rocky:** add the repository (commands on the download page), then `sudo apt install robocode-s` or `sudo dnf install robocode-s`. It puts `robocode-s` and `robocode-s-gui` on your `PATH` and adds an application menu entry.
+- **macOS:** no build yet; build from source, below. Homebrew and winget (`winget install NickHofstede.robocode-s`, once Microsoft accepts it) are not live yet.
+
+All of them contain the same things: the window, the command line, the robot host and the sample robots. The Java runtime (about 50 MB) is fetched on first use into your user data folder, not into the installation. Uninstalling leaves that folder and the GUI's settings; delete them to remove everything.
 
 ## Write a robot
 
 Robots for robocode-s are classic Robocode robots. Everything you write against the classic `robocode.*` API (`Robot`, `AdvancedRobot`, `TeamRobot`, `RateControlRobot`) runs on robocode-s unmodified:
 
-1. Install [classic Robocode 1.11.1](https://robocode.sourceforge.io/) and do its [first-robot tutorial](https://robowiki.net/wiki/Robocode/My_First_Robot), or set up a plain Java project against the `robocode.api` library (see [Developing a robot](/docs/robot-development#set-up-a-project)).
+1. Install [classic Robocode 1.11.1](https://robocode.sourceforge.io/) and do its [first-robot tutorial](https://robowiki.net/wiki/Robocode/My_First_Robot), or set up a project in your IDE ([Using an IDE](/docs/ide)).
 2. Compile it, or package it as a robot jar with classic's packager or your build tool.
 3. Point robocode-s at the jar, or at the folder your IDE compiles into (below).
 
-## Build robocode-s from source
+## Or build robocode-s from source
 
 You need Rust (stable, via [rustup](https://rustup.rs)), a C toolchain and JDK 21:
 
@@ -76,16 +86,5 @@ robocode-s agent --server HOST:7655 --token TOKEN --fingerprint sha256:...
 ```
 
 The agent starts the robots it is given, with its own `--sandbox`, at most `--slots N` at a time, and connects again for the next battle. Agents are the organizer's machines: they are trusted with robot timing, and in classic mode the network's delay adds to a robot's turn. Agents run jars only, not class folders, and the GUI's Start Battle doesn't use them yet. `robocode-s agent --help` has the options.
-
-## What installing will look like
-
-The first release will have, per platform, an installer or package and an archive on the [releases page](https://github.com/nhofsted/robocode-s/releases). Package-manager channels (apt and dnf repositories, winget, Homebrew) are planned ([#79](https://github.com/nhofsted/robocode-s/issues/79)) but not live. The files are not code-signed for now, so Windows and macOS warn once.
-
-- **Windows:** a setup program that installs for your user, without administrator rights, with a Start menu entry and an optional `PATH` entry. SmartScreen says "Windows protected your PC": choose "More info", then "Run anyway". There is also a `.zip` to unpack on an NTFS drive.
-- **Debian, Ubuntu, Fedora, RHEL:** a `.deb` (`sudo apt install ./robocode-s-<version>-linux-x86_64.deb`) or `.rpm` (`sudo dnf install ./robocode-s-<version>-linux-x86_64.rpm`), for x86-64 and arm64. They put `robocode-s` and `robocode-s-gui` on your `PATH` and add an application menu entry.
-- **macOS:** a zipped `robocode-s.app`. It is not signed or notarized, so Gatekeeper refuses it after a download: right-click it and choose Open, or "Open Anyway" in System Settings, Privacy & Security.
-- **Archives:** `.tar.gz` for Linux and macOS, `.zip` for Windows. Unpack anywhere and run `robocode-s-gui` or `robocode-s` from it.
-
-All of them contain the same things: the window, the command line, the robot host and the sample robots. The Java runtime is fetched on first use into your user data folder, not into the installation. Uninstalling leaves that folder and the GUI's settings; delete them to remove everything.
 
 Not built yet: the rumble client, for volunteering battles to [the rumble](/docs/rumble), and robots in other languages.

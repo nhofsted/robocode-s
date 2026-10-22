@@ -340,6 +340,7 @@ cmd_build() {
   [ ${#made[@]} -gt 0 ] || die "nothing was built"
   (cd "$out" && sha256sum -- * > SHA256SUMS)
   say "done: $out"
+  say "reminder: update VERSION and the file sizes in web/src/lib/release.ts (the download page)"
   ls -l "$out" >&2
   [ ${#skipped[@]} -eq 0 ] || echo "skipped: ${skipped[*]}" >&2
 }

@@ -10,6 +10,7 @@
 	let { children }: LayoutProps = $props();
 
 	const nav = [
+		{ href: '/download', label: 'Download' },
 		{ href: '/rankings', label: 'Rankings' },
 		{ href: '/docs', label: 'Docs' }
 	] as const;
