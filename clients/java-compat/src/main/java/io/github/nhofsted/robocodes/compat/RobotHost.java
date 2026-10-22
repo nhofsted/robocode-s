@@ -146,7 +146,7 @@ public final class RobotHost {
         copyJars(jars, home);
 
         ClientMessage.newBuilder().setHello(Hello.newBuilder()
-                .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(0))
+                .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(1))
                 .setRole(Role.ROLE_ROBOT)
                 .setToken(token)).build().writeDelimitedTo(out);
         out.flush();
@@ -187,6 +187,8 @@ public final class RobotHost {
             // What the robots run on: this JVM, as robots get the same one.
             out.append("platform\tJVM ").append(field(System.getProperty("java.version")))
                     .append('\n');
+            // And the deterministic rules it follows: a runner agent reports them.
+            out.append("rules\t").append(RobotRandomness.rulesVersion()).append('\n');
             for (RobotSpecification spec : engine.getLocalRepository()) {
                 IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
                 // The name classic looks it up by: a development version's is

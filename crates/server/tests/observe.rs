@@ -81,6 +81,7 @@ fn a_remote_observer_with_the_token_watches_the_battle_to_its_results() {
     let observers = Observers {
         listener: observe_listener,
         token: "s3cret".into(),
+        tls: None,
         wait: true,
     };
     let server = thread::spawn(move || {
@@ -97,7 +98,9 @@ fn a_remote_observer_with_the_token_watches_the_battle_to_its_results() {
     ];
 
     // The wrong token, and robots, are turned away.
-    let refused = Watcher::connect(&observe_address, "guess").err().unwrap();
+    let refused = Watcher::connect(&observe_address, "guess", None)
+        .err()
+        .unwrap();
     assert!(refused.contains("wrong observer token"), "{refused}");
     let mut robot = TcpStream::connect(&observe_address).unwrap();
     let hello = v1::ClientMessage {
@@ -116,7 +119,7 @@ fn a_remote_observer_with_the_token_watches_the_battle_to_its_results() {
 
     // The battle waits for its observer, which sees it from the first turn.
     thread::sleep(Duration::from_millis(200));
-    let watcher = Watcher::connect(&observe_address, "s3cret").unwrap();
+    let watcher = Watcher::connect(&observe_address, "s3cret", None).unwrap();
     let (mut info, mut snapshots, mut round_results) = (None, Vec::new(), 0);
     let outcome = watcher
         .run(None, |msg| match msg {
@@ -161,6 +164,7 @@ fn a_remote_observer_that_pauses_and_leaves_does_not_hold_the_battle_up() {
     let observers = Observers {
         listener: observe_listener,
         token: String::new(),
+        tls: None,
         wait: true,
     };
     let server = thread::spawn(move || {
@@ -172,10 +176,10 @@ fn a_remote_observer_that_pauses_and_leaves_does_not_hold_the_battle_up() {
         )
     });
     // The command line's own observer, on the robots' listener, stays to the end.
-    let local = Watcher::connect(&robots_address, "").unwrap();
+    let local = Watcher::connect(&robots_address, "", None).unwrap();
     let local = thread::spawn(move || local.run(None, |_| {}));
     let robot = idle_robot(robots_address, "a");
-    let watcher = Watcher::connect(&observe_address, "").unwrap();
+    let watcher = Watcher::connect(&observe_address, "", None).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = watcher.handle().unwrap();
     let _ = watcher.run(Some(rx), |msg| {
@@ -186,7 +190,7 @@ fn a_remote_observer_that_pauses_and_leaves_does_not_hold_the_battle_up() {
                 control: Some(v1::observer_control::Control::Pause(true)),
             });
             thread::sleep(Duration::from_millis(100));
-            let _ = handle.shutdown(std::net::Shutdown::Both);
+            let _ = handle.shutdown();
         }
     });
     let outcome = server.join().unwrap().unwrap();
@@ -213,6 +217,7 @@ fn a_remote_observer_that_stops_reading_does_not_hold_the_battle_up() {
     let observers = Observers {
         listener: observe_listener,
         token: String::new(),
+        tls: None,
         wait: true,
     };
     let (done, finished) = std::sync::mpsc::channel();
@@ -301,7 +306,7 @@ fn controls_apply_while_no_robot_runs_anymore() {
             vec![entry("a.A", "a"), entry("b.B", "b")],
         )
     });
-    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let watcher = Watcher::connect(&robots_address, "", None).unwrap();
     let robots = [
         stopped_robot(robots_address.clone(), "a"),
         stopped_robot(robots_address, "b"),
@@ -331,7 +336,7 @@ fn controls_apply_while_no_robot_runs_anymore() {
         }
         // At 5 turns a second the round would take minutes: give up.
         if faster.is_some_and(|t| t.elapsed() > Duration::from_secs(10)) {
-            let _ = handle.shutdown(std::net::Shutdown::Both);
+            let _ = handle.shutdown();
         }
     });
     let fast = fast.expect("97 turns within 10 s of the speed going to max");
@@ -365,7 +370,7 @@ fn a_faster_rate_applies_without_waiting_out_the_slow_turn() {
             vec![entry("a.A", "a"), entry("b.B", "b")],
         )
     });
-    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let watcher = Watcher::connect(&robots_address, "", None).unwrap();
     let robots = [
         idle_robot(robots_address.clone(), "a"),
         idle_robot(robots_address, "b"),
@@ -428,7 +433,7 @@ fn controls_apply_after_the_observer_and_robots_were_silent_for_long() {
             vec![entry("a.A", "a"), entry("b.B", "b")],
         )
     });
-    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let watcher = Watcher::connect(&robots_address, "", None).unwrap();
     let robots = [
         idle_robot(robots_address.clone(), "a"),
         idle_robot(robots_address, "b"),
@@ -454,7 +459,7 @@ fn controls_apply_after_the_observer_and_robots_were_silent_for_long() {
                     let _ = tx.send(control(Control::Pause(false)));
                     // Unheard: give up.
                     thread::sleep(Duration::from_secs(20));
-                    let _ = handle.shutdown(std::net::Shutdown::Both);
+                    let _ = handle.shutdown();
                 }));
             }
             50 => {
@@ -496,7 +501,7 @@ fn the_battle_stops_when_its_own_observer_is_gone() {
             vec![entry("a.A", "a"), entry("b.B", "b")],
         )
     });
-    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let watcher = Watcher::connect(&robots_address, "", None).unwrap();
     let robots = [
         idle_robot(robots_address.clone(), "a"),
         idle_robot(robots_address, "b"),
@@ -511,7 +516,7 @@ fn the_battle_stops_when_its_own_observer_is_gone() {
         if let server_message::Msg::TurnSnapshot(s) = msg
             && s.turn == 5
         {
-            let _ = handle.shutdown(std::net::Shutdown::Both);
+            let _ = handle.shutdown();
         }
     });
     assert!(watched.is_err(), "the connection broke");
@@ -547,7 +552,7 @@ fn stopped_by(
             vec![entry("a.A", "a"), entry("b.B", "b")],
         )
     });
-    let watcher = Watcher::connect(&robots_address, "").unwrap();
+    let watcher = Watcher::connect(&robots_address, "", None).unwrap();
     let robots = [
         idle_robot(robots_address.clone(), "a"),
         idle_robot(robots_address, "b"),
@@ -596,4 +601,80 @@ fn a_stop_at_the_end_of_a_round_starts_no_more_than_the_next() {
     });
     assert!(outcome.aborted);
     assert!(outcome.rounds <= 2, "{} rounds", outcome.rounds);
+}
+
+#[test]
+fn observers_from_elsewhere_watch_over_tls_with_the_pinned_certificate() {
+    use robocode_s_server::tls::{Fingerprint, Identity};
+    let dir = std::env::temp_dir().join(format!("robocodes-observe-tls-{}", std::process::id()));
+    let identity = Identity::load_or_create(&dir).unwrap();
+    let pin = identity.fingerprint;
+    let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let robots_address = robots_listener.local_addr().unwrap().to_string();
+    // On loopback, but with TLS, as `--observe PORT --tls` has it.
+    let observe_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let observe_address = observe_listener.local_addr().unwrap().to_string();
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 1,
+            inactivity_time: 20,
+            ..Default::default()
+        },
+        deterministic: true,
+        ..Default::default()
+    };
+    let observers = Observers {
+        listener: observe_listener,
+        token: "s3cret".into(),
+        tls: Some(identity),
+        wait: true,
+    };
+    let server = thread::spawn(move || {
+        run_battle_with(
+            robots_listener,
+            Some(observers),
+            &config,
+            vec![entry("a.A", "a"), entry("b.B", "b")],
+        )
+    });
+    let robots = [
+        idle_robot(robots_address.clone(), "a"),
+        idle_robot(robots_address, "b"),
+    ];
+    let wrong = Watcher::connect(&observe_address, "s3cret", Some(Fingerprint([9; 32])))
+        .err()
+        .unwrap();
+    assert!(wrong.contains("not the pinned"), "{wrong}");
+    let plain = Watcher::connect(&observe_address, "s3cret", None)
+        .err()
+        .unwrap();
+    assert!(plain.contains("if it wants TLS"), "{plain}");
+    let watcher = Watcher::connect(&observe_address, "s3cret", Some(pin)).unwrap();
+    let outcome = watcher.run(None, |_| {}).unwrap();
+    assert_eq!(outcome, server.join().unwrap().unwrap());
+    for r in robots {
+        r.join().unwrap();
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_plain_observers_listener_off_loopback_is_refused() {
+    let Ok(open) = TcpListener::bind("0.0.0.0:0") else {
+        return;
+    };
+    let observers = Observers {
+        listener: open,
+        token: "t".into(),
+        tls: None,
+        wait: false,
+    };
+    let e = run_battle_with(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        Some(observers),
+        &ServerConfig::default(),
+        vec![],
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("needs TLS"), "{e}");
 }

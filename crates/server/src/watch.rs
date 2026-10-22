@@ -2,12 +2,13 @@
 
 //! Watching a battle on a server as an observer, from this process or another machine
 //! (design §10: a remote GUI attached as an observer). The server's side is
-//! [`crate::Observers`].
+//! [`crate::Observers`]; off loopback over TLS ([`crate::net::connect`]).
 
 use crate::BattleOutcome;
+use crate::net::{self, Stream};
+use crate::tls::Fingerprint;
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
@@ -17,31 +18,16 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A connection to a battle as an observer, after the server greeted it.
 pub struct Watcher {
-    stream: TcpStream,
+    stream: Stream,
 }
 
 impl Watcher {
     /// Connects to the battle at `address` (`host:port`) with the observer `token` (empty
-    /// for a server that wants none).
-    pub fn connect(address: &str, token: &str) -> Result<Self, String> {
-        let addresses: Vec<_> = address
-            .to_socket_addrs()
-            .map_err(|e| format!("{address}: {e}"))?
-            .collect();
-        let mut error = format!("{address}: no address");
-        let mut stream = None;
-        for a in addresses {
-            match TcpStream::connect_timeout(&a, CONNECT_TIMEOUT) {
-                Ok(s) => {
-                    stream = Some(s);
-                    break;
-                }
-                Err(e) => error = format!("{address}: {e}"),
-            }
-        }
-        let mut stream = stream.ok_or(error)?;
+    /// for a server that wants none), over TLS when the server's certificate is pinned
+    /// (`pin`) or it isn't on loopback.
+    pub fn connect(address: &str, token: &str, pin: Option<Fingerprint>) -> Result<Self, String> {
+        let mut stream = net::connect(address, pin, CONNECT_TIMEOUT)?;
         let io = |e: std::io::Error| format!("{address}: {e}");
-        stream.set_nodelay(true).map_err(io)?;
         stream.set_read_timeout(Some(CONNECT_TIMEOUT)).map_err(io)?;
         let hello = v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(v1::Hello {
@@ -51,23 +37,32 @@ impl Watcher {
                 ..Default::default()
             })),
         };
+        let plain = !stream.is_tls();
+        // A TLS server answers a plain Hello with an alert, not a message.
+        let wants_tls = |e: String| {
+            if plain {
+                format!("{e} (if it wants TLS, give its certificate's fingerprint)")
+            } else {
+                e
+            }
+        };
         write_message(&mut stream, &hello).map_err(io)?;
         match read_message::<v1::ServerMessage>(&mut stream)
-            .map_err(io)?
+            .map_err(|e| wants_tls(io(e)))?
             .and_then(|m| m.msg)
         {
             Some(server_message::Msg::HelloAck(_)) => {}
             Some(server_message::Msg::Error(e)) => {
                 return Err(format!("{address} refused: {}", e.message));
             }
-            _ => return Err(format!("{address}: not a robocode-s battle")),
+            _ => return Err(wants_tls(format!("{address}: not a robocode-s battle"))),
         }
         stream.set_read_timeout(None).map_err(io)?;
         Ok(Self { stream })
     }
 
     /// A handle that ends the connection when shut down (from another thread).
-    pub fn handle(&self) -> std::io::Result<TcpStream> {
+    pub fn handle(&self) -> std::io::Result<Stream> {
         self.stream.try_clone()
     }
 

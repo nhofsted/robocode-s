@@ -3,24 +3,30 @@
 //! Battle server: robot and observer connections, the lockstep turn loop, turn
 //! deadlines, skipped turns and deterministic mode (design §5, §7; engine-spec §11).
 //!
-//! Threads and blocking TCP: every connection has a reader thread that forwards its
-//! messages to the battle loop, which owns the engine and does all writing.
+//! Threads and blocking TCP (TLS from elsewhere, [`net`]): every connection has a reader
+//! thread that forwards its messages to the battle loop, which owns the engine and does
+//! all writing.
 
+pub mod agents;
 pub mod battle_file;
 pub mod convert;
 pub mod driver;
+pub mod net;
 pub mod recording;
 pub mod results;
+pub mod tls;
 pub mod watch;
 
+use agents::AgentListener;
 use driver::RecordingDriver;
+use net::Stream;
 use recording::Recorder;
 use robocode_s_engine::{Battle, BattleRules, Event};
 use robocode_s_protocol::v1::{self, client_message, recording_entry::Entry, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -142,6 +148,9 @@ pub struct Observers {
     /// The credential observers present in their `Hello`; empty: none (for a loopback
     /// listener only, as the CLI ensures).
     pub token: String,
+    /// TLS with this certificate; `None`: plain, which only a loopback listener may be
+    /// ([`net::check_listener`]).
+    pub tls: Option<tls::Identity>,
     /// The battle starts only once the first observer is here (so that it sees it all).
     pub wait: bool,
 }
@@ -164,7 +173,7 @@ enum Incoming {
         stream: Conn,
     },
     ObserverConnected {
-        stream: TcpStream,
+        stream: Stream,
         /// It came to the [`Observers`] listener.
         remote: bool,
     },
@@ -185,7 +194,7 @@ enum Incoming {
 /// A robot's connection from the battle loop's side: a socket, or the pipes of a process
 /// the runner started (ADR 0019). The battle loop writes; a reader thread has the other half.
 enum Conn {
-    Tcp(TcpStream),
+    Tcp(Stream),
     /// `None` once shut down: dropping the writer closes the robot's stdin.
     Pipe(Option<Box<dyn Write + Send>>),
 }
@@ -195,7 +204,7 @@ impl Conn {
     fn shutdown(&mut self) {
         match self {
             Conn::Tcp(s) => {
-                let _ = s.shutdown(Shutdown::Both);
+                let _ = s.shutdown();
             }
             Conn::Pipe(w) => *w = None,
         }
@@ -294,16 +303,40 @@ pub fn run_battle_piped(
     robots: Vec<RobotEntry>,
     pipes: Vec<RobotPipe>,
 ) -> io::Result<BattleOutcome> {
+    run_battle_remote(listener, observers, config, robots, pipes, None)
+}
+
+/// [`run_battle_piped`], where the robots `agents` expects ([`AgentListener::expect`])
+/// connect to it, through their runner agents, instead of the listener.
+pub fn run_battle_remote(
+    listener: TcpListener,
+    observers: Option<Observers>,
+    config: &ServerConfig,
+    robots: Vec<RobotEntry>,
+    pipes: Vec<RobotPipe>,
+    agents: Option<&AgentListener>,
+) -> io::Result<BattleOutcome> {
+    if let Some(o) = &observers {
+        net::check_listener(&o.listener, o.tls.as_ref())?;
+    }
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let tokens: Vec<String> = robots.iter().map(|r| r.token.clone()).collect();
-    // A piped robot's index isn't open to the listener, whatever token it presents.
+    // A piped or remote robot's index isn't open to the listener, whatever token it
+    // presents.
     let mut taken = vec![false; tokens.len()];
     for pipe in pipes {
         if let Some(t) = taken.get_mut(pipe.robot) {
             *t = true;
         }
         spawn_pipe_robot(pipe, tx.clone());
+    }
+    if let Some(agents) = agents {
+        for index in agents.attach(tx.clone()) {
+            if let Some(t) = taken.get_mut(index) {
+                *t = true;
+            }
+        }
     }
     let acceptor = {
         let (tx, stop) = (tx.clone(), stop.clone());
@@ -317,7 +350,7 @@ pub fn run_battle_piped(
             let (tx, stop) = (tx.clone(), stop.clone());
             o.listener.set_nonblocking(true)?;
             Some(thread::spawn(move || {
-                observer_accept_loop(&o.listener, &o.token, &tx, &stop)
+                observer_accept_loop(&o.listener, &o.token, o.tls.as_ref(), &tx, &stop)
             }))
         }
         None => None,
@@ -328,6 +361,9 @@ pub fn run_battle_piped(
         b.run()
     });
     stop.store(true, Ordering::SeqCst);
+    if let Some(agents) = agents {
+        agents.detach();
+    }
     let _ = acceptor.join();
     if let Some(a) = observer_acceptor {
         let _ = a.join();
@@ -340,6 +376,7 @@ pub fn run_battle_piped(
 fn observer_accept_loop(
     listener: &TcpListener,
     token: &str,
+    tls: Option<&tls::Identity>,
     tx: &Sender<Incoming>,
     stop: &AtomicBool,
 ) {
@@ -354,10 +391,11 @@ fn observer_accept_loop(
             }
             Ok((stream, _)) => {
                 let (token, tx, connected) = (token.to_string(), tx.clone(), connected.clone());
-                let handshakes = handshakes.clone();
+                let (handshakes, tls) = (handshakes.clone(), tls.cloned());
                 handshakes.fetch_add(1, Ordering::SeqCst);
                 thread::spawn(move || {
-                    let _ = observer_handshake(stream, &token, &tx, &connected);
+                    let _ = Stream::accept(stream, tls.as_ref(), HELLO_TIMEOUT)
+                        .and_then(|stream| observer_handshake(stream, &token, &tx, &connected));
                     handshakes.fetch_sub(1, Ordering::SeqCst);
                 });
             }
@@ -369,13 +407,11 @@ fn observer_accept_loop(
 /// Reads an observer's `Hello` on an [`Observers`] listener: only observers, with the
 /// token.
 fn observer_handshake(
-    mut stream: TcpStream,
+    mut stream: Stream,
     token: &str,
     tx: &Sender<Incoming>,
     connected: &Arc<AtomicUsize>,
 ) -> io::Result<()> {
-    stream.set_nonblocking(false)?;
-    stream.set_nodelay(true)?;
     let hello = match read_hello(&mut stream)? {
         Some(v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(h)),
@@ -413,7 +449,7 @@ fn observer_handshake(
 
 /// Compares a presented token with the secret in time that doesn't depend on where they
 /// differ.
-fn same_secret(presented: &[u8], secret: &[u8]) -> bool {
+pub(crate) fn same_secret(presented: &[u8], secret: &[u8]) -> bool {
     presented.len() == secret.len()
         && presented
             .iter()
@@ -446,7 +482,7 @@ fn accept_loop(
 /// Reads the `Hello` and hands the connection to the battle loop. Robots and observers
 /// alike show their token: the listener is on loopback, but any local process reaches it.
 fn handshake(
-    mut stream: TcpStream,
+    stream: TcpStream,
     tokens: &[String],
     observer_token: &str,
     taken: &mut [bool],
@@ -454,6 +490,7 @@ fn handshake(
 ) -> io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
+    let mut stream = Stream::plain(stream);
     let hello = match read_hello(&mut stream)? {
         Some(v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(h)),
@@ -501,11 +538,11 @@ fn handshake(
 }
 
 /// How long a new connection has to say `Hello`.
-const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Reads a new connection's first message, the `Hello`, within [`HELLO_TIMEOUT`]; reads
 /// wait as long as it takes afterwards.
-fn read_hello(stream: &mut TcpStream) -> io::Result<Option<v1::ClientMessage>> {
+pub(crate) fn read_hello(stream: &mut Stream) -> io::Result<Option<v1::ClientMessage>> {
     stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
     let hello = read_message::<v1::ClientMessage>(stream);
     stream.set_read_timeout(None)?;
@@ -520,22 +557,23 @@ fn read_hello(stream: &mut TcpStream) -> io::Result<Option<v1::ClientMessage>> {
 /// after 10 s without a message (a GUI on another tab sends no controls, robots in a
 /// paused battle no `Execute`). The battle went on, still sending snapshots, deaf to
 /// that observer's speed, pause and stop.
-fn reader_of(stream: &TcpStream) -> io::Result<TcpStream> {
+pub(crate) fn reader_of(stream: &Stream) -> io::Result<Stream> {
     let reader = stream.try_clone()?;
     reader.set_read_timeout(None)?;
     Ok(reader)
 }
 
-fn refuse(mut stream: TcpStream, message: &str) -> io::Result<()> {
+pub(crate) fn refuse(mut stream: Stream, message: &str) -> io::Result<()> {
     write_message(
         &mut stream,
         &server(server_message::Msg::Error(v1::Error {
             message: message.into(),
         })),
-    )
+    )?;
+    stream.shutdown()
 }
 
-fn spawn_robot_reader(robot: usize, reader: TcpStream, tx: Sender<Incoming>) {
+pub(crate) fn spawn_robot_reader(robot: usize, reader: Stream, tx: Sender<Incoming>) {
     thread::spawn(move || read_robot(robot, reader, &tx));
 }
 
@@ -611,7 +649,7 @@ fn read_robot(robot: usize, mut reader: impl Read, tx: &Sender<Incoming>) {
 /// connection shut down): one that still got the turns would look alive while its
 /// speed, pause and stop went nowhere.
 fn spawn_observer_reader(
-    mut reader: TcpStream,
+    mut reader: Stream,
     tx: Sender<Incoming>,
     left: impl FnOnce() + Send + 'static,
 ) {
@@ -632,7 +670,7 @@ fn spawn_observer_reader(
             "server drops observer because {}",
             why_ended(&ended)
         ));
-        let _ = reader.shutdown(Shutdown::Both);
+        let _ = reader.shutdown();
         left();
     });
 }
@@ -674,7 +712,7 @@ pub fn log_control(what: &str, control: &v1::ObserverControl) {
     }
 }
 
-fn server(msg: server_message::Msg) -> v1::ServerMessage {
+pub(crate) fn server(msg: server_message::Msg) -> v1::ServerMessage {
     v1::ServerMessage { msg: Some(msg) }
 }
 
@@ -684,7 +722,7 @@ struct BattleLoop<'a> {
     /// The engine; every input goes through it and into the recording.
     engine: RecordingDriver,
     links: Vec<Link>,
-    observers: Vec<TcpStream>,
+    observers: Vec<Stream>,
     rx: Receiver<Incoming>,
     /// What came from the robots while the battle waited between turns, for the next
     /// turn's wait for them: they answer as before, after that turn's step.
@@ -793,7 +831,7 @@ impl<'a> BattleLoop<'a> {
             stream.shutdown();
         }
         for stream in &self.observers {
-            let _ = stream.shutdown(Shutdown::Both);
+            let _ = stream.shutdown();
         }
         let finished = self.engine.finish();
         // A battle stopped before its first round (a cancelled start) leaves no
@@ -1020,7 +1058,7 @@ impl<'a> BattleLoop<'a> {
                         self.remote_observers += 1;
                     }
                 } else {
-                    let _ = stream.shutdown(Shutdown::Both);
+                    let _ = stream.shutdown();
                 }
             }
             // An observer that paused the battle and left doesn't hold it up for the others
@@ -1435,7 +1473,7 @@ impl<'a> BattleLoop<'a> {
                     log_perf(format_args!(
                         "server drops observer because writing to it failed: {e}"
                     ));
-                    let _ = o.shutdown(Shutdown::Both);
+                    let _ = o.shutdown();
                     false
                 }
             });
@@ -1451,7 +1489,7 @@ mod tests {
     fn a_reader_waits_as_long_as_it_takes_after_the_hello() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let mut stream = listener.accept().unwrap().0;
+        let mut stream = Stream::plain(listener.accept().unwrap().0);
         let hello = v1::ClientMessage {
             msg: Some(client_message::Msg::Hello(v1::Hello::default())),
         };

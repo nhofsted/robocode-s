@@ -2,12 +2,13 @@
 //
 // robocode-s wire protocol, version 1 (docs/design.md §5, docs/engine-spec.md §11).
 //
-// Transport: any byte stream (TCP, with TLS off loopback). Every message is a
+// Transport: any byte stream (stdio, TCP; TLS off loopback, design §5.1). Every message is a
 // ClientMessage or ServerMessage, preceded by its length as a protobuf varint.
 //
 // A connection starts with Hello / HelloAck and then has one role:
 //   robot     one robot in one battle: the lockstep turn loop
-//   runner    a host that launches robot processes on the server's request
+//   runner    a runner agent (`robocode-s agent`): launches robot processes on the
+//             server's request and relays their stdio (ADR 0020)
 //   observer  a viewer (GUI, recorder) that follows a battle and may control it
 //
 // Units: distances in pixels, angles in radians (0 = north, clockwise), unless a
@@ -38,6 +39,7 @@ message ClientMessage {
     // runner
     LaunchResult launch_result = 20;
     RobotExited robot_exited = 21;
+    JarRequest jar_request = 22;
     // observer
     ObserverControl observer_control = 30;
   }
@@ -55,6 +57,7 @@ message ServerMessage {
     // runner
     LaunchRobot launch_robot = 20;
     StopRobot stop_robot = 21;
+    JarData jar_data = 22;
     // observer
     BattleInfo battle_info = 30;
     TurnSnapshot turn_snapshot = 31;
@@ -550,8 +553,17 @@ message RunnerInfo {
   repeated string runtimes = 1;
   // "local", "container" or "remote"
   string mode = 2;
-  // Whether this runner's CPU measurements can be trusted (design §7.3).
+  // Whether this runner's CPU measurements can be trusted (design §7.3). Informational:
+  // the server trusts a runner that presents its runner token.
   bool trusted_cpu_time = 3;
+  // The runner's engine version (design §4.4) and the deterministic rules its robot host
+  // follows; the server refuses others than its own.
+  uint32 engine_version = 4;
+  uint32 deterministic_rules = 5;
+  // What its robots run on, e.g. "JVM 21.0.12.1, linux x86_64, sandbox os (...)".
+  string platform = 6;
+  // How many robots it runs at once; 0: no limit.
+  uint32 slots = 7;
 }
 
 message RobotPackage {
@@ -567,7 +579,11 @@ message RobotPackage {
   string entry_point = 5;
 }
 
+// A robot to start. A runner agent fetches the jars it doesn't have (JarRequest), starts
+// the robot with stdio, connects to the server as that robot with `session_token` and
+// relays the robot's stdio, then answers LaunchResult.
 message LaunchRobot {
+  // The robot's index in the battle, as decimal text (also in the other runner messages).
   string robot_id = 1;
   // Token the robot presents in its Hello.
   string session_token = 2;
@@ -579,6 +595,33 @@ message LaunchRobot {
   int64 battle_seed = 6;
   bool deterministic = 7;
   uint32 memory_limit_mb = 8;
+  // JVM robots: the jars (or packages) the robot is looked up in, in order.
+  repeated JarRef jars = 9;
+  // The classic name the robot host looks the robot up by (`robot_name` without a
+  // duplicate suffix).
+  string lookup_name = 10;
+}
+
+// A jar by content: the runner caches it by hash.
+message JarRef {
+  // File name, e.g. "samples-0.1.0.jar" (no folders).
+  string name = 1;
+  // SHA-256 of the file, hex.
+  string sha256 = 2;
+  uint64 size = 3;
+}
+
+// A runner asks for a jar of a LaunchRobot it doesn't have.
+message JarRequest {
+  string sha256 = 1;
+}
+
+// A part of a requested jar, in order; the last one has `last`.
+message JarData {
+  string sha256 = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  bool last = 4;
 }
 
 message LaunchResult {

@@ -3,8 +3,10 @@
 //! Launches robot processes (design §6): one JVM per robot running the robocode-s robot
 //! host (`clients/java-compat`), in a [`Sandbox`] (ADR 0019).
 
+pub mod agent;
 pub mod jre;
 pub mod local;
+pub mod remote;
 mod sandbox;
 
 pub use sandbox::{Sandbox, docker_pulling};

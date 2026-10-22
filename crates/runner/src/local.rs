@@ -9,8 +9,9 @@
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport, launch};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
+use robocode_s_server::agents::AgentListener;
 use robocode_s_server::{
-    BattleOutcome, Observers, RobotEntry, RobotPipe, ServerConfig, random_token, run_battle_piped,
+    BattleOutcome, Observers, RobotEntry, RobotPipe, ServerConfig, random_token, run_battle_remote,
 };
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
@@ -74,6 +75,22 @@ pub fn check_rules(text: &str, lib: &Path) -> Result<(), String> {
         },
         robocode_s_server::DETERMINISTIC_RULES
     ))
+}
+
+/// What the robot host runs robots on (`JVM 21.0.4`) and the version of the deterministic
+/// rules it follows, from its `--describe` listing (of no jars) in `home`: what a runner
+/// agent reports to the server.
+pub fn host_info(host: &JavaHost, home: &Path) -> Result<(String, u32), String> {
+    let text = run_describe(host, &[], &[], home);
+    let _ = std::fs::remove_dir_all(home);
+    let text = text?;
+    let platform = text
+        .lines()
+        .find_map(|l| l.strip_prefix("platform\t"))
+        .unwrap_or("JVM")
+        .to_string();
+    check_rules(&text, &host.lib_dir)?;
+    Ok((platform, robocode_s_server::DETERMINISTIC_RULES))
 }
 
 /// A robot or team found in the jars or class folders, with the details from its `.properties` (empty
@@ -893,25 +910,8 @@ pub fn run_local_battle_with(
     battle: &LocalBattle,
     observers: Option<Observers>,
     controls: Option<mpsc::Receiver<v1::ObserverControl>>,
-    mut observe: impl FnMut(&server_message::Msg),
+    observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-    let address = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .to_string();
-    // The robots talk to the server over their stdin and stdout (ADR 0019); the listener
-    // is for the battle's own observer. A fresh secret per battle for that: any local
-    // process reaches it. It isn't recorded and doesn't affect the battle. The robots'
-    // tokens are never used: their indexes are taken by their pipes.
-    let entries: Vec<RobotEntry> = battle
-        .robots
-        .iter()
-        .map(|r| RobotEntry {
-            token: random_token(),
-            statics: r.statics.clone(),
-        })
-        .collect();
     let mut processes = Vec::new();
     let mut pipes = Vec::new();
     for (i, robot) in battle.robots.iter().enumerate() {
@@ -935,13 +935,74 @@ pub fn run_local_battle_with(
         }
         processes.push(process);
     }
+    let outcome = serve(battle, pipes, observers, None, controls, observe)?;
+    let stderr = processes
+        .iter_mut()
+        .map(|p| {
+            for _ in 0..100 {
+                if p.try_wait().ok().flatten().is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            without_noise(&p.stderr_tail())
+        })
+        .collect();
+    Ok(LocalOutcome { outcome, stderr })
+}
+
+/// A robot's error output without classic's loading messages.
+pub(crate) fn without_noise(tail: &str) -> String {
+    tail.lines()
+        .filter(|l| !is_classic_noise(l))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Runs `battle`'s server, with the robots on `pipes` or connecting through `agents`, and
+/// its own observer, which hands every message to `observe` (on this thread) and forwards
+/// `controls`.
+pub(crate) fn serve(
+    battle: &LocalBattle,
+    pipes: Vec<RobotPipe>,
+    observers: Option<Observers>,
+    agents: Option<AgentListener>,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
+    mut observe: impl FnMut(&server_message::Msg),
+) -> Result<BattleOutcome, String> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let address = listener
+        .local_addr()
+        .map_err(|e| e.to_string())?
+        .to_string();
+    // The robots talk to the server over their stdin and stdout (ADR 0019) or through
+    // their runner agents; the listener is for the battle's own observer. A fresh secret
+    // per battle for that: any local process reaches it. It isn't recorded and doesn't
+    // affect the battle. The robots' tokens are never used: their indexes are taken by
+    // their pipes or agents.
+    let entries: Vec<RobotEntry> = battle
+        .robots
+        .iter()
+        .map(|r| RobotEntry {
+            token: random_token(),
+            statics: r.statics.clone(),
+        })
+        .collect();
     let config = ServerConfig {
         observer_token: random_token(),
         ..battle.config.clone()
     };
     let observer_token = config.observer_token.clone();
-    let server =
-        thread::spawn(move || run_battle_piped(listener, observers, &config, entries, pipes));
+    let server = thread::spawn(move || {
+        run_battle_remote(
+            listener,
+            observers,
+            &config,
+            entries,
+            pipes,
+            agents.as_ref(),
+        )
+    });
 
     let mut observer = TcpStream::connect(&address).map_err(|e| e.to_string())?;
     // Controls are small messages: sent at once, not held for the last one's ack.
@@ -1008,23 +1069,7 @@ pub fn run_local_battle_with(
     if !over {
         return Err("lost the connection to the battle".into());
     }
-    let stderr = processes
-        .iter_mut()
-        .map(|p| {
-            for _ in 0..100 {
-                if p.try_wait().ok().flatten().is_some() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-            p.stderr_tail()
-                .lines()
-                .filter(|l| !is_classic_noise(l))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .collect();
-    Ok(LocalOutcome { outcome, stderr })
+    Ok(outcome)
 }
 
 /// Messages classic's robot side prints in every headless host: module loading, its

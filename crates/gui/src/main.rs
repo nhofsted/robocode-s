@@ -37,7 +37,7 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 usage: robocode-s-gui [recording]
        robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
-       robocode-s-gui --watch HOST:PORT [--token TOKEN] [--tps N]
+       robocode-s-gui --watch HOST:PORT [--token TOKEN] [--fingerprint F] [--tps N]
 
 Without arguments: the battle setup. With a recording (from --record or
 \"Record to\", or a website viewer track): its replay, in the Watch Battle tab.
@@ -59,6 +59,9 @@ stderr.
   --watch HOST:PORT  watch the battle on that server as an observer (one run with
                      `robocode-s battle --observe PORT`), in the Watch Battle tab
   --token TOKEN      with --watch: the observer token ($ROBOCODES_OBSERVE_TOKEN)
+  --fingerprint F    with --watch: the battle's certificate as it prints it
+                     (sha256:AB:CD:...), for TLS; without one, a loopback server
+                     is reached without TLS, another needs a CA's certificate
   --zoom Z[,X,Y]     battles and replays start zoomed in Z times (1 to 16), centred
                      on battlefield point X,Y (y up; default the field's centre)
   --tab NAME         open a tab at start: start, watch (or replay) or options
@@ -156,6 +159,7 @@ fn main() -> ExitCode {
                 watch = true;
             }
             "--token" => setup.watch_token = value(),
+            "--fingerprint" => setup.watch_fingerprint = value(),
             "--rounds" => setup.rounds = value().parse().unwrap_or(setup.rounds),
             "--seed" => setup.seed = value(),
             "--tps" => setup.turns_per_second = value().parse().unwrap_or(30),
