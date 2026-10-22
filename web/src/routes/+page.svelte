@@ -7,7 +7,7 @@
 		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
 		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'done' },
 		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'done' },
-		{ id: 'M3', name: 'Isolation: containers, remote runners', state: 'planned' },
+		{ id: 'M3', name: 'Sandbox, remote runners, installers', state: 'done' },
 		{ id: 'M4', name: 'Robots in Python, .NET, Rust, C/C++, Kotlin', state: 'planned' },
 		{ id: 'M5', name: 'The rumble: rankings, volunteers, submissions', state: 'planned' },
 		{ id: 'M5b', name: 'Battle replays in the browser', state: 'planned' }
@@ -83,10 +83,12 @@
 	<section class="status panel">
 		<h2>Where we are</h2>
 		<p>
-			robocode-s is in early development. Classic Java robots, the samples and real RoboRumble
-			bots alike, fight identically to classic: headless from the command line, or in the
-			desktop GUI with debug painting, recordings and replays. There is no release to download
-			yet. Follow along on <a href={REPO_URL}>GitHub</a>.
+			robocode-s is in development. Classic Java robots, the samples and real RoboRumble bots
+			alike, fight identically to classic: headless from the command line, or in the desktop
+			GUI with debug painting, recordings and replays. Robots run sandboxed, locally or on
+			other machines, and battles are deterministic by default. Installers for Windows, Linux
+			and macOS are built; there is no release to download yet, and until then you build it
+			from source. Follow along on <a href={REPO_URL}>GitHub</a>.
 		</p>
 		<ol class="milestones">
 			{#each milestones as m (m.id)}

@@ -3,15 +3,15 @@ title: Developing a robot
 description: How to set up, test, debug and release a Robocode robot with robocode-s, from the first build to the rumble.
 ---
 
-This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages arrive with milestone M4 and will get their own sections.
+This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages (milestone M4) are not started and will get their own sections.
 
-> **Status:** the parts marked *planned* depend on the command-line runner ([#12](https://github.com/nhofsted/robocode-s/issues/12)), the GUI (M2) or the rumble (M5). Until then, use classic Robocode 1.11.1 for the edit-and-run loop: your robot behaves the same in both.
+> **Status:** running, testing and debugging battles works today from the command line and the GUI (see [Getting started](/docs/getting-started)). The parts marked *planned* depend on the rumble (M5) or on tools still to come.
 
 ## How your robot runs
 
 In classic Robocode every robot is a thread inside the Robocode JVM. In robocode-s each robot is **its own process**:
 
-- The **runner** starts a JVM for your robot with the **robot host**: classic Robocode's own robot-side code (the `robocode.*` API, event handling, blocking calls), connected to the engine over the robocode-s protocol instead of in-process calls.
+- The **runner** starts a JVM for your robot, inside a sandbox, with the **robot host**: classic Robocode's own robot-side code (the `robocode.*` API, event handling, blocking calls), connected to the engine over the robocode-s protocol (on the process's stdin and stdout) instead of in-process calls. The JVMs are started while the battle is looked up, so a battle starts quickly.
 - Every turn the engine sends your robot its status and events, your code runs until it calls `execute()` (directly, or through a blocking call such as `ahead(100)`), and the robot host sends your commands back.
 - Team members are separate processes too; team messages travel through the server.
 
@@ -58,15 +58,17 @@ Everything in the [classic API](https://robocode.sourceforge.io/docs/robocode/) 
 Some things to keep in mind:
 
 - **One turn, one `execute()`.** Do your thinking between calls. If your code runs over the turn budget, the robot **skips the turn** (its previous commands stay in effect, you get a `SkippedTurnEvent`), and after too many skipped turns it is disabled. In the rumble's deterministic mode the budget is counted in work rather than time; see below.
-- **Data files** (`getDataFile`, `RobocodeFileOutputStream`) work as in classic, with the same 200 KB quota per robot.
-- **No network, no files outside your data directory.** When robots run in containers (milestone M3), that is enforced; in local mode, treat it as the rule anyway, since the rumble will.
+- **Data files** (`getDataFile`, `RobocodeFileOutputStream`) work as in classic, with the same 200 KB quota per robot. They are kept from battle to battle, as in classic (a robot such as Sonda reads the statistics of earlier battles), in the data folder under `robot-data/<robot and version>`. `--fresh-data` (or `ROBOCODES_FRESH_DATA=1`) starts every robot with no files and keeps none: use it to reproduce a battle exactly, since with data files a battle also depends on the ones before it. Two robots of the same class in one battle share one folder.
+- **No network, no files outside your data directory.** The sandbox enforces this (classic's SecurityManager denied the same): sockets and connections fail with an exception, other files can't be read or written, and a robot can't start other processes. On Linux the default `os` sandbox limits files only where the kernel has Landlock; the battle's header says `filesystem not limited` if it doesn't. `--sandbox none` is a plain process, for local experiments only: treat the limits as the rule anyway, since the rumble will.
 - **Threads are discouraged.** They still work, but anything timing-dependent between threads makes your robot nondeterministic.
 
 ## Run battles
 
-> **Status:** planned with the command-line runner (#12) and the GUI (M2).
+Run headless battles with `robocode-s battle`: choose robots, number of rounds, battlefield size and a **seed**, and get per-round results and, with `--record`, a recording. The desktop GUI does the same with a live view, speed control, pausing and single-stepping, and your robot's debug painting. See [Getting started](/docs/getting-started#run-a-battle-from-the-command-line) for the commands.
 
-You will run headless battles from the command line: choose robots, number of rounds, battlefield size and a **seed**, and get per-round results and a recording. The desktop GUI does the same with a live view, speed control, pausing and single-stepping, and your robot's debug painting. Until then, classic Robocode's GUI is the way to watch your robot.
+Your robot can be a jar or a **class folder**: `--jar path/to/classes` (or a folder added in the GUI's options) reads your IDE's output in place, as classic's development folders do. Recompile, and the next battle runs the new code, with no packaging step in the loop. Name it with classic's `*`: `my.Robot*`, or `my.Robot 1.0*` when its `.properties` has a version.
+
+A battle can also be watched from another machine (`--observe`), or run its robots on other machines (`robocode-s agent`); both are described in Getting started.
 
 ## Test it
 
@@ -76,11 +78,11 @@ Battles are random: start positions and a lot of robot behavior differ every rou
 
 **Measure over many battles.** A single battle says little; compare versions over many battles against a fixed set of opponents (a "test bed") and look at the average score. The rumble's numbers are averages over hundreds of pairings for the same reason. Keep a few opponents of each style in your test bed: a strong surfer, a pattern matcher, a rammer, a wall bot, and the samples for sanity.
 
-> **Status:** batch runs over a test bed with a summary table are planned for the command-line runner.
+> **Status:** batch runs over a test bed with a summary table are planned; for now, run `robocode-s battle` in a loop over seeds.
 
 ## Debug it
 
-**Print and paint first.** `out.println` output goes to the robot's console, and `onPaint(Graphics2D)` draws on the battlefield: waves, predicted positions, danger maps. In the GUI you switch painting on per robot. Painting is only requested while a viewer shows it, so it costs nothing in normal battles.
+**Print and paint first.** `out.println` output goes to the robot's console, and `onPaint(Graphics2D)` draws on the battlefield: waves, predicted positions, danger maps. In the GUI you switch painting on per robot (the pencil in its output tab), and `--record ... --paint` keeps it in a recording. Painting is only requested while a viewer shows it, so it costs nothing in normal battles.
 
 **Attach a debugger.** Because your robot is its own JVM, you can debug it like any Java program: start the robot's JVM with a debug agent and attach your IDE.
 
@@ -94,6 +96,8 @@ Use deterministic mode while debugging. In classic mode, a robot paused at a bre
 
 One caveat: debugger features that run your code (watch expressions, `toString()` in the variables view) count as work and can change your robot's state, so the battle may then go differently than without the debugger. Combine it with a seed to stop at the exact turn where things go wrong.
 
+**Replay what happened.** `robocode-s replay FILE` (or the GUI's Watch Battle) re-runs a recording turn for turn, with the robots' output and debug painting.
+
 **Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. Replays in the browser (M5b) show what happened; a local re-run under your debugger shows why.
 
 ## Deterministic mode
@@ -103,10 +107,10 @@ The rumble runs every battle in deterministic mode, so results can be checked by
 - **The clock is virtual.** In robot code, `System.nanoTime()` and `System.currentTimeMillis()` return a virtual time that advances with the turns and with the work your code does (counted in bytecode instructions). A loop that runs "until 2 ms have passed" does a fixed amount of work, the same on every machine. Seeding a generator from the clock gives the same seed every run.
 - **Randomness is seeded per robot**, from the battle seed and the robot's name: `Math.random()`, `new Random()` and `Utils.getRandom()`.
 - **Identity hash codes are deterministic** for objects your robot creates, so iterating over a `HashSet` of your own objects has the same order every run.
-- **No turn is skipped for being slow.** The engine waits for every robot. A robot that runs far over its budget is disabled instead.
+- **Turns are skipped by counted work, not by the clock.** The engine waits for every robot. A robot whose work in a turn is over the budget (3.2 ms of virtual time, how long classic really waits for a robot) answers as many turns late as classic would have, with classic's skipped-turn events, and is disabled after too many. A robot that never returns, such as an endless loop, is cut off at a work limit.
 - **Not covered:** time the JDK reads for you (`Thread.sleep`, timeouts in concurrent code) is still real, so robots whose threads race against each other stay nondeterministic.
 
-If your robot budgets its own computation by the clock, check that it still does enough work per turn under the virtual clock; the calibration of virtual time against real CPU time is still being tuned ([#15](https://github.com/nhofsted/robocode-s/issues/15)).
+If your robot budgets its own computation by the clock, check that it still does enough work per turn under the virtual clock; virtual time was calibrated against real CPU time for this ([#15](https://github.com/nhofsted/robocode-s/issues/15)). `--classic` shows how your robot behaves under classic's real timing.
 
 ## Package it
 
