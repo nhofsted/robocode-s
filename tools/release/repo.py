@@ -95,9 +95,21 @@ def gpg_key():
     return key
 
 
+def gpg_env():
+    """The environment for gpg: the data goes to its stdin, so gpg-agent's pinentry asks
+    for the key's passphrase on the terminal GPG_TTY names; set it from ours if unset."""
+    env = dict(os.environ)
+    if "GPG_TTY" not in env:
+        for stream in (sys.stderr, sys.stdout, sys.stdin):
+            if stream.isatty():
+                env["GPG_TTY"] = os.ttyname(stream.fileno())
+                break
+    return env
+
+
 def gpg(args, data=None):
     cmd = ["gpg", "--batch", "--yes", "--local-user", gpg_key(), "--digest-algo", "SHA256"] + args
-    r = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, check=False)
+    r = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, check=False, env=gpg_env())
     if r.returncode:
         die("gpg failed: " + " ".join(cmd))
     return r.stdout
