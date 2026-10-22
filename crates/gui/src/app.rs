@@ -797,7 +797,12 @@ impl App {
         let warm = robots.len().min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
             let warm = pool.as_ref().map(|pool| (pool, warm));
-            let _ = tx.send(prepare_with(&env, &robots, config, 512, warm));
+            // Cancelled meanwhile: nobody fights the battle, which leaves its folder.
+            if let Err(mpsc::SendError(Ok((_, battle)))) =
+                tx.send(prepare_with(&env, &robots, config, 512, warm))
+            {
+                battle.remove_dir();
+            }
             repaint.request_repaint();
         });
         self.local.starting = Some(Starting {

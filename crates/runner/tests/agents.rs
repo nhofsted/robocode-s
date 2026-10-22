@@ -200,6 +200,7 @@ fn battle(dir: &Path, names: &[&str]) -> LocalBattle {
             .collect(),
         jars: vec![jar],
         dir: dir.join("battle"),
+        data: None,
         memory_mb: 128,
         pool: None,
     }
@@ -221,6 +222,7 @@ fn agent_config(listener: &AgentListener, pin: Fingerprint, dir: &Path) -> Agent
         pin: Some(pin),
         slots: 0,
         dir: dir.to_path_buf(),
+        fresh_data: false,
     }
 }
 

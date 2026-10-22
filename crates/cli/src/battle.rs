@@ -5,6 +5,7 @@
 use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
+use robocode_s_runner::housekeeping::keep_battles;
 use robocode_s_runner::local::{Environment, prepare_with, random_seed, run_local_battle_with};
 use robocode_s_runner::pool::Pool;
 use robocode_s_runner::remote::run_remote_battle;
@@ -49,9 +50,12 @@ Robots and runtime:
   --warm N               start N robot JVMs while the robots are looked up,
                          instead of afterwards (default: one per robot; 0 starts
                          them when the battle does)
-  --data DIR             data directory: JRE, battle files ($ROBOCODES_DATA;
-                         default: the user data folder from a release archive,
-                         else target/robocodes-data)
+  --data DIR             data directory: JRE, robots' data files, battle files
+                         ($ROBOCODES_DATA; default: the user data folder from a
+                         release archive, else target/robocodes-data)
+  --fresh-data           robots start with no data files and keep none, as with
+                         $ROBOCODES_FRESH_DATA (default: each robot keeps its
+                         files from battle to battle, as in classic)
   --java PATH            Java executable ($ROBOCODES_JAVA; default: pinned JRE)
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
@@ -193,6 +197,7 @@ impl Options {
                 "--memory" => o.memory_mb = number(arg, value(arg)?)?,
                 "--warm" => o.warm = Some(number(arg, value(arg)?)?),
                 "--data" => o.env.data = value(arg)?.into(),
+                "--fresh-data" => o.env.fresh_data = true,
                 "--java" => o.env.java = Some(value(arg)?.into()),
                 "--host-lib" => o.env.host_lib = value(arg)?.into(),
                 "--agent-jar" => o.env.agent_jar = value(arg)?.into(),
@@ -375,6 +380,9 @@ pub fn run(o: &Options) -> Result<(), String> {
     }
     let statics: Vec<v1::RobotStatics> = battle.robots.iter().map(|r| r.statics.clone()).collect();
     let dir = battle.dir.clone();
+    // The battle's folder goes when it is over; with this set it stays, with the robots'
+    // output and error output in it.
+    let keep = keep_battles();
 
     let progress = !o.json && std::io::stderr().is_terminal();
     let rounds = o.rules.num_rounds;
@@ -392,7 +400,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         rx
     });
     let on_message = |msg: &server_message::Msg| match msg {
-        server_message::Msg::TurnSnapshot(s) => {
+        server_message::Msg::TurnSnapshot(s) if keep => {
             for (i, r) in s.robots.iter().enumerate() {
                 if r.output.is_empty() {
                     continue;
@@ -416,7 +424,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         _ => {}
     };
     let mut placements = Vec::new();
-    let local = match &agents {
+    let ran = match &agents {
         Some(agents) => {
             let remote = run_remote_battle(
                 &battle,
@@ -425,20 +433,27 @@ pub fn run(o: &Options) -> Result<(), String> {
                 observers,
                 controls,
                 on_message,
-            )?;
-            placements = remote.agents;
-            remote.local
+            );
+            remote.map(|remote| {
+                placements = remote.agents;
+                remote.local
+            })
         }
-        None => run_local_battle_with(&host, &battle, observers, controls, on_message)?,
+        None => run_local_battle_with(&host, &battle, observers, controls, on_message),
     };
+    // A local battle did so itself.
+    battle.remove_dir();
+    let local = ran?;
     if progress {
         eprint!("\r\x1b[K");
     }
     let mut noisy = Vec::new();
     for (i, tail) in local.stderr.iter().enumerate() {
         if !tail.is_empty() {
-            let _ = std::fs::write(dir.join(format!("stderr-{i}.txt")), tail);
-            noisy.push(statics[i].name.clone());
+            if keep {
+                let _ = std::fs::write(dir.join(format!("stderr-{i}.txt")), tail);
+            }
+            noisy.push((&statics[i].name, tail));
         }
     }
 
@@ -475,12 +490,17 @@ pub fn run(o: &Options) -> Result<(), String> {
         }
         print!("{}", results::table(&rows));
     }
-    if !noisy.is_empty() {
+    if keep && !noisy.is_empty() {
+        let names: Vec<&str> = noisy.iter().map(|(name, _)| name.as_str()).collect();
         eprintln!(
             "error output from {}: see {}",
-            noisy.join(", "),
+            names.join(", "),
             dir.display()
         );
+    } else {
+        for (name, tail) in noisy {
+            eprintln!("error output from {name}:\n{tail}");
+        }
     }
     Ok(())
 }

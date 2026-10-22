@@ -6,6 +6,7 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
+use crate::housekeeping::{remove_home, remove_stale_runs, robot_data_dir};
 use crate::pool::{Pool, launch_with};
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport};
 use robocode_s_protocol::v1::{self, client_message, server_message};
@@ -714,6 +715,9 @@ pub struct Environment {
     pub jars: Vec<PathBuf>,
     /// What the robots run in; the platform's default unless chosen.
     pub sandbox: Sandbox,
+    /// Robots start with no data files and keep none (`ROBOCODES_FRESH_DATA`, `--fresh-data`):
+    /// for battles that must not depend on the ones before (design §6.5).
+    pub fresh_data: bool,
 }
 
 impl Environment {
@@ -754,7 +758,14 @@ impl Environment {
                 default_robot_jars()
             },
             sandbox: Sandbox::default(),
+            fresh_data: std::env::var_os("ROBOCODES_FRESH_DATA")
+                .is_some_and(|v| !v.is_empty() && v != "0"),
         }
+    }
+
+    /// Where robots' data files are kept between battles: a folder per robot and version.
+    pub fn robot_data(&self) -> Option<PathBuf> {
+        (!self.fresh_data).then(|| self.data.join("robot-data"))
     }
 
     /// Checks the paths and finds Java (downloading the pinned JRE if needed; for the docker
@@ -835,12 +846,17 @@ pub fn prepare_with(
     if let Some((pool, warm)) = pool {
         pool.warm(&host, memory_mb, config.deterministic, warm);
     }
+    static BATTLES: AtomicU32 = AtomicU32::new(0);
+    let n = BATTLES.fetch_add(1, Ordering::Relaxed);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
+    // What crashed or killed runs left: their battles' folders and warm hosts' homes.
+    remove_stale_runs(&env.data.join("battles"));
+    remove_stale_runs(&env.data.join("pool"));
     let dir = std::path::absolute(env.data.join("battles"))
         .map_err(|e| e.to_string())?
-        .join(format!("{stamp}-{}", std::process::id()));
+        .join(format!("{stamp}-{n}-{}", std::process::id()));
     let mut jars = battle_jars(&host, &env.jars, robots, &env.data.join("list"));
     let mut described = describe(
         &host,
@@ -860,7 +876,13 @@ pub fn prepare_with(
             config.deterministic,
         );
     }
-    let described = described?;
+    let described = match described {
+        Ok(described) => described,
+        Err(e) => {
+            remove_home(&dir);
+            return Err(e);
+        }
+    };
     if let Some(path) = &config.record {
         config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
     }
@@ -875,6 +897,7 @@ pub fn prepare_with(
             .collect(),
         jars,
         dir,
+        data: env.robot_data(),
         memory_mb,
         pool: pool.map(|(pool, _)| pool.clone()),
     };
@@ -897,12 +920,24 @@ pub struct LocalBattle {
     pub robots: Vec<LocalRobot>,
     /// Jars and class folders containing the robots.
     pub jars: Vec<PathBuf>,
-    /// This battle's directory: robot `i` runs in `robot-<i>` below it.
+    /// This battle's directory: robot `i` runs in `robot-<i>` below it. It goes when the
+    /// battle is over ([`LocalBattle::remove_dir`]).
     pub dir: PathBuf,
+    /// Where the robots' data files are kept between battles ([`Environment::robot_data`]);
+    /// `None`: they have none.
+    pub data: Option<PathBuf>,
     pub memory_mb: u32,
     /// Where to take the robots' hosts from, already started ([`crate::pool`]); `None`
     /// starts them when the battle does.
     pub pool: Option<Arc<Pool>>,
+}
+
+impl LocalBattle {
+    /// Removes the battle's folder, unless `ROBOCODES_KEEP_BATTLES` says to keep it. A
+    /// battle does so itself when it is over; a prepared battle that is not fought needs it.
+    pub fn remove_dir(&self) {
+        remove_home(&self.dir);
+    }
 }
 
 /// The end of a local battle.
@@ -934,6 +969,18 @@ pub fn run_local_battle_with(
     controls: Option<mpsc::Receiver<v1::ObserverControl>>,
     observe: impl FnMut(&server_message::Msg),
 ) -> Result<LocalOutcome, String> {
+    let outcome = fight(host, battle, observers, controls, observe);
+    battle.remove_dir();
+    outcome
+}
+
+fn fight(
+    host: &JavaHost,
+    battle: &LocalBattle,
+    observers: Option<Observers>,
+    controls: Option<mpsc::Receiver<v1::ObserverControl>>,
+    observe: impl FnMut(&server_message::Msg),
+) -> Result<LocalOutcome, String> {
     let mut processes = Vec::new();
     let mut pipes = Vec::new();
     for (i, robot) in battle.robots.iter().enumerate() {
@@ -945,6 +992,11 @@ pub fn run_local_battle_with(
             seed: battle.config.seed,
             deterministic: battle.config.deterministic,
             memory_mb: battle.memory_mb,
+            // Two robots of one class share the folder: the last to end keeps its files.
+            data: battle
+                .data
+                .as_ref()
+                .map(|d| robot_data_dir(d, &robot.lookup)),
         };
         let mut process = launch_with(battle.pool.as_deref(), host, &launch_spec)
             .map_err(|e| format!("launching {}: {e}", robot.statics.name))?;
@@ -977,6 +1029,8 @@ pub fn run_local_battle_with(
                 }
                 thread::sleep(Duration::from_millis(50));
             }
+            // Its data files are kept and its home goes.
+            p.finish();
             without_noise(&p.stderr_tail())
         })
         .collect();
@@ -1109,6 +1163,7 @@ pub(crate) fn serve(
 fn is_classic_noise(line: &str) -> bool {
     line.starts_with("Loaded ")
         || line.contains("robocode.properties")
+        || line.starts_with("Initializing version check date")
         || line.starts_with("setVisible: No window manager was found.")
         || line.starts_with("Perhaps you are missing the robocode.ui")
         || line.trim().is_empty()

@@ -27,8 +27,10 @@ each battle and when the connection drops; Ctrl+C stops it.
                          when the battle asks)
   --sandbox KIND         what robots run in: os, bwrap, docker, none, as for
                          `robocode-s battle` (default os where there is one)
-  --data DIR             data directory: JRE, jar cache, robot homes
+  --data DIR             data directory: JRE, jar cache, robots' data files
                          ($ROBOCODES_DATA)
+  --fresh-data           robots start with no data files and keep none
+                         ($ROBOCODES_FRESH_DATA)
   --java PATH            Java executable ($ROBOCODES_JAVA; default: pinned JRE)
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
@@ -92,6 +94,7 @@ impl Options {
                     o.env.sandbox = value()?.parse().map_err(|e| format!("--sandbox: {e}"))?
                 }
                 "--data" => o.env.data = value()?.into(),
+                "--fresh-data" => o.env.fresh_data = true,
                 "--java" => o.env.java = Some(value()?.into()),
                 "--host-lib" => o.env.host_lib = value()?.into(),
                 "--agent-jar" => o.env.agent_jar = value()?.into(),
@@ -125,6 +128,7 @@ pub fn run_agent(o: &Options) -> Result<(), String> {
         pin: o.pin,
         slots: o.slots,
         dir,
+        fresh_data: o.env.fresh_data,
     };
     eprintln!("robocode-s agent: robots run on {}", launcher.info().0);
     let stop = AtomicBool::new(false);
