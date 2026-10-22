@@ -6,7 +6,8 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
-use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport, launch};
+use crate::pool::{Pool, launch_with};
+use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::agents::AgentListener;
@@ -16,6 +17,7 @@ use robocode_s_server::{
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -813,10 +815,26 @@ pub fn random_seed() -> i64 {
 pub fn prepare(
     env: &Environment,
     robots: &[String],
-    mut config: ServerConfig,
+    config: ServerConfig,
     memory_mb: u32,
 ) -> Result<(JavaHost, LocalBattle), String> {
+    prepare_with(env, robots, config, memory_mb, None)
+}
+
+/// [`prepare`], with the robots' hosts started warm from `pool` (`pool` keeps `warm` hosts
+/// for these robots) while the description runs: the robots' JVMs start meanwhile. The
+/// battle takes its robots' hosts from the pool.
+pub fn prepare_with(
+    env: &Environment,
+    robots: &[String],
+    mut config: ServerConfig,
+    memory_mb: u32,
+    pool: Option<(&Arc<Pool>, usize)>,
+) -> Result<(JavaHost, LocalBattle), String> {
     let host = env.host(config.deterministic)?;
+    if let Some((pool, warm)) = pool {
+        pool.warm(&host, memory_mb, config.deterministic, warm);
+    }
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
@@ -858,6 +876,7 @@ pub fn prepare(
         jars,
         dir,
         memory_mb,
+        pool: pool.map(|(pool, _)| pool.clone()),
     };
     Ok((host, battle))
 }
@@ -881,6 +900,9 @@ pub struct LocalBattle {
     /// This battle's directory: robot `i` runs in `robot-<i>` below it.
     pub dir: PathBuf,
     pub memory_mb: u32,
+    /// Where to take the robots' hosts from, already started ([`crate::pool`]); `None`
+    /// starts them when the battle does.
+    pub pool: Option<Arc<Pool>>,
 }
 
 /// The end of a local battle.
@@ -924,7 +946,7 @@ pub fn run_local_battle_with(
             deterministic: battle.config.deterministic,
             memory_mb: battle.memory_mb,
         };
-        let mut process = launch(host, &launch_spec)
+        let mut process = launch_with(battle.pool.as_deref(), host, &launch_spec)
             .map_err(|e| format!("launching {}: {e}", robot.statics.name))?;
         if let Some((reader, writer)) = process.take_pipes() {
             pipes.push(RobotPipe {
@@ -935,7 +957,17 @@ pub fn run_local_battle_with(
         }
         processes.push(process);
     }
-    let outcome = serve(battle, pipes, observers, None, controls, observe)?;
+    // The next battle's hosts start while this one runs, unless robots are timed: classic's
+    // mode would see the load.
+    let pool = battle.pool.as_deref();
+    if let Some(pool) = pool.filter(|_| battle.config.deterministic) {
+        pool.refill();
+    }
+    let outcome = serve(battle, pipes, observers, None, controls, observe);
+    if let Some(pool) = pool.filter(|_| !battle.config.deterministic) {
+        pool.refill();
+    }
+    let outcome = outcome?;
     let stderr = processes
         .iter_mut()
         .map(|p| {

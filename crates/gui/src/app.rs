@@ -17,13 +17,15 @@ use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::{DialogState, FileDialog, OpeningMode};
 use robocode_s_engine::BattleRules;
 use robocode_s_runner::local::{
-    Environment, Listed, LocalBattle, list_robots, prepare, random_seed,
+    Environment, Listed, LocalBattle, list_robots, prepare_with, random_seed,
 };
+use robocode_s_runner::pool::Pool;
 use robocode_s_runner::{JavaHost, Sandbox, docker_pulling};
 use robocode_s_server::tls::Fingerprint;
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 
 /// The battle setup form.
@@ -149,6 +151,9 @@ impl GameType {
         setup.rules = Rules::default();
     }
 }
+
+/// The most robot JVMs kept started between battles.
+const MAX_WARM_HOSTS: usize = 10;
 
 /// `--battle`: robots and teams separated by commas.
 pub fn parse_robots(text: &str) -> Vec<String> {
@@ -292,6 +297,9 @@ pub struct App {
     sprites: Sprites,
     backdrop: Backdrop,
     env: Environment,
+    /// Robot JVMs kept started between battles (the option "Warm robots"); dropped, they
+    /// stop.
+    pool: Option<Arc<Pool>>,
     setup: Setup,
     tab: Tab,
     /// The battle run here, in the Start Battle tab; the setup when there is none.
@@ -438,6 +446,7 @@ impl App {
             sprites: Sprites::new(&cc.egui_ctx),
             backdrop: Backdrop::default(),
             env,
+            pool: None,
             setup: launch.setup,
             tab: Tab::Start,
             local: Battle::default(),
@@ -776,8 +785,19 @@ impl App {
         };
         let (tx, rx) = mpsc::channel();
         let (env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
+        // The robots' JVMs start while they are described, and the next battle's while
+        // this one runs.
+        if !self.settings.warm_hosts {
+            self.pool = None;
+        } else if self.pool.is_none() {
+            let dir = env.data.join("pool").join(std::process::id().to_string());
+            self.pool = Some(Arc::new(Pool::new(dir)));
+        }
+        let pool = self.pool.clone();
+        let warm = robots.len().min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
-            let _ = tx.send(prepare(&env, &robots, config, 512));
+            let warm = pool.as_ref().map(|pool| (pool, warm));
+            let _ = tx.send(prepare_with(&env, &robots, config, 512, warm));
             repaint.request_repaint();
         });
         self.local.starting = Some(Starting {
@@ -1558,6 +1578,13 @@ impl App {
                         ui.end_row();
                     }
                     sandbox_row(ui, &mut app.settings);
+                    ui.label("Warm robots").on_hover_text(
+                        "Keeps the JVMs of the next battle's robots started while you watch \
+                         and between battles, so that it starts sooner (about half a second \
+                         less). Each idle JVM takes about 90 MB.",
+                    );
+                    ui.checkbox(&mut app.settings.warm_hosts, "Keep robot JVMs started");
+                    ui.end_row();
                 });
 
             section(ui, "Battlefield");
@@ -1676,6 +1703,9 @@ impl App {
     fn settings_changed(&mut self, ctx: &egui::Context, before: &Settings) {
         self.settings_unsaved = Some(ctx.input(|i| i.time));
         self.env.sandbox = self.settings.sandbox();
+        if !self.settings.warm_hosts || self.settings.sandbox != before.sandbox {
+            self.pool = None;
+        }
         let (s, setup) = (&self.settings, &mut self.setup);
         if s.classic != before.classic {
             setup.classic = s.classic;
@@ -2457,6 +2487,8 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // Stops the robot JVMs waiting for a battle.
+        self.pool = None;
         if self.settings_unsaved.is_some() {
             let _ = self.settings.save();
         }

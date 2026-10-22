@@ -106,6 +106,23 @@ message Error {
   string message = 1;
 }
 
+// The first message to a robot host started warm (`RobotHost --stdio --warm`, design
+// §6.2): it waits for it on its stdin, before the Hello of the protocol. The runner sends
+// it, so it isn't part of the ClientMessage/ServerMessage envelopes. Sandbox grants are
+// fixed when the process starts, so the robot's jars are not granted but put into the
+// host's home beforehand.
+message RobotAssignment {
+  // Classic name to look the robot up by, e.g. `sample.Fire` or `jk.mega.DrussGT 3.1.16`.
+  string robot = 1;
+  // The battle seed for the robot's own random streams (ADR 0009).
+  int64 seed = 2;
+  // Deterministic mode: the host was started with the determinism agent and its flags.
+  bool deterministic = 3;
+  // The robot's jars, as paths relative to the host's home: the host moves them to where
+  // classic's repository reads them, then looks the robot up.
+  repeated string jars = 4;
+}
+
 // ============================================================================
 // Battle description
 // ============================================================================

@@ -20,6 +20,9 @@ pub struct Settings {
     pub robot_folders: Vec<PathBuf>,
     /// What robots run in, by name (`--sandbox`, ADR 0019); see [`Settings::sandbox`].
     pub sandbox: String,
+    /// Keep robot JVMs started between battles, so the next battle's robots start sooner
+    /// (about 90 MB of memory each while they wait; see `runner::pool`).
+    pub warm_hosts: bool,
     /// Draw each robot's radar scan arc.
     pub scan_arcs: bool,
     /// Bullets in the robots' bullet colours rather than all in one.
@@ -87,6 +90,7 @@ impl Default for Settings {
             // `Environment::from_env` assumes.
             robot_folders: vec![robocode_s_runner::local::default_robot_dir()],
             sandbox: Sandbox::default().name().into(),
+            warm_hosts: true,
             scan_arcs: false,
             colored_bullets: true,
             robot_names: true,
@@ -353,6 +357,7 @@ mod tests {
         let s = Settings {
             robot_folders: vec!["/robots".into(), "more".into()],
             sandbox: "none".into(),
+            warm_hosts: false,
             scan_arcs: true,
             colored_bullets: false,
             robot_names: false,

@@ -6,11 +6,14 @@
 //! Paths come from the environment, with defaults for a built source tree:
 //! `ROBOCODES_JAVA` (else the pinned JRE is downloaded into `ROBOCODES_DATA`),
 //! `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_ROBOT_JARS` (path list),
-//! `ROBOCODES_SANDBOX` (else the platform's default).
+//! `ROBOCODES_SANDBOX` (else the platform's default). `ROBOCODES_WARM=1` starts the robots
+//! from a warm pool (#82): the battle must come out the same.
 
+use robocode_s_runner::pool::Pool;
 use robocode_s_runner::{JavaHost, Sandbox, jre};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 fn env_path(name: &str, default: &str) -> PathBuf {
     std::env::var_os(name).map_or_else(|| PathBuf::from(default), PathBuf::from)
@@ -66,9 +69,22 @@ fn main() -> ExitCode {
             )]
         });
     let work = data.join("battles");
+    let pool = std::env::var_os("ROBOCODES_WARM")
+        .is_some_and(|v| v == "1")
+        .then(|| {
+            Arc::new(Pool::new(
+                data.join(format!("pool-live-{}", std::process::id())),
+            ))
+        });
     let mut failed = 0;
     for file in &files {
-        match robocode_s_difftest::live::live_battle(Path::new(file), &host, &jars, &work) {
+        match robocode_s_difftest::live::live_battle(
+            Path::new(file),
+            &host,
+            &jars,
+            &work,
+            pool.as_ref(),
+        ) {
             Ok(summary) => {
                 println!(
                     "OK   {file}: {summary}, engine {}",

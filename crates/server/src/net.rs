@@ -296,8 +296,11 @@ mod tests {
     use super::*;
     use std::thread;
 
+    /// A fresh identity, in a folder of its own: tests running at once each make one.
     fn identity() -> Identity {
-        let dir = std::env::temp_dir().join(format!("robocodes-net-{}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("robocodes-net-{}-{n}", std::process::id()));
         let identity = Identity::load_or_create(&dir).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         identity

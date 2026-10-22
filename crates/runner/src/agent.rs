@@ -6,6 +6,7 @@
 //! its own to the server, as that robot. After a battle, or when the connection drops,
 //! it connects again. The server's side is [`crate::remote`].
 
+use crate::pool::{Pool, launch_with};
 use crate::remote::{MAX_JAR_SIZE, sha256_hex};
 use crate::{JavaHost, RobotLaunch, RobotProcess, RobotStdin, RobotStdout, Transport};
 use robocode_s_protocol::v1::{self, client_message, server_message};
@@ -15,6 +16,7 @@ use robocode_s_server::tls::Fingerprint;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -24,6 +26,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The longest wait between attempts to connect.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// The heap of the robots of a battle run with `robocode-s battle`'s defaults: what the
+/// agent warms hosts for before it has seen a battle.
+const USUAL_MEMORY_MB: u32 = 512;
 
 /// Where and how the agent connects.
 #[derive(Debug, Clone)]
@@ -45,6 +51,8 @@ pub trait Launcher: Send + Sync {
     /// What its robots run on, and the deterministic rules its robot host follows.
     fn info(&self) -> (String, u32);
     fn launch(&self, launch: &RobotLaunch) -> io::Result<Box<dyn Robot>>;
+    /// A battle ended: the time to prepare for the next one.
+    fn battle_over(&self) {}
 }
 
 /// A robot the agent started.
@@ -83,12 +91,22 @@ pub struct JvmLauncher {
     host: JavaHost,
     platform: String,
     rules: u32,
+    /// Robot hosts started ahead, how many to keep, and the heap and mode of the last launch.
+    pool: Option<Warm>,
+}
+
+struct Warm {
+    pool: Pool,
+    count: usize,
+    last: Mutex<(u32, bool)>,
 }
 
 impl JvmLauncher {
     /// Asks the robot host what it runs on and which rules it follows (`dir` for its
-    /// listing's home).
-    pub fn new(host: JavaHost, dir: &Path) -> Result<Self, String> {
+    /// listing's home), and starts `warm` robot hosts ahead (0: none): for the usual
+    /// battle, and again after each battle. The server decides the heap and the mode at
+    /// each launch, and hosts that don't fit are replaced.
+    pub fn new(host: JavaHost, dir: &Path, warm: usize) -> Result<Self, String> {
         let (jvm, rules) = crate::local::host_info(&host, &dir.join("describe"))?;
         let platform = format!(
             "{jvm}, {} {}, sandbox {}",
@@ -96,10 +114,20 @@ impl JvmLauncher {
             std::env::consts::ARCH,
             host.sandbox.report()
         );
+        let pool = (warm > 0).then(|| {
+            let pool = Pool::new(dir.join("pool"));
+            pool.warm(&host, USUAL_MEMORY_MB, true, warm);
+            Warm {
+                pool,
+                count: warm,
+                last: Mutex::new((USUAL_MEMORY_MB, true)),
+            }
+        });
         Ok(Self {
             host,
             platform,
             rules,
+            pool,
         })
     }
 }
@@ -110,7 +138,23 @@ impl Launcher for JvmLauncher {
     }
 
     fn launch(&self, launch: &RobotLaunch) -> io::Result<Box<dyn Robot>> {
-        Ok(Box::new(crate::launch(&self.host, launch)?))
+        let pool = self.pool.as_ref();
+        if let Some(warm) = pool {
+            *warm.last.lock().unwrap() = (launch.memory_mb, launch.deterministic);
+        }
+        Ok(Box::new(launch_with(
+            pool.map(|w| &w.pool),
+            &self.host,
+            launch,
+        )?))
+    }
+
+    fn battle_over(&self) {
+        if let Some(warm) = &self.pool {
+            let (memory_mb, deterministic) = *warm.last.lock().unwrap();
+            warm.pool
+                .warm(&self.host, memory_mb, deterministic, warm.count);
+        }
     }
 }
 
@@ -375,6 +419,7 @@ impl Battle<'_> {
                         .map_err(broke)?;
                     if self.robots.is_empty() {
                         status("battle over");
+                        self.launcher.battle_over();
                         return Ok(());
                     }
                 }

@@ -5,7 +5,8 @@
 use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
-use robocode_s_runner::local::{Environment, prepare, random_seed, run_local_battle_with};
+use robocode_s_runner::local::{Environment, prepare_with, random_seed, run_local_battle_with};
+use robocode_s_runner::pool::Pool;
 use robocode_s_runner::remote::run_remote_battle;
 use robocode_s_server::agents::AgentListener;
 use robocode_s_server::net::is_loopback;
@@ -15,6 +16,7 @@ use std::fs::File;
 use std::io::{IsTerminal, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub const USAGE: &str = "\
@@ -44,6 +46,9 @@ Robots and runtime:
                          else the archive's robots, or the sample robots of a
                          built source tree)
   --memory MB            heap per robot JVM (default 512)
+  --warm N               start N robot JVMs while the robots are looked up,
+                         instead of afterwards (default: one per robot; 0 starts
+                         them when the battle does)
   --data DIR             data directory: JRE, battle files ($ROBOCODES_DATA;
                          default: the user data folder from a release archive,
                          else target/robocodes-data)
@@ -100,6 +105,8 @@ pub struct Options {
     /// Java, robot host, data directory and robot jars.
     pub env: Environment,
     pub memory_mb: u32,
+    /// `--warm`: robot hosts to start ahead; `None`: one per robot.
+    pub warm: Option<usize>,
     pub json: bool,
     pub record: Option<PathBuf>,
     pub paint: bool,
@@ -130,6 +137,7 @@ impl Options {
             turn_timeout: ServerConfig::default().turn_timeout,
             env: Environment::from_env(),
             memory_mb: 512,
+            warm: None,
             json: false,
             record: None,
             paint: false,
@@ -183,6 +191,7 @@ impl Options {
                 }
                 "--jar" => jars.push(PathBuf::from(value(arg)?)),
                 "--memory" => o.memory_mb = number(arg, value(arg)?)?,
+                "--warm" => o.warm = Some(number(arg, value(arg)?)?),
                 "--data" => o.env.data = value(arg)?.into(),
                 "--java" => o.env.java = Some(value(arg)?.into()),
                 "--host-lib" => o.env.host_lib = value(arg)?.into(),
@@ -343,7 +352,27 @@ pub fn run(o: &Options) -> Result<(), String> {
         record: o.record.clone(),
         ..Default::default()
     };
-    let (host, battle) = prepare(&o.env, &o.robots, config, o.memory_mb)?;
+    // The robots' JVMs start while the robots are described. Robots on agents run there.
+    let warm = o.warm.unwrap_or(o.robots.len());
+    let pool = (warm > 0 && agents.is_none()).then(|| {
+        let dir = o
+            .env
+            .data
+            .join("pool")
+            .join(format!("{}", std::process::id()));
+        Arc::new(Pool::new(dir))
+    });
+    let (host, battle) = prepare_with(
+        &o.env,
+        &o.robots,
+        config,
+        o.memory_mb,
+        pool.as_ref().map(|pool| (pool, warm)),
+    )?;
+    // One battle: the hosts started are all it needs.
+    if let Some(pool) = &pool {
+        pool.no_refill();
+    }
     let statics: Vec<v1::RobotStatics> = battle.robots.iter().map(|r| r.statics.clone()).collect();
     let dir = battle.dir.clone();
 
@@ -535,6 +564,14 @@ mod tests {
         assert!(Options::parse(&args("sample.Fire --rounds x")).is_err());
         assert!(Options::parse(&args("sample.Fire --rounds 0")).is_err());
         assert!(Options::parse(&args("sample.Fire --bogus")).is_err());
+    }
+
+    #[test]
+    fn warm_hosts_default_to_the_robots() {
+        assert_eq!(Options::parse(&args("a.B")).unwrap().warm, None);
+        assert_eq!(Options::parse(&args("a.B --warm 0")).unwrap().warm, Some(0));
+        assert_eq!(Options::parse(&args("a.B --warm 3")).unwrap().warm, Some(3));
+        assert!(Options::parse(&args("a.B --warm x")).is_err());
     }
 
     #[test]

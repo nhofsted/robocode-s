@@ -8,16 +8,20 @@ use crate::{RACE, classic_race, compare_snapshot, load, rounds, rules, setups, s
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
 use robocode_s_runner::local::{LocalBattle, LocalRobot, lookup_name, run_local_battle};
+use robocode_s_runner::pool::Pool;
 use robocode_s_server::ServerConfig;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
-/// Runs the battle of `recording` live and compares it with the recording.
+/// Runs the battle of `recording` live and compares it with the recording; with a `pool`,
+/// the robots' hosts are warm ones (they must change nothing).
 pub fn live_battle(
     recording: &Path,
     host: &JavaHost,
     jars: &[PathBuf],
     work: &Path,
+    pool: Option<&Arc<Pool>>,
 ) -> Result<String, String> {
     let lines = load(recording);
     let header = &lines[0];
@@ -77,7 +81,11 @@ pub fn live_battle(
         jars: jars.to_vec(),
         dir: work.join(&battle_name),
         memory_mb: 512,
+        pool: pool.cloned(),
     };
+    if let Some(pool) = pool {
+        pool.warm(host, battle.memory_mb, true, battle.robots.len());
+    }
     let mut snapshots = Vec::new();
     let local = run_local_battle(host, &battle, None, |msg| {
         if let server_message::Msg::TurnSnapshot(s) = msg {
