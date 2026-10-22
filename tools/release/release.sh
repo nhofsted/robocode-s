@@ -470,14 +470,23 @@ confirm() {
 cmd_publish() {
   local version="${1:?VERSION}" dry=0 tools="$ROOT/tools/release"
   [ "${2:-}" = --dry-run ] && dry=1
+  local dir="${ROBOCODES_DIST_ROOT:-$ROOT/target/release-dist}/$version"
+  [ -f "$dir/SHA256SUMS" ] || die "no $dir/SHA256SUMS: run build --version $version first"
+  # The cask downloads the macOS apps: without a macOS build there is no tap to publish.
+  local macos=0
+  grep -q -- "-macos-.*\.app\.zip\$" "$dir/SHA256SUMS" && macos=1
   local n=0 names=("GitHub release v$version (public, with all files)"
     "apt and dnf repositories on https://rumble.planethofstede.be/packages/ (signed with ROBOCODES_GPG_KEY)"
     "winget pull request to microsoft/winget-pkgs (NickHofstede.robocode-s $version)"
     "Homebrew tap nhofsted/homebrew-robocode-s (cask $version)")
   step() {
     n=$((n + 1))
-    local title="${names[$((n - 1))]}"; shift
+    local title="${names[$((n - 1))]}" name="$1"; shift
     echo; echo "== Step $n of 4: $title"
+    if [ "$name" = tap ] && [ $macos = 0 ]; then
+      echo "   skipped: no macOS build in this release (build it on a Mac first)"
+      return 0
+    fi
     if [ $dry = 1 ]; then
       echo "   would run: $*"
       return 0
@@ -486,12 +495,33 @@ cmd_publish() {
   }
   if [ $dry = 1 ]; then
     echo "DRY RUN: nothing is run or sent."
+    echo
+    echo "What the real run needs:"
+    if [ -n "${ROBOCODES_GPG_KEY:-}" ]; then
+      echo "   ok       ROBOCODES_GPG_KEY is set ($ROBOCODES_GPG_KEY)"
+    else
+      echo "   MISSING  ROBOCODES_GPG_KEY: the repositories' signing key (tools/release/repo.py keygen)"
+    fi
+    if aws sts get-caller-identity --profile robocode-s >/dev/null 2>&1; then
+      echo "   ok       AWS profile robocode-s is signed in"
+    else
+      echo "   MISSING  AWS profile robocode-s: aws sso login --profile robocode-s (and the packages bucket: cd infra && pnpm deploy)"
+    fi
+    if gh auth status >/dev/null 2>&1; then
+      echo "   ok       gh is signed in"
+    else
+      echo "   MISSING  gh: gh auth login"
+    fi
     step upload "$0" upload "$version" --publish
     step repo "$tools/repo.py" build "$version" --pull '&&' "$tools/repo.py" upload --for-real
     step winget "$tools/winget.py" "$version" --submit --for-real
     step tap "$tools/tap.sh" "$version" --for-real
-    echo; echo "The commands each step runs, printed by the tools themselves:"
-    "$tools/repo.py" upload || true
+    if [ -d "$ROOT/target/package-repo/apt" ]; then
+      echo; echo "The repository upload, as repo.py would run it:"
+      python3 -I "$tools/repo.py" upload || true
+    else
+      echo; echo "(The repository is built by step 2 itself, which then shows its upload before asking again.)"
+    fi
     return 0
   fi
   step upload "$0" upload "$version" --publish
