@@ -22,6 +22,9 @@ each battle and when the connection drops; Ctrl+C stops it.
                          CA-issued certificate, and a loopback server is
                          reached without TLS
   --slots N              robots at once (default: no limit)
+  --warm N               robot JVMs to keep started, waiting for the next
+                         battle's robots (default: --slots; 0: none, they start
+                         when the battle asks)
   --sandbox KIND         what robots run in: os, bwrap, docker, none, as for
                          `robocode-s battle` (default os where there is one)
   --data DIR             data directory: JRE, jar cache, robot homes
@@ -40,6 +43,8 @@ pub struct Options {
     pub token: String,
     pub pin: Option<Fingerprint>,
     pub slots: u32,
+    /// `--warm`: robot hosts to keep started; `None`: the slots.
+    pub warm: Option<usize>,
     pub env: Environment,
 }
 
@@ -50,6 +55,7 @@ impl Options {
             token: std::env::var("ROBOCODES_AGENT_TOKEN").unwrap_or_default(),
             pin: None,
             slots: 0,
+            warm: None,
             env: Environment::from_env(),
         };
         let mut args = args.iter();
@@ -74,6 +80,13 @@ impl Options {
                     o.slots = v
                         .parse()
                         .map_err(|_| format!("--slots: not a valid number: {v}"))?
+                }
+                "--warm" => {
+                    let v = value()?;
+                    o.warm = Some(
+                        v.parse()
+                            .map_err(|_| format!("--warm: not a valid number: {v}"))?,
+                    )
                 }
                 "--sandbox" => {
                     o.env.sandbox = value()?.parse().map_err(|e| format!("--sandbox: {e}"))?
@@ -104,7 +117,8 @@ pub fn run_agent(o: &Options) -> Result<(), String> {
     // Deterministic battles need the determinism agent; it is checked here once.
     let host = env.host(true)?;
     let dir = std::path::absolute(env.data.join("agent")).map_err(|e| e.to_string())?;
-    let launcher = JvmLauncher::new(host, &dir)?;
+    let warm = o.warm.unwrap_or(o.slots as usize);
+    let launcher = JvmLauncher::new(host, &dir, warm)?;
     let config = AgentConfig {
         server: o.server.clone(),
         token: o.token.clone(),
@@ -131,9 +145,10 @@ mod tests {
     fn parses_the_agent_options() {
         let pin = format!("sha256:{}", ["AB"; 32].join(":"));
         let o = Options::parse(&args(&format!(
-            "--server h:7655 --token t --fingerprint {pin} --slots 4 --sandbox none"
+            "--server h:7655 --token t --fingerprint {pin} --slots 4 --warm 2 --sandbox none"
         )))
         .unwrap();
+        assert_eq!(o.warm, Some(2));
         assert_eq!(
             (o.server.as_str(), o.token.as_str(), o.slots),
             ("h:7655", "t", 4)

@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod jre;
 pub mod local;
+pub mod pool;
 pub mod remote;
 mod sandbox;
 
@@ -38,6 +39,10 @@ pub enum Transport {
     /// ([`RobotProcess::take_pipes`]): the pipes are the robot's identity, and it needs no
     /// network (ADR 0019).
     Stdio,
+    /// [`Transport::Stdio`] with a robot host that starts without its robot (`--warm`) and
+    /// waits for its assignment on stdin ([`pool`], design §6.2). The launch's robot, jars
+    /// and seed are for that assignment, not the command line.
+    Warm,
     /// Over TCP, for a robot a server reaches by address.
     Tcp {
         /// Server address, e.g. `127.0.0.1:7654`.
@@ -97,22 +102,26 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     args.push("io.github.nhofsted.robocodes.compat.RobotHost".into());
     match &launch.transport {
         Transport::Stdio => args.push("--stdio".into()),
+        Transport::Warm => args.extend(["--stdio".into(), "--warm".into()]),
         Transport::Tcp { server, .. } => {
             args.push("--server".into());
             args.push(server.clone());
         }
     }
-    for (flag, value) in [
-        ("--robot", launch.robot.clone()),
-        ("--home", launch.home.display().to_string()),
-        ("--seed", launch.seed.to_string()),
-    ] {
-        args.push(flag.into());
-        args.push(value);
-    }
-    for jar in &launch.jars {
-        args.push("--jar".into());
-        args.push(jar.display().to_string());
+    args.push("--home".into());
+    args.push(launch.home.display().to_string());
+    if !matches!(launch.transport, Transport::Warm) {
+        for (flag, value) in [
+            ("--robot", launch.robot.clone()),
+            ("--seed", launch.seed.to_string()),
+        ] {
+            args.push(flag.into());
+            args.push(value);
+        }
+        for jar in &launch.jars {
+            args.push("--jar".into());
+            args.push(jar.display().to_string());
+        }
     }
     args
 }
@@ -172,7 +181,7 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         .args(jvm_args(&seen_host, &seen_launch))
         .current_dir(&launch.home);
     let stdio = match &launch.transport {
-        Transport::Stdio => true,
+        Transport::Stdio | Transport::Warm => true,
         Transport::Tcp { token, .. } => {
             sandboxed.command.env(TOKEN_ENV, token);
             false

@@ -36,4 +36,4 @@ The protocol already had a runner role (`ROLE_RUNNER`, `RunnerInfo`, `LaunchRobo
 - Observers off loopback need the fingerprint (or a CA's certificate), and an observer's token no longer travels in the clear.
 - The certificate is long-lived and self-signed: deleting `tls/` in the data folder makes a new one, which clients must pin again.
 - No new crates: rustls, ring and webpki-roots were already compiled in for the JRE download.
-- Warm pools of robot processes (#82) are left for later.
+- Warm pools of robot processes (#82) came after it (design §6.8); `robocode-s agent --warm` keeps them.

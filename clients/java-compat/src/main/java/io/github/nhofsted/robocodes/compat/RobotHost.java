@@ -8,6 +8,7 @@ import io.github.nhofsted.robocodes.protocol.v1.ClientMessage;
 import io.github.nhofsted.robocodes.protocol.v1.Hello;
 import io.github.nhofsted.robocodes.protocol.v1.ProtocolVersion;
 import io.github.nhofsted.robocodes.protocol.v1.Role;
+import io.github.nhofsted.robocodes.protocol.v1.RobotAssignment;
 import io.github.nhofsted.robocodes.protocol.v1.ServerMessage;
 import net.sf.robocode.core.ContainerBase;
 import net.sf.robocode.host.IHostManager;
@@ -23,6 +24,7 @@ import robocode.control.RobotSpecification;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -62,6 +64,14 @@ import java.util.regex.Pattern;
  * agent loaded, the robot's random streams are derived from the seed and its unique name
  * (ADR 0009).
  *
+ * <p>{@code robot-host --stdio --warm --home dir} starts without a robot, for a runner's
+ * warm pool (design §6.2): the JVM and classic's container are started while the host
+ * waits on its stdin for a {@link RobotAssignment}, the robot, its seed and the mode. The
+ * runner has put the robot's jars into {@code dir/jars} (sandbox grants are fixed when the
+ * process starts, so the home is all it may read and write); the host moves them to where
+ * classic reads them. Then it goes on as above. Nothing of the robot is initialized before the
+ * assignment: its random streams are configured after {@code HelloAck}, as always.
+ *
  * <p>{@code robot-host --describe --home dir --jar robot.jar --robot a [--robot b ...]}
  * instead prints what classic's repository knows about each robot, teams expanded into
  * their members, in battle order. One tab-separated line per robot: {@code robot}, the
@@ -86,6 +96,10 @@ public final class RobotHost {
         if (stdio) {
             args = Arrays.stream(args).filter(a -> !a.equals("--stdio")).toArray(String[]::new);
         }
+        boolean warm = Arrays.asList(args).contains("--warm");
+        if (warm) {
+            args = Arrays.stream(args).filter(a -> !a.equals("--warm")).toArray(String[]::new);
+        }
         String server = null;
         String token = System.getenv().getOrDefault("ROBOCODES_ROBOT_TOKEN", "");
         List<String> robots = new ArrayList<>();
@@ -109,6 +123,16 @@ public final class RobotHost {
                         + "--jar robot.jar [--robot name ...]");
             }
             System.exit(describe(robots, jars, home));
+        }
+        if (warm) {
+            if (!stdio || home == null || !robots.isEmpty() || !jars.isEmpty()) {
+                throw new IllegalArgumentException("usage: robot-host --stdio --warm --home dir");
+            }
+            InputStream in = new BufferedInputStream(new FileInputStream(FileDescriptor.in));
+            OutputStream out = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
+            System.setOut(System.err);
+            System.setIn(new ByteArrayInputStream(new byte[0]));
+            System.exit(runWarm(in, out, token, home));
         }
         String robot = robots.isEmpty() ? null : robots.get(0);
         if ((server == null) != stdio || robot == null || home == null) {
@@ -144,7 +168,57 @@ public final class RobotHost {
         // robots by process and container instead (design §6).
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
+        return play(in, out, token, robot, jars, home, seed, null);
+    }
 
+    /**
+     * A warm host: loads what it can before the robot is known, then reads the
+     * {@link RobotAssignment} from {@code in} and plays the robot. Returns 0 if the
+     * runner closes the pipe instead (the pool is discarded).
+     */
+    static int runWarm(InputStream in, OutputStream out, String token, Path home) throws Exception {
+        System.setProperty("NOSECURITY", "true");
+        // Classic's settings and engine (container, modules, repository) are independent of
+        // the robot. Its repository reads the robots directory when asked for the robot
+        // (not before: jars that arrive while it starts up are not found).
+        Files.createDirectories(home.resolve("robots"));
+        configure(home, List.of());
+        RobocodeEngine engine = new RobocodeEngine(home.toFile());
+        warmUp();
+        RobotAssignment assignment = RobotAssignment.parseDelimitedFrom(in);
+        if (assignment == null) {
+            return 0;
+        }
+        if (assignment.getDeterministic() != RobotRandomness.isAgentInstalled()) {
+            System.err.println("this host was started "
+                    + (RobotRandomness.isAgentInstalled() ? "" : "not ") + "deterministic");
+            return 1;
+        }
+        List<Path> jars = new ArrayList<>();
+        for (String jar : assignment.getJarsList()) {
+            Path from = home.resolve(jar).normalize();
+            if (!from.startsWith(home.normalize())) {
+                System.err.println("jar outside the home: " + jar);
+                return 1;
+            }
+            jars.add(Files.move(from, home.resolve("robots").resolve(from.getFileName()),
+                    StandardCopyOption.REPLACE_EXISTING));
+        }
+        return play(in, out, token, assignment.getRobot(), jars, home, assignment.getSeed(), engine);
+    }
+
+    /** Loads the protocol's classes, which the robot's connection needs first. */
+    private static void warmUp() throws IOException {
+        var buffer = new ByteArrayOutputStream();
+        ClientMessage.newBuilder().setHello(Hello.newBuilder()
+                .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(1))
+                .setRole(Role.ROLE_ROBOT)).build().writeDelimitedTo(buffer);
+        ServerMessage.parseDelimitedFrom(new ByteArrayInputStream(buffer.toByteArray()));
+    }
+
+    /** The robot's side of the protocol, with classic's {@code engine} if it is started already. */
+    private static int play(InputStream in, OutputStream out, String token, String robot,
+            List<Path> jars, Path home, long seed, RobocodeEngine engine) throws Exception {
         ClientMessage.newBuilder().setHello(Hello.newBuilder()
                 .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(1))
                 .setRole(Role.ROLE_ROBOT)
@@ -162,7 +236,9 @@ public final class RobotHost {
 
         // Initializes classic's container and repository. Not closed: classic's cleanup
         // expects its battle module, and the process ends with the battle anyway.
-        RobocodeEngine engine = new RobocodeEngine(home.toFile());
+        if (engine == null) {
+            engine = new RobocodeEngine(home.toFile());
+        }
         RobotSpecification[] found = engine.getLocalRepository(robot);
         if (found.length == 0) {
             System.err.println("robot " + robot + " not found in " + jars);
@@ -265,8 +341,16 @@ public final class RobotHost {
                 copies.put(jar.getFileName().toString(), jar.toAbsolutePath());
             }
         }
-        // Classic's development paths, in its robocode.properties (it splits them at commas
-        // and the path separator).
+        configure(home, folders);
+        return copies;
+    }
+
+    /**
+     * Writes classic's settings into {@code home}: its development paths (class folders),
+     * in its robocode.properties (it splits them at commas and the path separator), and
+     * what it would otherwise measure.
+     */
+    private static void configure(Path home, List<String> folders) throws IOException {
         Path settings = Files.createDirectories(home.resolve("config")).resolve("robocode.properties");
         Properties properties = new Properties();
         if (Files.isRegularFile(settings)) {
@@ -285,7 +369,6 @@ public final class RobotHost {
         // Robots in a class folder write their data files into the battle's home, as robots
         // in jars do, rather than into the folder (classic's default for development robots).
         System.setProperty("ALWAYSUSECACHEFORDATA", "true");
-        return copies;
     }
 
     /**

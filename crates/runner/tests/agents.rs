@@ -201,6 +201,7 @@ fn battle(dir: &Path, names: &[&str]) -> LocalBattle {
         jars: vec![jar],
         dir: dir.join("battle"),
         memory_mb: 128,
+        pool: None,
     }
 }
 
@@ -536,7 +537,13 @@ fn real_robots_on_an_agent_fight_the_battle_they_fight_locally() {
     let local = run_local_battle(&host, &battle, None, |_| {}).unwrap();
     let dir = temp("jvm");
     let (listener, pin) = listener(&dir);
-    for sandbox in [Sandbox::None, Sandbox::Os] {
+    // The agent's robots start cold, or from its warm pool.
+    for (sandbox, warm) in [
+        (Sandbox::None, 0),
+        (Sandbox::None, 2),
+        (Sandbox::Os, 0),
+        (Sandbox::Os, 2),
+    ] {
         if let Some(why) = sandbox.unavailable() {
             eprintln!("{sandbox} skipped: {why}");
             continue;
@@ -546,8 +553,8 @@ fn real_robots_on_an_agent_fight_the_battle_they_fight_locally() {
             jars: Vec::new(),
             ..env.clone()
         };
-        let agent_dir = dir.join(format!("agent-{sandbox}"));
-        let launcher = JvmLauncher::new(agent_env.host(true).unwrap(), &agent_dir).unwrap();
+        let agent_dir = dir.join(format!("agent-{sandbox}-{warm}"));
+        let launcher = JvmLauncher::new(agent_env.host(true).unwrap(), &agent_dir, warm).unwrap();
         assert!(launcher.info().0.contains(&format!("sandbox {sandbox}")));
         let stop = Arc::new(AtomicBool::new(false));
         let config = agent_config(&listener, pin, &agent_dir);
@@ -568,7 +575,10 @@ fn real_robots_on_an_agent_fight_the_battle_they_fight_locally() {
         .unwrap();
         stop.store(true, Ordering::SeqCst);
         agent.join().unwrap().unwrap();
-        assert_eq!(remote.local.outcome, local.outcome, "sandbox {sandbox}");
+        assert_eq!(
+            remote.local.outcome, local.outcome,
+            "sandbox {sandbox}, warm {warm}"
+        );
     }
     let _ = std::fs::remove_dir_all(&battle.dir);
     listener.close();
