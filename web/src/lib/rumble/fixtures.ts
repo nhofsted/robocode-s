@@ -12,6 +12,8 @@ import {
 	type BotId,
 	type BotRumble,
 	type BotVersion,
+	type Contributor,
+	type Contributors,
 	type Division,
 	type HistoryPoint,
 	type Metrics,
@@ -38,6 +40,7 @@ export interface Fixtures {
 	index(): RumbleIndex;
 	rankings(rumble: RumbleId): Rankings | undefined;
 	bot(id: BotId): BotDetails | undefined;
+	contributors(): Contributors;
 }
 
 interface Bot {
@@ -165,9 +168,12 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		};
 	};
 
+	const contributors = (): Contributors => createContributors(seed, now);
+
 	const get = (path: string): unknown | undefined => {
 		const clean = path.replace(/^\/+/, '');
 		if (clean === 'rumbles.json') return index();
+		if (clean === 'contributors.json') return contributors();
 		let m = /^rankings\/([^/]+)\.json$/.exec(clean);
 		if (m) return rankings(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
@@ -175,7 +181,41 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		return undefined;
 	};
 
-	return { get, index, rankings, bot };
+	return { get, index, rankings, bot, contributors };
+}
+
+const LOGIN_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night', 'cold', 'dusty'];
+const LOGIN_SECOND = ['coder', 'farm', 'node', 'box', 'rig', 'lab', 'pi', 'cluster', 'tower', 'laptop', 'vm'];
+
+/** The volunteers list: heavy-tailed battle counts, sorted by battles, most first. */
+function createContributors(seed: number, now: Date): Contributors {
+	const rand = mulberry32(seed ^ 0x5eed);
+	const logins = new Set<string>();
+	const list: Contributor[] = [];
+	while (list.length < 40) {
+		const login = `${pick(rand, LOGIN_FIRST)}-${pick(rand, LOGIN_SECOND)}${rand() < 0.5 ? Math.floor(rand() * 100) : ''}`;
+		if (logins.has(login)) continue;
+		logins.add(login);
+		const battles = Math.max(1, Math.floor(200_000 * rand() ** 4));
+		const active = rand() < 0.6;
+		const sinceDays = 1 + Math.floor(rand() * 200);
+		const verifier = battles > 5000 && rand() < 0.8;
+		list.push({
+			login,
+			country: COUNTRIES[hash(login) % COUNTRIES.length] || null,
+			battles,
+			battlesWeek: active ? Math.min(battles, Math.floor(battles * (0.02 + rand() * 0.2))) : 0,
+			tier: verifier ? 'verifier' : rand() < 0.03 ? 'quarantined' : 'new',
+			since: new Date(now.getTime() - sinceDays * 86_400_000).toISOString()
+		});
+	}
+	list.sort((a, b) => b.battles - a.battles || (a.login < b.login ? -1 : 1));
+	return {
+		schema: SCHEMA_VERSION,
+		generatedAt: now.toISOString(),
+		engineVersion: ENGINE_VERSION,
+		contributors: list
+	};
 }
 
 function createBots(rand: () => number, size: number, now: Date): Bot[] {

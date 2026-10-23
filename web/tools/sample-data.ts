@@ -1,6 +1,6 @@
 // Writes the synthetic rumble data set (src/lib/rumble/fixtures.ts) as static files, for hosting
 // the site before the rankings Lambda exists. The site shows its "sample data" notice with it.
-// Usage: node tools/sample-data.ts <outdir>    (writes <outdir>/rumbles.json, rankings/, bots/)
+// Usage: node tools/sample-data.ts <outdir>    (writes <outdir>/rumbles.json, contributors.json, rankings/, bots/)
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFixtures } from '../src/lib/rumble/fixtures.ts';
@@ -17,6 +17,7 @@ const write = (path: string, body: unknown) => {
 	writeFileSync(join(outDir, path), JSON.stringify(body));
 };
 
+write('contributors.json', fixtures.contributors());
 const index = fixtures.index();
 write('rumbles.json', index);
 const bots = new Set<string>();

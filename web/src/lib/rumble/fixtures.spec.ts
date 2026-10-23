@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classOf, createFixtures } from './fixtures.ts';
-import type { BotDetails, Rankings, RumbleIndex } from './types.ts';
+import type { BotDetails, Contributors, Rankings, RumbleIndex } from './types.ts';
 
 const fixtures = createFixtures({ seed: 42, bots: 120 });
 const index = fixtures.get('rumbles.json') as RumbleIndex;
@@ -94,6 +94,19 @@ describe('fixtures', () => {
 		expect(fixtures.get('rankings/nope.json')).toBeUndefined();
 		expect(fixtures.get('bots/no.such.Bot.json')).toBeUndefined();
 		expect(fixtures.get('other.json')).toBeUndefined();
+	});
+});
+
+describe('contributors', () => {
+	it('are sorted by battles with week counts within the total', () => {
+		const file = fixtures.get('contributors.json') as Contributors;
+		expect(file.contributors.length).toBeGreaterThan(0);
+		file.contributors.forEach((c, i) => {
+			if (i > 0) expect(c.battles).toBeLessThanOrEqual(file.contributors[i - 1].battles);
+			expect(c.battlesWeek).toBeLessThanOrEqual(c.battles);
+			expect(c.battles).toBeGreaterThan(0);
+		});
+		expect(new Set(file.contributors.map((c) => c.login)).size).toBe(file.contributors.length);
 	});
 });
 

@@ -163,3 +163,31 @@ export interface HistoryPoint {
 	aps: number;
 	glicko: number;
 }
+
+/**
+ * `/data/v1/contributors.json`: the volunteers who contributed battles, sorted by `battles`,
+ * most first. Users who have not contributed, who hid themselves (opt-out) or are banned are
+ * not listed.
+ */
+export interface Contributors {
+	schema: typeof SCHEMA_VERSION;
+	generatedAt: string;
+	/** The engine version the counters of this file refer to. */
+	engineVersion: number;
+	contributors: Contributor[];
+}
+
+export interface Contributor {
+	/** The volunteer's login. */
+	login: string;
+	/** The volunteer's country (see `Author.country`). */
+	country: string | null;
+	/** Battles contributed in total. */
+	battles: number;
+	/** Battles contributed in the last 7 days. */
+	battlesWeek: number;
+	/** Reputation tier: `new` (below the verifier threshold), `verifier` or `quarantined`. */
+	tier: 'new' | 'verifier' | 'quarantined';
+	/** When the volunteer first signed in. */
+	since: string;
+}
