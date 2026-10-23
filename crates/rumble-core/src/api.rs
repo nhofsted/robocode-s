@@ -112,6 +112,35 @@ impl ErrorBody {
     }
 }
 
+/// An error response as the server's logic produces it: the code (and so the status) and a
+/// message for humans.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiError {
+    pub code: ErrorCode,
+    pub message: String,
+}
+
+impl ApiError {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> ApiError {
+        ApiError {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn body(&self) -> ErrorBody {
+        ErrorBody::new(self.code, self.message.clone())
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code.as_str(), self.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
 // ---- GET info ----
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
