@@ -14,6 +14,7 @@ use std::thread;
 fn entry(name: &str, token: &str, interactive: bool) -> RobotEntry {
     RobotEntry {
         token: token.into(),
+        debug: false,
         statics: v1::RobotStatics {
             name: name.into(),
             full_class_name: name.into(),
