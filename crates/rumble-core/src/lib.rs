@@ -11,6 +11,7 @@ pub mod data;
 pub mod ids;
 pub mod jar;
 pub mod metrics;
+pub mod plan;
 pub mod record;
 pub mod results;
 pub mod slots;
