@@ -737,7 +737,7 @@ Parallel tracks: P1 first; then P2, P3, P10 in parallel; P4/P5/P6 after P3; P7 a
 
 1. **Pairing statistics live in an S3 state file, folded hourly from a DynamoDB result log**, instead of DynamoDB pairing items and per-bot sums updated by delta (design §12.6). A melee battle costs one record instead of 45 pairing writes, the daily run needs no table scan, and the log is the per-user log of §12.4. Rankings data stays daily; planning data is up to an hour old.
 2. **Assignments are signed batch tokens, not rows.** One post per batch, made idempotent by a batch marker; the token carries seeds, bots and deadline.
-3. **One table, no GSIs**, 25/25 provisioned in prod. Open: whether the Organization's other project already uses part of DynamoDB's free capacity (it is counted per Organization, ADR 0016); the table would then get less.
+3. **One table, no GSIs**, 25/25 provisioned in prod. Checked 2026-10-24: the Organization's other project uses on-demand tables only, so the provisioned 25/25 is all the rumble's.
 4. **Crates:** `crates/rumble-core` and `crates/rumble-client` in the root workspace; `rumble/lambda` a separate workspace (AWS SDK compile times stay out of `cargo clippy --workspace`), built with cargo-zigbuild for `aarch64-unknown-linux-gnu.2.34`.
 5. **Our token travels in `X-Rumble-Token`** (OAC owns `Authorization`); every POST carries `x-amz-content-sha256`, computed by the client and by the site's fetch wrapper.
 6. **Device-flow tokens are checked with GitHub's application token API** (proves they were issued to our app) and then deleted; the server never keeps a GitHub token.
@@ -759,6 +759,5 @@ Parallel tracks: P1 first; then P2, P3, P10 in parallel; P4/P5/P6 after P3; P7 a
 21. **Launch:** a dev-stage trial first (the owner, maybe a few RoboWiki regulars), then prod opens to everyone after the full import and a stable day. The M4 release (0.2.0) goes to every channel of design §6.9: GitHub release and download page, apt/dnf, winget, Homebrew.
 
 Open questions for the owner:
-- Q1 (decision 3): the other project's DynamoDB usage.
 - Q2: the GitHub OAuth app owner (personal account or an organization) and the admin GitHub id(s).
 - Q5: the RoboWiki announcement text. (Q3, Q4 and the archive as a mirror were answered 2026-10-24: fresh data, Docker or `--unsandboxed` on macOS, the archive as the last fallback.)
