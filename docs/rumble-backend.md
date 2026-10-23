@@ -437,7 +437,7 @@ V(A,B)    = gain(n) · close · Σ_{r ∈ R(A,B)} ½ (contested_A,r · coverage_
 3. Compute the plan (§10.3) for each division and write `plan.json.gz`, then `pairings.bin` with the new `done`. The state file is its own cursor: a crash before it is written folds the same hours again into the old state, so nothing is counted twice.
 4. Probation and failure transitions (§12.3) as UpdateItems on `REG`.
 
-`pairings.bin` (`rumble_core::state`): gzip of `"RSPS" | u16 version 1 | u32 engine | u8 division | u32 done hour (YYYYMMDDHH) | u64 battles | u32 versions | versions × (u32 vid, u32 battles, u32 failed, u32 last-20 failure bits) | u32 count | count × (u32 a, u32 b, u32 n, f64 s, f64 q, f64 v, u16 day)` sorted by vid and (a, b); 42 bytes a pairing, about 25 MB for 1v1 at 1,100 bots before compression. Weights of −1 can make `n` reach 0, in which case the entry is dropped.
+`pairings.bin` (`rumble_core::state`): gzip of `"RSPS" | u16 version 1 | u32 engine | u8 division | u32 done hour (YYYYMMDDHH) | u64 battles | u32 versions | versions × (u32 vid, u32 battles, u32 failed, u32 last-20 failure bits) | u32 count | count × (u32 a, u32 b, u32 n, f64 s, f64 q, f64 v, u16 day)` sorted by vid and (a, b); 38 bytes a pairing, about 23 MB for 1v1 at 1,100 bots before compression. Weights of −1 can make `n` reach 0, in which case the entry is dropped.
 
 `plan.json.gz`:
 

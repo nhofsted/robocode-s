@@ -4,13 +4,20 @@
 //! no randomness. Callers pass random bytes and the current time in.
 
 pub mod api;
+pub mod auth;
 pub mod codesize;
 pub mod config;
+pub mod data;
 pub mod ids;
 pub mod jar;
+pub mod metrics;
 pub mod record;
+pub mod results;
+pub mod slots;
 pub mod state;
+pub mod store;
 pub mod token;
+pub mod verify;
 
 pub use config::Config;
 pub use ids::{Division, RumbleId, WeightClass};
