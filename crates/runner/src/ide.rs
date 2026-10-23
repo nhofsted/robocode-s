@@ -149,7 +149,10 @@ impl RunConfiguration {
 
     pub fn classpath(&self) -> String {
         let separator = if cfg!(windows) { '\\' } else { '/' };
-        format!("{}{separator}*", self.host_lib.trim_end_matches(['/', '\\']))
+        format!(
+            "{}{separator}*",
+            self.host_lib.trim_end_matches(['/', '\\'])
+        )
     }
 
     pub fn vm_options_line(&self) -> String {
@@ -187,13 +190,24 @@ impl RunConfiguration {
     /// The configuration as text to read and copy from.
     pub fn text(&self) -> String {
         let mut out = String::new();
-        out.push_str("Run configuration for your IDE (Java 17 or newer; a Debug button starts it)\n\n");
+        out.push_str(
+            "Run configuration for your IDE (Java 17 or newer; a Debug button starts it)\n\n",
+        );
         let rows = [
             ("Main class", self.main_class.clone()),
-            ("Classpath", format!("{}   (every jar in that folder, besides the project's own)", self.classpath())),
+            (
+                "Classpath",
+                format!(
+                    "{}   (every jar in that folder, besides the project's own)",
+                    self.classpath()
+                ),
+            ),
             ("VM options", self.vm_options_line()),
             ("Program arguments", self.arguments_line()),
-            ("Environment", format!("{}={}", self.env_name, self.env_value)),
+            (
+                "Environment",
+                format!("{}={}", self.env_name, self.env_value),
+            ),
         ];
         for (name, value) in rows {
             out.push_str(&format!("  {name:<18} {value}\n"));
@@ -232,9 +246,15 @@ mod tests {
             main_class: MAIN_CLASS.into(),
             host_lib: "/opt/robocode-s/lib/robot-host".into(),
             vm_options: MODULE_OPENINGS.map(String::from).to_vec(),
-            arguments: ["--ide", "--server", "127.0.0.1:7878", "--home", "/my data/ide-home"]
-                .map(String::from)
-                .to_vec(),
+            arguments: [
+                "--ide",
+                "--server",
+                "127.0.0.1:7878",
+                "--home",
+                "/my data/ide-home",
+            ]
+            .map(String::from)
+            .to_vec(),
             env_name: TOKEN_ENV.into(),
             env_value: "abc".into(),
             agent: "/opt/robocode-s/lib/agent/java-determinism.jar".into(),

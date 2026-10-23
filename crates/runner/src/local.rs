@@ -6,8 +6,8 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
-use crate::ide;
 use crate::housekeeping::{remove_home, remove_stale_runs, robot_data_dir};
+use crate::ide;
 use crate::pool::{Pool, launch_with};
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport};
 use robocode_s_protocol::v1::{self, client_message, server_message};
@@ -873,7 +873,11 @@ pub fn prepare_ide(
     let dir = std::path::absolute(env.data.join("battles"))
         .map_err(|e| e.to_string())?
         .join(format!("{stamp}-{n}-{}", std::process::id()));
-    let mut jars = battle_jars(&host, &env.jars, &robots, &env.data.join("list"));
+    let mut jars = if robots.is_empty() {
+        env.jars.clone()
+    } else {
+        battle_jars(&host, &env.jars, &robots, &env.data.join("list"))
+    };
     let mut described = describe(
         &host,
         &jars,

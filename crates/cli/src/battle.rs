@@ -327,7 +327,10 @@ fn wait_for_ide(o: &Options, robots: &mut [String]) -> Result<IdeListener, Strin
     let here = loop {
         for k in 1..=count {
             if let Some(here) = listener.wait_for(k, &cancel) {
-                eprintln!("{} connected ({k} of {count})", here[k - 1].description.name);
+                eprintln!(
+                    "{} connected ({k} of {count})",
+                    here[k - 1].description.name
+                );
             }
         }
         let here = listener.robots();
