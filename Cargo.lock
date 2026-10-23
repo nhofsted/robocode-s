@@ -2718,14 +2718,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "robocode-s-rumble-client"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "robocode-s-rumble-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "robocode-s-rumble-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "flate2",
  "hmac",
  "serde",
  "serde_json",
  "sha2",
+ "zip",
 ]
 
 [[package]]
@@ -2734,7 +2748,6 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "libc",
- "flate2",
  "robocode-s-engine",
  "robocode-s-protocol",
  "robocode-s-server",

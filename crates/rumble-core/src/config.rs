@@ -26,6 +26,7 @@ pub struct Config {
     pub slots: SlotsConfig,
     pub plan: PlanConfig,
     pub jar: JarConfig,
+    pub submit: SubmitConfig,
     /// GitHub numeric ids with the admin role.
     pub admins: Vec<u64>,
 }
@@ -256,6 +257,28 @@ impl Default for JarConfig {
     }
 }
 
+/// Submission limits (spec §12.2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SubmitConfig {
+    /// Bots one user may own.
+    pub max_bots: u32,
+    /// New versions per bot per day.
+    pub versions_per_day: u32,
+    /// Younger GitHub accounts need the owner's approval to submit.
+    pub min_account_days: u32,
+}
+
+impl Default for SubmitConfig {
+    fn default() -> Self {
+        SubmitConfig {
+            max_bots: 5,
+            versions_per_day: 5,
+            min_account_days: 30,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -274,6 +297,7 @@ impl Default for Config {
             slots: SlotsConfig::default(),
             plan: PlanConfig::default(),
             jar: JarConfig::default(),
+            submit: SubmitConfig::default(),
             admins: vec![4_036_752],
         }
     }
@@ -344,10 +368,19 @@ mod tests {
                          "closeFactor": 10.0, "rankFactor": 2.0,
                          "minHourly": {"1v1": 200, "melee": 20}, "headroom": 1.5},
                 "jar": {"maxBytes": 5242880, "maxUnpacked": 20971520, "maxEntries": 5000},
+                "submit": {"maxBots": 5, "versionsPerDay": 5, "minAccountDays": 30},
                 "admins": [4036752]
             })
         );
         assert_eq!(config.divisions.get(Division::Melee).robots, 10);
+    }
+
+    #[test]
+    fn submit_limits() {
+        let config = Config::with_overrides(&json!({"submit": {"maxBots": 8}})).unwrap();
+        assert_eq!(config.submit.max_bots, 8);
+        assert_eq!(config.submit.versions_per_day, 5);
+        assert_eq!(config.submit.min_account_days, 30);
     }
 
     #[test]
