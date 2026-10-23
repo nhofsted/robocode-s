@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 base64 = "0.23.1"
+flate2 = "1.1.10"
 hmac = "0.13"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
