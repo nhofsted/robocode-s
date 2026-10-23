@@ -582,6 +582,16 @@ mod tests {
     }
 
     #[test]
+    fn robots_from_the_ide_are_marked_and_the_port_is_chosen() {
+        let o = Options::parse(&args("sample.Walls,@ide,@ide --ide-port 9000")).unwrap();
+        assert_eq!(o.robots, ["sample.Walls", "@ide", "@ide"]);
+        assert_eq!(o.ide_port, 9000);
+        let o = Options::parse(&args("@ide")).unwrap();
+        assert_eq!(o.ide_port, ide::DEFAULT_PORT);
+        assert!(Options::parse(&args("@ide --ide-port x")).is_err());
+    }
+
+    #[test]
     fn parses_robots_and_rules() {
         let o = Options::parse(&args(
             "sample.Fire,sample.Walls sample.Crazy --rounds 35 --seed -7 --width 1000 --hide-enemy-names --json",
