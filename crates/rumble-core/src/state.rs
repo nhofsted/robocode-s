@@ -10,14 +10,24 @@ use crate::record::{Record, division_code, division_from_code, pairing_score, pa
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 
 const MAGIC: &[u8; 4] = b"RSPS";
-const FILE_VERSION: u16 = 1;
+/// Version 2 added the reporters of each version's failures; version 1 files are still read.
+const FILE_VERSION: u16 = 2;
 /// Bytes per pairing in the file: `u32 a, u32 b, u32 n, f64 s, f64 q, f64 v, u16 day`.
 const PAIRING_BYTES: usize = 38;
-const VERSION_BYTES: usize = 16;
+/// Bytes per version in the file: version 1 `u32 vid, battles, failed, last20`; version 2 adds
+/// `u8 reporter count, 3 × u32 reporter hash`.
+const VERSION_BYTES_V1: usize = 16;
+const VERSION_BYTES: usize = 29;
+/// Reporters kept per version: enough for the rule "at least 3 distinct users" (§12.3).
+pub const MAX_REPORTERS: usize = 3;
+/// A successful battle that leaves fewer failures than this in the last 20 forgets the
+/// reporters: the failure share is then below any sensible `probation.failShare`.
+const RESET_FAILURES: u32 = 10;
 const LAST_20: u32 = (1 << 20) - 1;
 
 /// The sums of one pairing, from the side of A, the lower vid (§10.2).
@@ -86,9 +96,31 @@ pub struct VersionTally {
     pub failed: u32,
     /// The outcome of its last 20 battles, bit 0 the newest, 1 = failed.
     pub last20: u32,
+    /// Hashes ([`reporter_hash`]) of up to 3 distinct users who reported recent trusted failures.
+    pub reporters: [u32; MAX_REPORTERS],
+    pub reporter_count: u8,
+}
+
+/// The 32-bit hash of a reporter's uid kept in the failure tallies.
+pub fn reporter_hash(uid: &str) -> u32 {
+    let digest = Sha256::digest(uid.as_bytes());
+    u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
 }
 
 impl VersionTally {
+    /// Distinct reporters of recent failures, at most 3.
+    pub fn distinct_reporters(&self) -> u32 {
+        u32::from(self.reporter_count)
+    }
+
+    fn add_reporter(&mut self, hash: u32) {
+        let count = self.reporter_count as usize;
+        if count < MAX_REPORTERS && !self.reporters[..count].contains(&hash) {
+            self.reporters[count] = hash;
+            self.reporter_count += 1;
+        }
+    }
+
     /// Failures among the last 20 battles.
     pub fn recent_failures(&self) -> u32 {
         (self.last20 & LAST_20).count_ones()
@@ -101,6 +133,10 @@ impl VersionTally {
 
     fn push(&mut self, failed: bool) {
         self.last20 = ((self.last20 << 1) | u32::from(failed)) & LAST_20;
+        if !failed && self.recent_failures() < RESET_FAILURES {
+            self.reporters = [0; MAX_REPORTERS];
+            self.reporter_count = 0;
+        }
     }
 }
 
@@ -163,6 +199,12 @@ impl State {
     /// updates the failed version's tallies only if its reporter was trusted (§12.3). A
     /// negative weight undoes the counts but cannot undo the failure window's bits.
     pub fn fold(&mut self, record: &Record, day: u16) {
+        self.fold_from(record, day, &record.uid);
+    }
+
+    /// [`State::fold`] with an explicit reporter uid (the log item's uid): a trusted failure
+    /// adds the reporter to the version's distinct reporters (§12.3).
+    pub fn fold_from(&mut self, record: &Record, day: u16, reporter: &str) {
         if record.division != self.division {
             return;
         }
@@ -180,6 +222,7 @@ impl State {
                 tally.failed = add(tally.failed, w);
                 if w > 0 {
                     tally.push(true);
+                    tally.add_reporter(reporter_hash(reporter));
                 }
             }
             None => {
@@ -267,6 +310,10 @@ impl State {
             raw.extend_from_slice(&tally.battles.to_le_bytes());
             raw.extend_from_slice(&tally.failed.to_le_bytes());
             raw.extend_from_slice(&tally.last20.to_le_bytes());
+            raw.push(tally.reporter_count);
+            for r in tally.reporters {
+                raw.extend_from_slice(&r.to_le_bytes());
+            }
         }
         raw.extend_from_slice(&(pairings.len() as u32).to_le_bytes());
         for ((a, b), p) in &pairings {
@@ -294,7 +341,7 @@ impl State {
             return Err("pairings.bin: bad magic".to_string());
         }
         let version = reader.u16()?;
-        if version != FILE_VERSION {
+        if !(1..=FILE_VERSION).contains(&version) {
             return Err(format!("pairings.bin: unsupported version {version}"));
         }
         let engine = reader.u32()?;
@@ -302,18 +349,35 @@ impl State {
         let done = reader.u32()?;
         let battles = reader.u64()?;
         let version_count = reader.u32()? as usize;
-        if version_count > reader.0.len() / VERSION_BYTES {
+        let version_bytes = if version == 1 {
+            VERSION_BYTES_V1
+        } else {
+            VERSION_BYTES
+        };
+        if version_count > reader.0.len() / version_bytes {
             return Err("pairings.bin: truncated versions".to_string());
         }
         let mut state = State::new(engine, division, done);
         state.battles = battles;
         for _ in 0..version_count {
             let vid = reader.u32()?;
-            let tally = VersionTally {
+            let mut tally = VersionTally {
                 battles: reader.u32()?,
                 failed: reader.u32()?,
                 last20: reader.u32()?,
+                ..VersionTally::default()
             };
+            if version >= 2 {
+                tally.reporter_count = reader.u8()?;
+                if tally.reporter_count as usize > MAX_REPORTERS {
+                    return Err(format!(
+                        "pairings.bin: version {vid} has too many reporters"
+                    ));
+                }
+                for r in &mut tally.reporters {
+                    *r = reader.u32()?;
+                }
+            }
             if state.versions.insert(vid, tally).is_some() {
                 return Err(format!("pairings.bin: version {vid} twice"));
             }
@@ -618,10 +682,10 @@ mod tests {
         let mut s = state();
         s.fold(&duel(entry(1, 1.0, 1), entry(2, 3.0, 1)), 1);
         let raw = gunzip(&s.to_bytes());
-        // Header: magic, version 1, engine 1, division 0.
+        // Header: magic, version 2, engine 1, division 0.
         assert_eq!(&raw[..4], b"RSPS");
-        assert_eq!(&raw[4..6], &[1, 0]);
-        assert_eq!(raw.len(), 4 + 2 + 4 + 1 + 4 + 8 + 4 + 2 * 16 + 4 + 38);
+        assert_eq!(&raw[4..6], &[2, 0]);
+        assert_eq!(raw.len(), 4 + 2 + 4 + 1 + 4 + 8 + 4 + 2 * 29 + 4 + 38);
 
         assert!(State::from_bytes(b"not gzip").is_err());
         assert!(State::from_bytes(&gzip(&raw[..raw.len() - 1])).is_err());
@@ -630,7 +694,7 @@ mod tests {
         bad[0] = b'X';
         assert!(State::from_bytes(&gzip(&bad)).is_err());
         let mut bad = raw.clone();
-        bad[4] = 2;
+        bad[4] = 3;
         assert!(State::from_bytes(&gzip(&bad)).is_err());
         let mut bad = raw.clone();
         bad[10] = 9;
@@ -643,6 +707,55 @@ mod tests {
         let at = raw.len() - 38;
         bad[at..at + 4].copy_from_slice(&5u32.to_le_bytes());
         assert!(State::from_bytes(&gzip(&bad)).is_err());
+    }
+
+    #[test]
+    fn version_1_files_are_still_read() {
+        let mut s = state();
+        s.fold(&duel(entry(1, 10.0, 1), entry(2, 30.0, 2)), 5);
+        let mut failed = duel(entry(1, 0.0, 0), entry(3, 0.0, 0));
+        failed.failed = Some((1, FailReason::Crash));
+        s.fold(&failed, 5);
+        // Rewrite as a version 1 file: 16 bytes per version, no reporters.
+        let raw = gunzip(&s.to_bytes());
+        let head = 4 + 2 + 4 + 1 + 4 + 8 + 4;
+        let versions = 3;
+        let mut old = raw[..head].to_vec();
+        old[4] = 1;
+        for i in 0..versions {
+            let at = head + i * VERSION_BYTES;
+            old.extend_from_slice(&raw[at..at + VERSION_BYTES_V1]);
+        }
+        old.extend_from_slice(&raw[head + versions * VERSION_BYTES..]);
+        let back = State::from_bytes(&gzip(&old)).unwrap();
+        assert_eq!(back.pairing(1, 2), s.pairing(1, 2));
+        assert_eq!(back.versions[&3].failed, 1);
+        assert_eq!(back.versions[&3].reporter_count, 0);
+        assert_eq!(back.battles, s.battles);
+        // Writing it again gives a version 2 file.
+        assert_eq!(&gunzip(&back.to_bytes())[4..6], &[2, 0]);
+    }
+
+    #[test]
+    fn reporters_are_distinct_and_reset() {
+        let mut s = state();
+        let mut failed = duel(entry(1, 0.0, 0), entry(2, 0.0, 0));
+        failed.failed = Some((1, FailReason::Crash));
+        for reporter in ["g1", "g1", "g2", "g3", "g4"] {
+            s.fold_from(&failed, 1, reporter);
+        }
+        let t = s.versions[&2];
+        assert_eq!((t.failed, t.distinct_reporters()), (5, 3));
+        assert_eq!(t.reporters[0], reporter_hash("g1"));
+        // fold uses the record's uid.
+        failed.uid = "g9".into();
+        s.fold(&failed, 1);
+        assert_eq!(s.versions[&2].distinct_reporters(), 3);
+        // Successes push the failure share down: the reporters are forgotten.
+        for _ in 0..12 {
+            s.fold(&duel(entry(2, 10.0, 1), entry(3, 10.0, 1)), 1);
+        }
+        assert_eq!(s.versions[&2].distinct_reporters(), 0);
     }
 
     /// 1,100 bots, every pair: 604,450 pairings. Run with
