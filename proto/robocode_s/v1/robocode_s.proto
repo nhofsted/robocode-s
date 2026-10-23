@@ -91,6 +91,26 @@ message Hello {
   repeated string features = 4;
   // Runners only.
   RunnerInfo runner = 5;
+  // Robots started by an IDE (design §5.2, 1.2): the robot says who it is, as the
+  // server otherwise tells it in HelloAck. Only on the IDE listener.
+  RobotDescription robot_description = 6;
+}
+
+// What a robot host knows about the robot it was started with (classic's repository):
+// the fields `RobotHost --describe` prints for one robot. The server names it for the
+// battle (unique names, as classic's Battle.createPeers) and answers with HelloAck.
+message RobotDescription {
+  // Unique full class name with version, e.g. "jk.mega.DrussGT 3.1.16"; classic's
+  // lookup name.
+  string name = 1;
+  string full_class_name = 2;
+  RobotType type = 3;
+  // Classic's team id when the robot is a team (not accepted from an IDE yet).
+  optional string team_id = 4;
+  // What the robot runs on, e.g. "JVM 21.0.12".
+  string platform = 5;
+  // The deterministic rules its host follows (0: unknown).
+  uint32 deterministic_rules = 6;
 }
 
 message HelloAck {
@@ -667,6 +687,9 @@ message BattleInfo {
   repeated RobotStatics robots = 2;
   // The battle's seed (classic's RANDOMSEED), to show and to fight the battle again.
   int64 seed = 3;
+  // A robot from an IDE is in the battle (design §7.4): no time limits, not comparable to
+  // real battles.
+  bool debug = 4;
 }
 
 message TurnSnapshot {
@@ -811,6 +834,8 @@ message RecordingHeader {
   repeated RobotStatics robots = 5;
   // Engine version (design §4.4) the battle ran with; 0 = recorded before engine versions.
   uint32 engine_version = 6;
+  // A debug battle (BattleInfo.debug).
+  bool debug = 7;
 }
 
 message RecordedCommands {

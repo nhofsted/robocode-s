@@ -41,6 +41,8 @@ pub struct Live {
     pub seed: i64,
     /// Deterministic mode (ADR 0005), rather than classic timing.
     pub deterministic: bool,
+    /// A debug battle: a robot from an IDE is in it (design §7.4).
+    pub debug: bool,
     /// A battle on another server, watched as an observer: its address. Its robots, rules
     /// and seed come with its `BattleInfo`.
     pub watching: Option<String>,
@@ -161,6 +163,7 @@ impl Live {
             rounds,
             seed: 0,
             deterministic: true,
+            debug: false,
             watching: None,
             connection: Arc::default(),
             latest: None,
@@ -211,8 +214,11 @@ impl Live {
                     }
                     self.previous = self.latest.replace(s);
                 }
-                Ok(server_message::Msg::BattleInfo(info)) if self.watching.is_some() => {
-                    self.on_info(info)
+                Ok(server_message::Msg::BattleInfo(info)) => {
+                    self.debug = info.debug;
+                    if self.watching.is_some() {
+                        self.on_info(info)
+                    }
                 }
                 Ok(_) => {}
                 Err(result) => self.outcome = Some(result),

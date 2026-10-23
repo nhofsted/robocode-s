@@ -196,8 +196,10 @@ fn battle(dir: &Path, names: &[&str]) -> LocalBattle {
             .map(|n| LocalRobot {
                 statics: statics(n),
                 lookup: n.to_string(),
+                ide: None,
             })
             .collect(),
+        ide: None,
         jars: vec![jar],
         dir: dir.join("battle"),
         data: None,
@@ -282,6 +284,7 @@ fn a_battle_on_an_agent_is_the_battle_on_pipes_and_its_jars_are_fetched_once() {
         .map(|r| RobotEntry {
             statics: r.statics.clone(),
             token: "unused".into(),
+            debug: false,
         })
         .collect();
     let pipes = (0..robots.len())

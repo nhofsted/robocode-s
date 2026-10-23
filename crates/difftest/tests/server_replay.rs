@@ -178,6 +178,7 @@ fn replay_through_server(path: &Path) -> Result<String, String> {
         .enumerate()
         .map(|(i, s)| RobotEntry {
             token: format!("token-{i}"),
+            debug: false,
             statics: v1::RobotStatics {
                 name: s.name.clone(),
                 full_class_name: s.full_class_name.clone(),

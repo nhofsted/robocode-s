@@ -23,6 +23,10 @@ pub struct Settings {
     /// Keep robot JVMs started between battles, so the next battle's robots start sooner
     /// (about 90 MB of memory each while they wait; see `runner::pool`).
     pub warm_hosts: bool,
+    /// Listen for robots started by an IDE's debugger while the app is open, on this port
+    /// of 127.0.0.1 (design §10, `crate::ide`).
+    pub ide_listen: bool,
+    pub ide_port: u16,
     /// Draw each robot's radar scan arc.
     pub scan_arcs: bool,
     /// Bullets in the robots' bullet colours rather than all in one.
@@ -91,6 +95,8 @@ impl Default for Settings {
             robot_folders: vec![robocode_s_runner::local::default_robot_dir()],
             sandbox: Sandbox::default().name().into(),
             warm_hosts: true,
+            ide_listen: true,
+            ide_port: robocode_s_server::ide::DEFAULT_PORT,
             scan_arcs: false,
             colored_bullets: true,
             robot_names: true,
@@ -358,6 +364,8 @@ mod tests {
             robot_folders: vec!["/robots".into(), "more".into()],
             sandbox: "none".into(),
             warm_hosts: false,
+            ide_listen: false,
+            ide_port: 9000,
             scan_arcs: true,
             colored_bullets: false,
             robot_names: false,

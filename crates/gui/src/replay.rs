@@ -51,6 +51,8 @@ pub struct ReplayView {
     unverified: usize,
     /// Set when it was recorded with another engine version than this one.
     engine_warning: Option<String>,
+    /// Recorded in a debug battle (robots from an IDE, not timed).
+    debug: bool,
     results: Vec<v1::Results>,
     /// The shown turn.
     position: usize,
@@ -219,6 +221,7 @@ impl ReplayView {
             turns,
             unverified,
             engine_warning: recording.engine_warning(),
+            debug: recording.header.debug,
             results,
             position: 0,
             current: None,
@@ -256,6 +259,7 @@ impl ReplayView {
             properties: Vec::new(),
             unverified: 0,
             engine_warning: engine_warning(decoded.engine_version),
+            debug: false,
             results: Vec::new(),
             position: 0,
             current: None,
@@ -488,6 +492,7 @@ impl ReplayView {
                 let turn = self.current.as_ref().map(|s| s.turn);
                 let (rounds, unverified) = (self.rounds, self.unverified);
                 let engine_warning = self.engine_warning.clone();
+                let debug = self.debug;
                 let mut go_to = None;
                 let seed = match &self.source {
                     Source::Recording { seed, .. } => Some(seed.to_string()),
@@ -527,6 +532,14 @@ impl ReplayView {
                                 Color32::LIGHT_RED,
                                 format!("{unverified} turns differ from the recording"),
                             );
+                        }
+                        if debug {
+                            ui.add_space(10.0);
+                            ui.colored_label(Color32::GOLD, "Debug battle")
+                                .on_hover_text(
+                                    "A robot from an IDE was in it, not timed: not comparable \
+                                 with real battles.",
+                                );
                         }
                         if let Some(warning) = &engine_warning {
                             ui.add_space(10.0);

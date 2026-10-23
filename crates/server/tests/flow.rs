@@ -18,6 +18,7 @@ use std::time::Duration;
 fn entry(name: &str, token: &str) -> RobotEntry {
     RobotEntry {
         token: token.into(),
+        debug: false,
         statics: v1::RobotStatics {
             name: name.into(),
             full_class_name: name.into(),

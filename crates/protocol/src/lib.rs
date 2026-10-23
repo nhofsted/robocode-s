@@ -15,7 +15,7 @@ pub mod v1 {
 }
 
 /// The protocol version implemented by this crate.
-pub const PROTOCOL_VERSION: v1::ProtocolVersion = v1::ProtocolVersion { major: 1, minor: 1 };
+pub const PROTOCOL_VERSION: v1::ProtocolVersion = v1::ProtocolVersion { major: 1, minor: 2 };
 
 /// Messages larger than this are refused (16 MiB).
 pub const MAX_MESSAGE_SIZE: usize = 16 << 20;

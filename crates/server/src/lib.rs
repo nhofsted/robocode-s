@@ -11,6 +11,7 @@ pub mod agents;
 pub mod battle_file;
 pub mod convert;
 pub mod driver;
+pub mod ide;
 pub mod net;
 pub mod recording;
 pub mod results;
@@ -137,6 +138,10 @@ pub struct RobotEntry {
     /// The one-time token the robot presents in its `Hello` ([`random_token`]: any local
     /// process can reach the robots' listener).
     pub token: String,
+    /// A robot started by an IDE (design §7.4, [`ide`]): the battle waits for it as long as
+    /// it takes (no connect timeout, no turn deadline, hard limit, skipped turns by counted
+    /// work or limit for stopping), and is marked as a debug battle.
+    pub debug: bool,
 }
 
 /// Observers from elsewhere (design §10: a remote GUI attached as an observer): a
@@ -273,6 +278,8 @@ struct Link {
     late_execute: Option<(i64, v1::Execute)>,
     /// The turn of the `Tick` a robot answered late; it skipped the turns after it.
     answered_late: Option<i64>,
+    /// A robot from an IDE ([`RobotEntry::debug`]): never timed.
+    debug: bool,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -718,6 +725,8 @@ pub(crate) fn server(msg: server_message::Msg) -> v1::ServerMessage {
 
 struct BattleLoop<'a> {
     config: &'a ServerConfig,
+    /// A robot from an IDE is in the battle ([`RobotEntry::debug`]).
+    debug: bool,
     statics: Vec<v1::RobotStatics>,
     /// The engine; every input goes through it and into the recording.
     engine: RecordingDriver,
@@ -750,6 +759,8 @@ impl<'a> BattleLoop<'a> {
         robots: Vec<RobotEntry>,
         rx: Receiver<Incoming>,
     ) -> io::Result<Self> {
+        let debug_links: Vec<bool> = robots.iter().map(|r| r.debug).collect();
+        let debug = debug_links.contains(&true);
         let mut statics: Vec<v1::RobotStatics> = robots.into_iter().map(|r| r.statics).collect();
         let rules = convert::rules(&config.rules, config.deterministic);
         for (i, s) in statics.iter_mut().enumerate() {
@@ -757,7 +768,13 @@ impl<'a> BattleLoop<'a> {
             s.rules = Some(rules);
         }
         let setups = statics.iter().map(convert::robot_setup).collect();
-        let links = statics.iter().map(|_| Link::default()).collect();
+        let links = debug_links
+            .into_iter()
+            .map(|debug| Link {
+                debug,
+                ..Link::default()
+            })
+            .collect();
         let recorder = match &config.record {
             Some(path) => Some(Recorder::create(
                 path,
@@ -768,6 +785,7 @@ impl<'a> BattleLoop<'a> {
                     rules: Some(rules),
                     robots: statics.clone(),
                     engine_version: robocode_s_engine::ENGINE_VERSION,
+                    debug,
                 },
             )?),
             None => None,
@@ -775,6 +793,7 @@ impl<'a> BattleLoop<'a> {
         let battle = Battle::new(config.rules.clone(), setups, config.seed);
         Ok(Self {
             config,
+            debug,
             engine: RecordingDriver::new(battle, recorder),
             statics,
             links,
@@ -849,16 +868,23 @@ impl<'a> BattleLoop<'a> {
         })
     }
 
-    /// Waits until every robot connected, or the connect timeout passed.
+    /// Waits until every robot connected, or the connect timeout passed. A robot from an
+    /// IDE is waited for as long as it takes: until it connects, it is gone or the battle
+    /// is stopped.
     fn await_robots(&mut self) {
         let deadline = Instant::now() + self.config.connect_timeout;
         while self.links.iter().any(|l| l.stream.is_none()) && !self.abort {
-            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-                return;
+            let received = match deadline.checked_duration_since(Instant::now()) {
+                Some(left) => self.rx.recv_timeout(left),
+                // Only robots from an IDE are still waited for.
+                None if self.links.iter().any(|l| l.debug && l.stream.is_none()) => {
+                    self.rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                }
+                None => return,
             };
-            match self.rx.recv_timeout(left) {
+            match received {
                 Ok(incoming) => self.handle(incoming),
-                Err(RecvTimeoutError::Timeout) => return,
+                Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
@@ -995,24 +1021,31 @@ impl<'a> BattleLoop<'a> {
             }
         }
         let mut deadline = Instant::now() + timeout;
+        // Past the deadline only robots from an IDE (a breakpoint can hold one for
+        // minutes) are still waited for.
         while (0..self.links.len()).any(|i| self.expecting(i)) {
-            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-                break;
+            let received = match deadline.checked_duration_since(Instant::now()) {
+                Some(left) => self.rx.recv_timeout(left),
+                None if (0..self.links.len()).any(|i| self.links[i].debug && self.expecting(i)) => {
+                    self.rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                }
+                None => break,
             };
-            match self.rx.recv_timeout(left) {
+            match received {
                 Ok(incoming) => {
                     self.handle(incoming);
                     if self.abort {
                         deadline = deadline.min(Instant::now() + self.config.turn_timeout);
                     }
                 }
-                Err(_) => break,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
         if self.config.deterministic && !self.abort {
             // Too slow for the hard limit: disabled.
             for i in 0..self.links.len() {
-                if self.expecting(i) {
+                if self.expecting(i) && !self.links[i].debug {
                     self.engine.input(Entry::Disable(i as i32));
                     self.links[i].awaiting = None;
                 }
@@ -1043,6 +1076,7 @@ impl<'a> BattleLoop<'a> {
                     )),
                     robots: self.statics.clone(),
                     seed: self.config.seed,
+                    debug: self.debug,
                 };
                 let ack = server(server_message::Msg::HelloAck(v1::HelloAck {
                     version: Some(PROTOCOL_VERSION),
@@ -1100,7 +1134,7 @@ impl<'a> BattleLoop<'a> {
         if link.awaiting != Some(execute.turn) || link.late_execute.is_some() {
             return; // not the reply we wait for
         }
-        if self.config.deterministic && !link.final_execute && !execute.stopped {
+        if self.config.deterministic && !link.debug && !link.final_execute && !execute.stopped {
             // The robot's counted work decides when it answers (classic: its wall time). Not
             // after its code ended: classic's `waitForBattleEndImpl` isn't waited for.
             let late = late_turns(execute.cpu_nanos, execute.turn, DETERMINISTIC_BUDGET_NANOS);

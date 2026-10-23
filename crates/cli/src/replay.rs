@@ -42,6 +42,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let out = serde_json::json!({
             "seed": recording.header.seed,
             "engineVersion": recording.header.engine_version,
+            "debug": recording.header.debug,
             "rounds": recording.rounds(),
             "turns": turns,
             "paintedTurns": painted,
@@ -71,6 +72,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 String::new()
             }
         );
+        if recording.header.debug {
+            println!(
+                "Debug battle: a robot from an IDE was in it, not timed; not comparable with real \
+                 battles.\n"
+            );
+        }
         print!("{}", results::table(&rows));
     }
     if unverified.is_empty() {

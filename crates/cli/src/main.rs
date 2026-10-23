@@ -4,6 +4,7 @@
 
 mod agent;
 mod battle;
+mod ide;
 mod replay;
 mod results;
 
@@ -16,6 +17,7 @@ Commands:
   battle     run a headless battle and print the results
   replay     re-run a recorded battle, verify it and print the results
   agent      run robots for battles on other machines (a runner agent)
+  ide-config print the run configuration for debugging a robot from your IDE
   --version  print the version, engine version and protocol version
 
 `robocode-s battle --help` describes the battle options, `robocode-s agent --help`
@@ -64,6 +66,19 @@ fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("robocode-s agent: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("ide-config") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", ide::USAGE);
+                return ExitCode::SUCCESS;
+            }
+            match ide::run(&args[1..]) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("robocode-s ide-config: {e}");
                     ExitCode::FAILURE
                 }
             }

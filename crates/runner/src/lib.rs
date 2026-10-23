@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod housekeeping;
+pub mod ide;
 pub mod jre;
 pub mod local;
 pub mod pool;

@@ -6,10 +6,12 @@ use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::housekeeping::keep_battles;
-use robocode_s_runner::local::{Environment, prepare_with, random_seed, run_local_battle_with};
+use robocode_s_runner::ide::{CLI_MARKER, marker, run_configuration};
+use robocode_s_runner::local::{Environment, prepare_ide, random_seed, run_local_battle_with};
 use robocode_s_runner::pool::Pool;
 use robocode_s_runner::remote::run_remote_battle;
 use robocode_s_server::agents::AgentListener;
+use robocode_s_server::ide::{self, IdeListener};
 use robocode_s_server::net::is_loopback;
 use robocode_s_server::tls::Identity;
 use robocode_s_server::{Observers, ServerConfig};
@@ -18,6 +20,7 @@ use std::io::{IsTerminal, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 pub const USAGE: &str = "\
@@ -25,6 +28,10 @@ usage: robocode-s battle [options] <robot>...
 
 Robots are class names as in classic Robocode, optionally with version
 (sample.Fire, jk.mega.DrussGT 3.1.16); a team expands into its members.
+`@ide` is a robot you debug from your IDE (see `robocode-s ide-config`): the
+command prints the run configuration and waits for your IDE to start it. It takes
+no time limits, so a breakpoint pauses the whole battle; the battle is marked as a
+debug battle. One `@ide` per robot, after the others in the battle.
 
 Battle:
   --battle FILE          classic .battle file: its robots and rules (options
@@ -41,6 +48,7 @@ Battle:
   --turn-timeout MS      classic mode: time per turn (default 50)
 
 Robots and runtime:
+  --ide-port N           port robots from your IDE connect to (default 7878)
   --jar PATH             robot jar, or a class folder (an IDE's output, read in
                          place: robots there are named with classic's `*`, e.g.
                          `my.Robot*`); repeatable (default: $ROBOCODES_ROBOT_JARS,
@@ -102,6 +110,8 @@ fingerprint is printed, for clients to pin (--fingerprint).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     pub robots: Vec<String>,
+    /// `--ide-port`: where robots from an IDE connect (`@ide` in `robots`).
+    pub ide_port: u16,
     pub rules: BattleRules,
     pub seed: Option<i64>,
     pub classic: bool,
@@ -135,6 +145,7 @@ impl Options {
     fn defaults() -> Self {
         Self {
             robots: Vec::new(),
+            ide_port: ide::DEFAULT_PORT,
             rules: BattleRules::default(),
             seed: None,
             classic: false,
@@ -193,6 +204,7 @@ impl Options {
                 "--turn-timeout" => {
                     o.turn_timeout = Duration::from_millis(number(arg, value(arg)?)?)
                 }
+                "--ide-port" => o.ide_port = number(arg, value(arg)?)?,
                 "--jar" => jars.push(PathBuf::from(value(arg)?)),
                 "--memory" => o.memory_mb = number(arg, value(arg)?)?,
                 "--warm" => o.warm = Some(number(arg, value(arg)?)?),
@@ -298,6 +310,41 @@ fn reach(bound: std::net::SocketAddr) -> String {
     }
 }
 
+/// Listens for the robots from an IDE (one for each `@ide` in `robots`), prints how to
+/// start them and waits for them; their entries in `robots` become the connected robots.
+fn wait_for_ide(o: &Options, robots: &mut [String]) -> Result<IdeListener, String> {
+    let count = robots.iter().filter(|r| *r == CLI_MARKER).count();
+    let address = format!("127.0.0.1:{}", o.ide_port);
+    let listener = IdeListener::bind(&address, ide::token(&o.env.data)?)
+        .map_err(|e| format!("--ide-port {}: {e}", o.ide_port))?;
+    eprintln!("{}", run_configuration(&o.env, o.ide_port)?.text());
+    eprintln!(
+        "Waiting for {count} robot{} from your IDE on {address} (Ctrl+C cancels)...",
+        if count == 1 { "" } else { "s" }
+    );
+    // Nothing cancels but Ctrl+C, which ends the program.
+    let cancel = AtomicBool::new(false);
+    let here = loop {
+        for k in 1..=count {
+            if let Some(here) = listener.wait_for(k, &cancel) {
+                eprintln!(
+                    "{} connected ({k} of {count})",
+                    here[k - 1].description.name
+                );
+            }
+        }
+        let here = listener.robots();
+        if here.len() >= count {
+            break here;
+        }
+    };
+    let mut ids = here.iter().map(|r| r.id);
+    for robot in robots.iter_mut().filter(|r| *r == CLI_MARKER) {
+        *robot = marker(ids.next().unwrap_or_default());
+    }
+    Ok(listener)
+}
+
 pub fn run(o: &Options) -> Result<(), String> {
     let seed = o.seed.unwrap_or_else(random_seed);
     let mut certificate = None;
@@ -349,6 +396,15 @@ pub fn run(o: &Options) -> Result<(), String> {
         }
         None => None,
     };
+    let mut robots = o.robots.clone();
+    let from_ide = robots.iter().filter(|r| *r == CLI_MARKER).count();
+    let ide = match from_ide {
+        0 => None,
+        _ if agents.is_some() => {
+            return Err("@ide: robots from your IDE run on this machine, not on agents".into());
+        }
+        _ => Some(wait_for_ide(o, &mut robots)?),
+    };
     let config = ServerConfig {
         rules: o.rules.clone(),
         seed,
@@ -358,7 +414,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         ..Default::default()
     };
     // The robots' JVMs start while the robots are described. Robots on agents run there.
-    let warm = o.warm.unwrap_or(o.robots.len());
+    let warm = o.warm.unwrap_or(robots.len() - from_ide);
     let pool = (warm > 0 && agents.is_none()).then(|| {
         let dir = o
             .env
@@ -367,9 +423,10 @@ pub fn run(o: &Options) -> Result<(), String> {
             .join(format!("{}", std::process::id()));
         Arc::new(Pool::new(dir))
     });
-    let (host, battle) = prepare_with(
+    let (host, battle) = prepare_ide(
         &o.env,
-        &o.robots,
+        &robots,
+        ide.as_ref(),
         config,
         o.memory_mb,
         pool.as_ref().map(|pool| (pool, warm)),
@@ -378,6 +435,7 @@ pub fn run(o: &Options) -> Result<(), String> {
     if let Some(pool) = &pool {
         pool.no_refill();
     }
+    let debug = from_ide > 0;
     let statics: Vec<v1::RobotStatics> = battle.robots.iter().map(|r| r.statics.clone()).collect();
     let dir = battle.dir.clone();
     // The battle's folder goes when it is over; with this set it stays, with the robots'
@@ -443,6 +501,9 @@ pub fn run(o: &Options) -> Result<(), String> {
     };
     // A local battle did so itself.
     battle.remove_dir();
+    if let Some(ide) = &ide {
+        ide.close();
+    }
     let local = ran?;
     if progress {
         eprint!("\r\x1b[K");
@@ -463,6 +524,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "seed": seed,
             "rounds": local.outcome.rounds,
             "deterministic": !o.classic,
+            "debug": debug,
             "engineVersion": robocode_s_engine::ENGINE_VERSION,
             "sandbox": host.sandbox.report(),
             "agents": placements,
@@ -482,6 +544,12 @@ pub fn run(o: &Options) -> Result<(), String> {
             robocode_s_engine::ENGINE_VERSION,
             host.sandbox.report()
         );
+        if debug {
+            println!(
+                "Debug battle: robots from your IDE were not timed, so the results are not \
+                 comparable with real battles.\n"
+            );
+        }
         for (robot, agent) in statics.iter().zip(&placements) {
             println!("{} ran on {agent}", robot.name);
         }
@@ -511,6 +579,16 @@ mod tests {
 
     fn args(s: &str) -> Vec<String> {
         s.split(' ').map(String::from).collect()
+    }
+
+    #[test]
+    fn robots_from_the_ide_are_marked_and_the_port_is_chosen() {
+        let o = Options::parse(&args("sample.Walls,@ide,@ide --ide-port 9000")).unwrap();
+        assert_eq!(o.robots, ["sample.Walls", "@ide", "@ide"]);
+        assert_eq!(o.ide_port, 9000);
+        let o = Options::parse(&args("@ide")).unwrap();
+        assert_eq!(o.ide_port, ide::DEFAULT_PORT);
+        assert!(Options::parse(&args("@ide --ide-port x")).is_err());
     }
 
     #[test]

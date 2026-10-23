@@ -43,6 +43,7 @@ pub fn live_battle(
             };
             LocalRobot {
                 lookup: lookup_name(&s.name).to_string(),
+                ide: None,
                 statics: v1::RobotStatics {
                     name: s.name.clone(),
                     full_class_name: s.full_class_name.clone(),
@@ -79,6 +80,7 @@ pub fn live_battle(
             ..Default::default()
         },
         robots,
+        ide: None,
         jars: jars.to_vec(),
         dir: work.join(&battle_name),
         // Battles that must repeat the oracle's start with no data files from earlier ones.

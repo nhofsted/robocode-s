@@ -5,6 +5,7 @@
 
 use crate::backdrop::Backdrop;
 use crate::icons;
+use crate::ide::{self, Ide};
 use crate::live::Live;
 use crate::replay::{Opening, ReplayView};
 use crate::screen;
@@ -16,8 +17,9 @@ use crate::view::{self, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::{DialogState, FileDialog, OpeningMode};
 use robocode_s_engine::BattleRules;
+use robocode_s_runner::ide::{marker, parse_marker};
 use robocode_s_runner::local::{
-    Environment, Listed, LocalBattle, list_robots, prepare_with, random_seed,
+    Environment, Listed, LocalBattle, list_robots, prepare_ide, random_seed,
 };
 use robocode_s_runner::pool::Pool;
 use robocode_s_runner::{JavaHost, Sandbox, docker_pulling};
@@ -329,6 +331,10 @@ pub struct App {
     /// The sound effects' output, opened when sound is first on.
     sound: Sound,
     open_path: String,
+    /// Robots started by the user's IDE, waiting for a battle.
+    ide: Ide,
+    /// `--ide-add`: add robots from an IDE to the battle as they connect.
+    ide_add: bool,
     /// The robots in the jars and class folders, listed in the background.
     available: Option<Result<Vec<Listed>, String>>,
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
@@ -412,6 +418,10 @@ pub struct Launch {
     pub camera: view::Camera,
     /// The smallest the window gets, in points (see [`crate::window::keep_min_size`]).
     pub min_size: egui::Vec2,
+    /// Open the "From your IDE…" panel at start, and add the robots that connect to the
+    /// battle (`--from-ide`, `--ide-add`, for screenshots and testing).
+    pub ide_panel: bool,
+    pub ide_add: bool,
 }
 
 impl App {
@@ -464,6 +474,8 @@ impl App {
             camera: launch.camera,
             sound: Sound::default(),
             open_path: String::new(),
+            ide: Ide::new(launch.ide_panel),
+            ide_add: launch.ide_add,
             available: None,
             listing: None,
             relist: false,
@@ -618,49 +630,81 @@ impl App {
                 field_height = field.rect.height();
                 let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.add_space(6.0);
-                list_box(ui, "available", lists, |ui| match &self.available {
-                    None => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(RichText::new("Listing the robots…").weak());
-                        });
-                    }
-                    Some(Err(e)) => {
-                        ui.colored_label(Color32::LIGHT_RED, e);
-                    }
-                    Some(Ok(robots)) => {
-                        let filter = self.filter.to_lowercase();
-                        let shown: Vec<&Listed> = robots
-                            .iter()
-                            .filter(|r| r.name.to_lowercase().contains(&filter))
-                            .collect();
-                        if shown.is_empty() {
-                            let none = if robots.is_empty() {
-                                "No robots: add a robot folder in the options."
-                            } else {
-                                "No robot matches the filter."
-                            };
-                            ui.label(RichText::new(none).weak());
-                        }
-                        for r in &shown {
-                            let picked = self.picked.as_deref() == Some(r.name.as_str());
-                            let row = robot_row(ui, &r.name, r.team, picked, Action::Add);
+                list_box(ui, "available", lists, |ui| {
+                    // Robots from the IDE: pinned at the top, whatever the filter says.
+                    if !self.ide.connected.is_empty() {
+                        ui.label(
+                            RichText::new("FROM YOUR IDE")
+                                .small()
+                                .strong()
+                                .color(shell::ACCENT),
+                        );
+                        for r in &self.ide.connected {
+                            let entry = marker(r.id);
+                            let in_battle = self.setup.robots.contains(&entry);
+                            let tag = in_battle.then_some("in the battle");
+                            let picked = self.picked.as_deref() == Some(entry.as_str());
+                            let name = ide::label(&r.description.name);
+                            let row = robot_row(ui, &name, tag, picked, Action::Add);
                             if row.clicked {
-                                self.picked = Some(r.name.clone());
-                                self.details = Some(r.name.clone());
+                                self.picked = Some(entry.clone());
                             }
-                            if row.act {
-                                add = Some(r.name.clone());
+                            if row.act && !in_battle {
+                                add = Some(entry);
                             }
                         }
-                        if enter {
-                            // Enter adds the highlighted robot, else the first match.
-                            let picked = shown
+                        ui.add_space(6.0);
+                    }
+                    match &self.available {
+                        None => {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new("Listing the robots…").weak());
+                            });
+                        }
+                        Some(Err(e)) => {
+                            ui.colored_label(Color32::LIGHT_RED, e);
+                        }
+                        Some(Ok(robots)) => {
+                            let filter = self.filter.to_lowercase();
+                            let shown: Vec<&Listed> = robots
                                 .iter()
-                                .find(|r| self.picked.as_deref() == Some(r.name.as_str()))
-                                .or(shown.first());
-                            add = picked.map(|r| r.name.clone());
-                            field.request_focus();
+                                .filter(|r| r.name.to_lowercase().contains(&filter))
+                                .collect();
+                            if shown.is_empty() {
+                                let none = if robots.is_empty() {
+                                    "No robots: add a robot folder in the options."
+                                } else {
+                                    "No robot matches the filter."
+                                };
+                                ui.label(RichText::new(none).weak());
+                            }
+                            for r in &shown {
+                                let picked = self.picked.as_deref() == Some(r.name.as_str());
+                                let row = robot_row(
+                                    ui,
+                                    &r.name,
+                                    r.team.then_some("team"),
+                                    picked,
+                                    Action::Add,
+                                );
+                                if row.clicked {
+                                    self.picked = Some(r.name.clone());
+                                    self.details = Some(r.name.clone());
+                                }
+                                if row.act {
+                                    add = Some(r.name.clone());
+                                }
+                            }
+                            if enter {
+                                // Enter adds the highlighted robot, else the first match.
+                                let picked = shown
+                                    .iter()
+                                    .find(|r| self.picked.as_deref() == Some(r.name.as_str()))
+                                    .or(shown.first());
+                                add = picked.map(|r| r.name.clone());
+                                field.request_focus();
+                            }
                         }
                     }
                 });
@@ -687,6 +731,16 @@ impl App {
                                 robots.clear();
                                 self.picked_selected = None;
                             }
+                            if ui
+                                .button("From your IDE…")
+                                .on_hover_text(
+                                    "Debug a robot with your IDE's debugger: how to set it up, \
+                                     and the robots waiting",
+                                )
+                                .clicked()
+                            {
+                                self.ide.open = true;
+                            }
                         });
                     },
                 );
@@ -697,10 +751,16 @@ impl App {
                         ui.label(RichText::new("Double-click a robot to add it.").weak());
                     }
                     for (i, name) in robots.iter().enumerate() {
+                        let from_ide = self.ide.state(name);
                         let team = matches!(&self.available,
                             Some(Ok(a)) if a.iter().any(|r| r.team && &r.name == name));
                         let picked = self.picked_selected == Some(i);
-                        let row = robot_row(ui, name, team, picked, Action::Remove);
+                        let (shown, tag) = match &from_ide {
+                            Some((robot, true)) => (ide::label(robot), Some("waiting")),
+                            Some((robot, false)) => (ide::label(robot), Some("not connected")),
+                            None => (name.clone(), team.then_some("team")),
+                        };
+                        let row = robot_row(ui, &shown, tag, picked, Action::Remove);
                         if row.clicked {
                             self.picked_selected = Some(i);
                             self.details = Some(name.clone());
@@ -717,9 +777,16 @@ impl App {
             });
         });
         if let Some(name) = add {
-            self.setup.robots.push(name);
+            self.add_robot(name);
         }
         self.robot_details(ui);
+    }
+
+    /// Adds a robot to the battle; a robot from an IDE (one connection) only once.
+    fn add_robot(&mut self, name: String) {
+        if parse_marker(&name).is_none() || !self.setup.robots.contains(&name) {
+            self.setup.robots.push(name);
+        }
     }
 
     /// The details of the robot clicked last, from its `.properties`: its name and
@@ -764,6 +831,13 @@ impl App {
             self.error = Some("Add some robots to the battle first.".into());
             return;
         }
+        if let Some(name) = self.ide.missing(&self.setup.robots) {
+            self.error = Some(format!(
+                "{} isn't connected: start it again from your IDE, or take it out of the battle.",
+                ide::label(&name)
+            ));
+            return;
+        }
         let seed = match parse_seed(&self.setup.seed) {
             Ok(seed) => seed.unwrap_or_else(random_seed),
             Err(e) => {
@@ -785,6 +859,7 @@ impl App {
         };
         let (tx, rx) = mpsc::channel();
         let (env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
+        let ide = self.ide.listener();
         // The robots' JVMs start while they are described, and the next battle's while
         // this one runs.
         if !self.settings.warm_hosts {
@@ -794,19 +869,20 @@ impl App {
             self.pool = Some(Arc::new(Pool::new(dir)));
         }
         let pool = self.pool.clone();
-        let warm = robots.len().min(MAX_WARM_HOSTS);
+        let from_ide = robots.iter().filter(|r| parse_marker(r).is_some()).count();
+        let warm = (robots.len() - from_ide).min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
             let warm = pool.as_ref().map(|pool| (pool, warm));
             // Cancelled meanwhile: nobody fights the battle, which leaves its folder.
             if let Err(mpsc::SendError(Ok((_, battle)))) =
-                tx.send(prepare_with(&env, &robots, config, 512, warm))
+                tx.send(prepare_ide(&env, &robots, ide.as_ref(), config, 512, warm))
             {
                 battle.remove_dir();
             }
             repaint.request_repaint();
         });
         self.local.starting = Some(Starting {
-            contestants: s.robots.clone(),
+            contestants: s.robots.iter().map(|r| self.ide.display(r)).collect(),
             prepared: Some(rx),
             seed,
             rounds: s.rounds.max(1),
@@ -1590,6 +1666,20 @@ impl App {
                     );
                     ui.checkbox(&mut app.settings.warm_hosts, "Keep robot JVMs started");
                     ui.end_row();
+                    ui.label("From your IDE").on_hover_text(
+                        "Robots started by your IDE's debugger connect to this port on this \
+                         computer and wait for a battle (Start Battle, From your IDE…).",
+                    );
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut app.settings.ide_listen, "Listen on 127.0.0.1, port");
+                        ui.add(egui::DragValue::new(&mut app.settings.ide_port).range(1..=65535));
+                    });
+                    ui.end_row();
+                    if let Some(e) = &app.ide.error {
+                        ui.label("");
+                        ui.colored_label(Color32::LIGHT_RED, e);
+                        ui.end_row();
+                    }
                 });
 
             section(ui, "Battlefield");
@@ -1880,6 +1970,15 @@ impl App {
                     available,
                     &live.camera,
                 );
+                if live.debug {
+                    ui.painter().text(
+                        available.left_top() + egui::vec2(10.0, 8.0),
+                        egui::Align2::LEFT_TOP,
+                        "Debug battle: robots from your IDE aren't timed",
+                        egui::FontId::proportional(13.0),
+                        Color32::from_rgb(255, 190, 90),
+                    );
+                }
                 if live.outcome.is_none() && !live.stopping {
                     let layer = ui.layer_id();
                     for event in live.interaction.events(ui.ctx(), layer, rect, &t) {
@@ -2211,9 +2310,16 @@ struct Row {
     act: bool,
 }
 
-/// A row of a robot list, as wide as the list: the name, "team" for a team, and the
-/// action's icon when the row is hovered or highlighted.
-fn robot_row(ui: &mut egui::Ui, name: &str, team: bool, picked: bool, action: Action) -> Row {
+/// A row of a robot list, as wide as the list: the name, a small tag on the right ("team"
+/// for a team, the state of a robot from an IDE), and the action's icon when the row is
+/// hovered or highlighted.
+fn robot_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    tag: Option<&str>,
+    picked: bool,
+    action: Action,
+) -> Row {
     const HEIGHT: f32 = 24.0;
     // Room on the right for the scrollbar, which floats over the rows.
     const RIGHT: f32 = 10.0;
@@ -2244,11 +2350,11 @@ fn robot_row(ui: &mut egui::Ui, name: &str, team: bool, picked: bool, action: Ac
         .or(response.hover_pos())
         .is_some_and(|p| icon.contains(p));
     let mut right = icon.left() - 4.0;
-    if team {
+    if let Some(tag) = tag {
         let tag = painter.text(
             egui::pos2(right, rect.center().y),
             egui::Align2::RIGHT_CENTER,
-            "team",
+            tag,
             egui::FontId::proportional(11.0),
             visuals.weak_text_color(),
         );
@@ -2395,6 +2501,7 @@ impl eframe::App for App {
         shell::footer(root);
         self.poll_listing(ctx);
         self.poll_starting(ctx);
+        self.poll_ide(ctx);
         let style = self.style();
         // A battle keeps running in its tab while another tab is open.
         if let Some(live) = &mut self.remote.live {
@@ -2475,6 +2582,7 @@ impl eframe::App for App {
             Tab::Rumble => self.rumble_page(root),
             Tab::Options => self.options_page(root),
         }
+        self.ide_windows(ctx);
         self.play_sounds(ctx);
         self.file_dialog(ctx);
         self.save_error_window(ctx);
@@ -2501,6 +2609,45 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Listens for robots from the IDE as the options say, and takes those that connected.
+    fn poll_ide(&mut self, ctx: &egui::Context) {
+        self.ide.sync(ctx, &self.env, &self.settings);
+        if self.ide_add {
+            let new: Vec<String> = self
+                .ide
+                .connected
+                .iter()
+                .map(|r| marker(r.id))
+                .filter(|m| !self.setup.robots.contains(m))
+                .collect();
+            self.setup.robots.extend(new);
+        }
+    }
+
+    /// The notice of a robot that connected and the "From your IDE…" panel.
+    fn ide_windows(&mut self, ctx: &egui::Context) {
+        let mut add = self.ide.notice_ui(ctx, 40.0);
+        let (added, changed) =
+            self.ide
+                .panel(ctx, &self.env, &mut self.settings, &self.setup.robots);
+        if changed {
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
+        add = add.or(added);
+        // Already in the battle: nothing to announce.
+        if let Some(n) = &self.ide.notice
+            && self.setup.robots.contains(&marker(n.id))
+        {
+            self.ide.notice = None;
+        }
+        if let Some(id) = add {
+            self.add_robot(marker(id));
+            if self.local.live.is_none() && self.local.starting.is_none() {
+                self.tab = Tab::Start;
+            }
+        }
+    }
+
     /// Saves the options once they have been still for a moment and nothing is being
     /// dragged; takes the graphs' Round/Battle choice into them first.
     fn save_settings(&mut self, ctx: &egui::Context) {
