@@ -81,6 +81,9 @@ All tunables are one struct, `rumble_core::Config`, with the defaults below in c
 | `plan.headroom` | 1.5 | Planned battles = last hour's battles × headroom. |
 | `jar.maxBytes` | 5 MiB | Jar size limit (compressed). |
 | `jar.maxUnpacked` | 20 MiB, 5,000 entries | Zip-bomb guard. |
+| `submit.maxBots` | 5 | Bots one user may own (§12.2). |
+| `submit.versionsPerDay` | 5 | New versions per bot per day. |
+| `submit.minAccountDays` | 30 | Younger GitHub accounts need the owner's approval to submit. |
 | `admins` | `[4036752]` (nhofsted) | GitHub numeric ids with the admin role. |
 
 ## 4. Identifiers
@@ -180,11 +183,12 @@ Auth column: `-` none, `T` upload token or session, `S` session cookie only (bro
    "rules": {"rounds": 35, "width": 800, "height": 600, "gunCoolingRate": 0.1,
              "inactivityTime": 450, "sentryBorder": 100, "hideEnemyNames": false},
    "bots": [{"id": "jk.mega.DrussGT", "version": "3.1.16", "vid": 812,
-             "sha256": "9f1c...", "size": 210345, "url": "/jars/9f1c....jar"},
+             "sha256": "9f1c...", "size": 210345, "url": "/jars/9f1c....jar", "data": null},
             {"id": "voidious.Diamond", "version": "1.8.28", "vid": 77, "sha256": "...", "size": 98123, "url": "/jars/....jar"}]}
  ]}
 ```
 
+- `data` (reserved, always `null` in M4): a later server-held data snapshot per bot (`{"sha256", "size", "url"}`, a zip of the robot's data folder) that the client copies in before the battle. Clients of M4 refuse a battle whose `data` isn't `null` (they report it `notRun`), so the feature can be added without misrunning battles.
 - `kind`: `normal`, `verify` (a re-run of someone's battle, §11), `probation` (a new version's battles, §12.3), `watch` (M6). Robot order in `bots` is the battle's robot order (the server randomizes it).
 - 204 with `Retry-After` when `paused`, or when no division the client offers has two active bots. Otherwise there is always work (no cap, §10).
 - 409 `engine_mismatch` if `engine` isn't `engineVersion`.
@@ -500,7 +504,7 @@ The client runs the same validation before it uploads (import, and `rumble submi
 
 ### 12.2 Submission
 
-`bots/upload-url` then a PUT, or a URL (`http`/`https`, fetched by the Lambda with a 10 s timeout and the size limit; redirects followed up to 3), then `bots/submit`: the Lambda validates, copies the jar to `jars/<sha256>.jar` (if not there), allocates a vid, and writes the version `REG V#<vid>` with `st: probation`, and the bot `M` item (created, or the new vid prepended to `vs`) in one transaction. A new bot belongs to the submitter (`uid`). An existing bot can only get a new version from its owner (403 otherwise; unclaimed imported bots need a claim first, §16.4). The same version with the same jar: 200, nothing changes; with another jar: 409.
+`bots/upload-url` then a PUT, or a URL (`http`/`https`, fetched by the Lambda with a 10 s timeout and the size limit; redirects followed up to 3), then `bots/submit`: the Lambda validates, copies the jar to `jars/<sha256>.jar` (if not there), allocates a vid, and writes the version `REG V#<vid>` with `st: probation`, and the bot `M` item (created, or the new vid prepended to `vs`) in one transaction. A new bot belongs to the submitter (`uid`). **Limits** (config `submit.*`): at most 5 bots per user (`submit.maxBots`), 5 new versions per bot per day (`submit.versionsPerDay`), and a GitHub account younger than 30 days (`submit.minAccountDays`, from `created_at` at sign-in, stored on the user as `ghc`) gets 403 `forbidden` with a message to ask the owner, who can lift it (`admin/users/update` `{"trusted": true}`, attribute `tr`). Admins and imported bots are exempt. An existing bot can only get a new version from its owner (403 otherwise; unclaimed imported bots need a claim first, §16.4). The same version with the same jar: 200, nothing changes; with another jar: 409.
 
 ### 12.3 Probation, ranking, retiring
 
@@ -737,8 +741,8 @@ Parallel tracks: P1 first; then P2, P3, P10 in parallel; P4/P5/P6 after P3; P7 a
 6. **Device-flow tokens are checked with GitHub's application token API** (proves they were issued to our app) and then deleted; the server never keeps a GitHub token.
 7. **Work allocation without a cap** (§10): hourly water-filled quotas over all pairings from LiteRumble-style variance reduction, a ×10 closeness factor and a rank-contest factor; verification, probation and watch work first. Supersedes #23's threshold.
 8. **Melee pairings by classic's split:** each of the 45 pairs scored by the two bots' total scores in the battle; survival as the share of the two bots' wins (both divisions).
-9. **Robots start with no data files** in rumble battles (`fresh_data`): needed for verification to compare equal runs. Classic rumble robots keep data between battles; ours don't.
-10. **The rumble client refuses to run unsandboxed** without `--unsandboxed`; on macOS this means Docker.
+9. **Robots start with no data files** in rumble battles (`fresh_data`; owner, 2026-10-24): needed for verification to compare equal runs. Classic rumble robots keep data between battles; ours don't. Data shipped inside the jar still counts. Server-held per-bot data snapshots (promoted from verified battles) are a possible follow-up; the work item reserves `data` for them.
+10. **The rumble client refuses to run unsandboxed** without `--unsandboxed` (owner, 2026-10-24); on macOS this means Docker, or that explicit opt-in (the GUI asks once, with a warning).
 11. **A new version replaces the old one only after probation**, so bots don't vanish from the rankings meanwhile. **Imported bots skip probation.**
 12. **Codesize** is classic's tool's: the sum of all methods' `Code` lengths in every class of the jar.
 13. **Recording keys use bot ids and the first 16 hex digits of the jar hash**, so the M6 viewer finds them from published data; melee slots are per version (5 won, 5 not won).
@@ -751,6 +755,4 @@ Parallel tracks: P1 first; then P2, P3, P10 in parallel; P4/P5/P6 after P3; P7 a
 Open questions for the owner:
 - Q1 (decision 3): the other project's DynamoDB usage.
 - Q2: the GitHub OAuth app owner (personal account or an organization) and the admin GitHub id(s).
-- Q3: should rumble battles really drop robots' data files (decision 9)? The alternative, data files per volunteer, makes verification impossible for learning robots.
-- Q4: `--unsandboxed` on macOS: acceptable, or macOS volunteers Docker-only?
-- Q5: the `strangeautomata` archive as a mirror source for the import, and the RoboWiki announcement text.
+- Q5: the RoboWiki announcement text. (Q3, Q4 and the archive as a mirror were answered 2026-10-24: fresh data, Docker or `--unsandboxed` on macOS, the archive as the last fallback.)
