@@ -11,7 +11,7 @@ The [download page](/download) has the Windows installer, the apt and dnf reposi
 
 - **Windows:** run the setup program. It installs for your user, without administrator rights, with a Start menu entry and an optional `PATH` entry. It is not code-signed: SmartScreen says "Windows protected your PC", so choose "More info", then "Run anyway". There is also a `.zip` to unpack on an NTFS drive.
 - **Debian, Ubuntu, Fedora, RHEL, Rocky:** add the repository (commands on the download page), then `sudo apt install robocode-s` or `sudo dnf install robocode-s`. It puts `robocode-s` and `robocode-s-gui` on your `PATH` and adds an application menu entry.
-- **macOS:** the `.dmg` for Apple Silicon or Intel from the [download page](/download): drag `robocode-s.app` to Applications. It is unsigned: right-click it and choose Open the first time. Homebrew and winget (`winget install NickHofstede.robocode-s`, once Microsoft accepts it) are not live yet.
+- **macOS:** the `.dmg` for Apple Silicon or Intel from the [download page](/download): drag `robocode-s.app` to Applications. It is unsigned: right-click it and choose Open the first time. Or with Homebrew: `brew install --cask nhofsted/robocode-s/robocode-s` (updates with `brew upgrade --cask`). winget (`winget install NickHofstede.robocode-s`) works once Microsoft accepts it.
 
 All of them contain the same things: the window, the command line, the robot host and the sample robots. The Java runtime (about 50 MB) is fetched on first use into your user data folder, not into the installation. Uninstalling leaves that folder and the GUI's settings; delete them to remove everything.
 

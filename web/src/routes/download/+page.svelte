@@ -108,6 +108,13 @@ sudo dnf install robocode-s`;
 				Open the <code>.dmg</code> and drag <code>robocode-s.app</code> to Applications. The command
 				line is <code>robocode-s.app/Contents/MacOS/robocode-s</code>.
 			</p>
+			<h3>Homebrew</h3>
+			<pre>brew install --cask nhofsted/robocode-s/robocode-s</pre>
+			<p>
+				Installs the app and links <code>robocode-s</code> on the <code>PATH</code>;
+				<code>brew upgrade --cask robocode-s</code> brings later versions. The cask clears the
+				quarantine flag, so Gatekeeper doesn't stop it.
+			</p>
 			<table>
 				<thead><tr><th>File</th><th>Apple Silicon</th><th>Intel</th></tr></thead>
 				<tbody>
