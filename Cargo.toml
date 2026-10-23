@@ -16,6 +16,7 @@ robocode-s-replay = { path = "crates/replay" }
 robocode-s-geom = { path = "crates/geom" }
 robocode-s-java-random = { path = "crates/java-random" }
 robocode-s-protocol = { path = "crates/protocol" }
+robocode-s-rumble-core = { path = "crates/rumble-core" }
 robocode-s-runner = { path = "crates/runner" }
 robocode-s-server = { path = "crates/server" }
 
