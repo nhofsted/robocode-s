@@ -4,8 +4,12 @@
 //! no randomness. Callers pass random bytes and the current time in.
 
 pub mod api;
+pub mod codesize;
 pub mod config;
 pub mod ids;
+pub mod jar;
+pub mod record;
+pub mod state;
 pub mod token;
 
 pub use config::Config;
