@@ -88,7 +88,7 @@ pub struct RunConfiguration {
 }
 
 pub const ROBOT_PLACEHOLDER: &str = "my.Robot";
-pub const OUTPUT_PLACEHOLDER: &str = "<output folder>";
+pub const OUTPUT_PLACEHOLDER: &str = "<output-folder>";
 
 /// The configuration for robots connecting to `127.0.0.1:port`. Makes the token the
 /// first time.

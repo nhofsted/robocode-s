@@ -13,6 +13,7 @@ mod console;
 mod files;
 mod graphs;
 mod icons;
+mod ide;
 mod input;
 mod live;
 mod pace;
@@ -75,6 +76,9 @@ stderr.
                      otherwise after --after frames (default 120)
   --loading          with --screenshot and --battle or a replay: shoot the loading
                      screen after --after frames instead
+  --from-ide         open the \"From your IDE...\" panel at start (for screenshots)
+  --ide-add          add the robots started by an IDE to the battle as they connect
+                     (for screenshots and testing)
   --kill-at TURN:N   with --battle: kill robot N (from 0, in --battle's order) at
                      turn TURN of the first round, as its kill button does
   --input-at TURN:EVENT
@@ -143,6 +147,7 @@ fn main() -> ExitCode {
     let mut tab = None;
     let mut browse = None;
     let mut kill_at = None;
+    let (mut ide_panel, mut ide_add) = (false, false);
     let mut input_at = Vec::new();
     let mut camera = view::Camera::default();
     let mut size = [1200.0, 860.0];
@@ -168,6 +173,8 @@ fn main() -> ExitCode {
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
             "--loading" => loading = true,
+            "--from-ide" => ide_panel = true,
+            "--ide-add" => ide_add = true,
             "--kill-at" => {
                 let text = value();
                 let parsed = text
@@ -276,6 +283,8 @@ fn main() -> ExitCode {
                 input_at,
                 camera,
                 min_size: min_size.into(),
+                ide_panel,
+                ide_add,
             };
             Ok(Box::new(App::new(
                 cc,

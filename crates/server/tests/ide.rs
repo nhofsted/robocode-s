@@ -310,3 +310,25 @@ fn the_ide_token_is_made_once() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_debug_battle_is_recorded_as_one() {
+    let path = std::env::temp_dir().join(format!("robocodes-ide-{}.rec", std::process::id()));
+    let config = ServerConfig {
+        rules: rules(),
+        record: Some(path.clone()),
+        ..Default::default()
+    };
+    let main = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = main.local_addr().unwrap().to_string();
+    let robots = vec![entry("b.B", "b", true)];
+    let server = thread::spawn(move || run_battle(main, &config, robots));
+    let mut b = TcpStream::connect(&address).unwrap();
+    write_message(&mut b, &robot_hello("b", None)).unwrap();
+    let b = play(b, -1, Duration::ZERO, 0);
+    server.join().unwrap().unwrap();
+    b.join().unwrap();
+    let recording = robocode_s_server::recording::Recording::read(&path).unwrap();
+    assert!(recording.header.debug);
+    let _ = std::fs::remove_file(&path);
+}
