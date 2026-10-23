@@ -12,7 +12,16 @@ Breakpoints and stepping work too: your IDE's own debugger starts the robot, and
 Your robot compiles against `robocode.api` 1.11.1, the classic API. You need it at compile time only; robocode-s provides it at run time.
 
 - **From Maven Central:** `net.sf.robocode:robocode.api:1.11.1` (Gradle and Maven snippets below).
-- **From the install:** `robocode.api-1.11.1.jar` is in `lib/robot-host/` of the installation: `%LOCALAPPDATA%\Programs\robocode-s` on Windows, `/usr/lib/robocode-s` for the Linux packages. Add it to your project as a library if you build without Gradle or Maven.
+- **From your robocode-s installation**, if you build without Gradle or Maven: add this jar to your project as a library.
+
+  | Installed with | The jar |
+  |---|---|
+  | Windows installer | `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host\robocode.api-1.11.1.jar` |
+  | `.deb` or `.rpm` | `/usr/lib/robocode-s/lib/robot-host/robocode.api-1.11.1.jar` |
+  | macOS app | `/Applications/robocode-s.app/Contents/Resources/lib/robot-host/robocode.api-1.11.1.jar` |
+  | An unpacked archive | `lib/robot-host/robocode.api-1.11.1.jar` in the folder you unpacked |
+
+  On Windows, `AppData` is a hidden folder: paste `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host` into Explorer's address bar (or the IDE's file dialog) to get there. `%LOCALAPPDATA%` is `C:\Users\<you>\AppData\Local`. In a macOS file dialog, Cmd+Shift+G takes a path; Finder shows the app's contents with right-click, Show Package Contents.
 
 **Java level:** compile with `--release 8`. Classic Robocode 1.11.1 runs on Java 8, so a robot built for 8 also runs in classic and in classic RoboRumble clients, and robocode-s runs robots on a Temurin 21 JRE, which runs it unchanged. If you only target robocode-s, any level up to 21 works. Don't go above 21: the runtime can't load newer class files.
 
@@ -99,12 +108,14 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 ## Debug it with your IDE's debugger
 
+> **Needs robocode-s 0.2.0** (or a build from source): 0.1.0 has no `ide-config`, `@ide` or *From your IDE…* yet.
+
 The IDE starts the robot itself (its Debug button), so breakpoints, stepping and watches work as in any Java program; there is no remote debug port to attach to. The robot waits for a battle, and robocode-s makes the battle from it.
 
 **Set it up once.** `robocode-s ide-config` prints the run configuration, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows the same with Copy buttons). It has:
 
 - the main class, `io.github.nhofsted.robocodes.compat.RobotHost`;
-- the classpath: the jars in your installation's `lib/robot-host` folder, besides your project's own;
+- the classpath: every jar in your installation's `lib/robot-host` folder (the folder of the jar in [the table above](#1-get-the-api)), besides your project's own;
 - the program arguments `--ide --server 127.0.0.1:7878 --robot your.Robot --jar <output-folder> --home <folder>`: your robot's class name, and the folder your IDE compiles to;
 - the token, in the environment variable `ROBOCODES_IDE_TOKEN`. It is made once and kept in robocode-s's data folder, readable by you only, so the configuration never changes and no other user on the machine can take the slot. The port is fixed too (7878 on 127.0.0.1; `--ide-port` and the options change it).
 
