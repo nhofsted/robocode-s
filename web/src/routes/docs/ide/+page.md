@@ -5,7 +5,7 @@ description: Write a robot in IntelliJ IDEA, Eclipse or VS Code, build it with G
 
 You write a robot in your IDE against classic Robocode's API, and robocode-s runs the folder your IDE compiles into. Recompile, start a battle, and it runs the new code. No packaging step.
 
-> **Status:** attaching your IDE's debugger (breakpoints, stepping) is not available yet; it comes with [#17](https://github.com/nhofsted/robocode-s/issues/17). Until then, use the robot's output, debug painting and properties, and recordings, below.
+Breakpoints and stepping work too: your IDE's own debugger starts the robot, and robocode-s waits for it ([debug it from the IDE](#debug-it-with-your-ides-debugger), below).
 
 ## 1. Get the API
 
@@ -97,9 +97,33 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 }
 ```
 
+## Debug it with your IDE's debugger
+
+The IDE starts the robot itself (its Debug button), so breakpoints, stepping and watches work as in any Java program; there is no remote debug port to attach to. The robot waits for a battle, and robocode-s makes the battle from it.
+
+**Set it up once.** `robocode-s ide-config` prints the run configuration, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows the same with Copy buttons). It has:
+
+- the main class, `io.github.nhofsted.robocodes.compat.RobotHost`;
+- the classpath: the jars in your installation's `lib/robot-host` folder, besides your project's own;
+- the program arguments `--ide --server 127.0.0.1:7878 --robot your.Robot --jar <output-folder> --home <folder>`: your robot's class name, and the folder your IDE compiles to;
+- the token, in the environment variable `ROBOCODES_IDE_TOKEN`. It is made once and kept in robocode-s's data folder, readable by you only, so the configuration never changes and no other user on the machine can take the slot. The port is fixed too (7878 on 127.0.0.1; `--ide-port` and the options change it).
+
+**Then, each time:**
+
+1. Start the battle. On the command line, `robocode-s battle yourinitials.Kestrel,sample.Walls,@ide` (one `@ide` for each robot you start from the IDE; they come after the others in the battle) prints the configuration and waits: *waiting for 1 robot from your IDE on 127.0.0.1:7878*. In the GUI, leave robocode-s open: it listens while it runs. Start your robot with the IDE's Debug button; it shows in *From your IDE* at the top of the available robots, with a notice. *Add to battle*, then Start Battle.
+2. Hit a breakpoint. The whole battle pauses with the robot: the others wait for it, however long you look. When you let it go, the battle goes on.
+3. When the battle ends the robot's JVM ends with it. Start it again from the IDE for the next battle.
+
+**What differs from a normal battle.** A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`your.Kestrel*`), and a second copy gets `(2)`. A few details:
+
+- A robot from the IDE runs in the IDE's JVM, outside the sandbox, with your IDE's `--home` folder: its data files are kept there, not with the other robots'.
+- Teams need several JVMs, so they can't start from the IDE yet.
+- For seeded random numbers (the same battle again with `--seed N`), add `-javaagent:<the determinism agent>` to the VM options and `--seed N` to the program arguments; `ide-config` prints the path. Without it the robot's `Math.random()` isn't seeded.
+- A deterministic battle (the default) needs the robot host of the same robocode-s version: use the jars `ide-config` names. `--classic` has no such limit.
+
 ## Find out what your robot does
 
-Until a debugger can attach ([#17](https://github.com/nhofsted/robocode-s/issues/17)):
+Besides the debugger:
 
 - **Output.** `out.println` goes to the robot's output tab in the GUI, and to the console on the command line.
 - **Debug painting.** `onPaint(Graphics2D)` draws on the battlefield. In the GUI switch it on per robot with the pencil in its output tab. `--record FILE --paint` keeps the painting in a recording.
