@@ -196,8 +196,10 @@ fn battle(dir: &Path, names: &[&str]) -> LocalBattle {
             .map(|n| LocalRobot {
                 statics: statics(n),
                 lookup: n.to_string(),
+                ide: None,
             })
             .collect(),
+        ide: None,
         jars: vec![jar],
         dir: dir.join("battle"),
         data: None,

@@ -6,12 +6,14 @@
 //! expands teams and reports each robot's type. [`battle_statics`] then gives them their
 //! unique battle names exactly as classic's `Battle.createPeers` does.
 
+use crate::ide;
 use crate::housekeeping::{remove_home, remove_stale_runs, robot_data_dir};
 use crate::pool::{Pool, launch_with};
 use crate::{JavaHost, MODULE_OPENINGS, RobotLaunch, Sandbox, Transport};
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::agents::AgentListener;
+use robocode_s_server::ide::IdeListener;
 use robocode_s_server::{
     BattleOutcome, Observers, RobotEntry, RobotPipe, ServerConfig, random_token, run_battle_remote,
 };
@@ -838,10 +840,24 @@ pub fn prepare(
 pub fn prepare_with(
     env: &Environment,
     robots: &[String],
+    config: ServerConfig,
+    memory_mb: u32,
+    pool: Option<(&Arc<Pool>, usize)>,
+) -> Result<(JavaHost, LocalBattle), String> {
+    prepare_ide(env, robots, None, config, memory_mb, pool)
+}
+
+/// [`prepare_with`], where `robots` may also hold robots from an IDE ([`crate::ide::marker`])
+/// waiting at `ide`: they are described already and come after the others in the battle.
+pub fn prepare_ide(
+    env: &Environment,
+    robots: &[String],
+    ide: Option<&IdeListener>,
     mut config: ServerConfig,
     memory_mb: u32,
     pool: Option<(&Arc<Pool>, usize)>,
 ) -> Result<(JavaHost, LocalBattle), String> {
+    let (ide_robots, robots) = ide::split(robots, ide, config.deterministic)?;
     let host = env.host(config.deterministic)?;
     if let Some((pool, warm)) = pool {
         pool.warm(&host, memory_mb, config.deterministic, warm);
@@ -857,11 +873,11 @@ pub fn prepare_with(
     let dir = std::path::absolute(env.data.join("battles"))
         .map_err(|e| e.to_string())?
         .join(format!("{stamp}-{n}-{}", std::process::id()));
-    let mut jars = battle_jars(&host, &env.jars, robots, &env.data.join("list"));
+    let mut jars = battle_jars(&host, &env.jars, &robots, &env.data.join("list"));
     let mut described = describe(
         &host,
         &jars,
-        robots,
+        &robots,
         &dir.join("describe"),
         config.deterministic,
     );
@@ -871,12 +887,12 @@ pub fn prepare_with(
         described = describe(
             &host,
             &jars,
-            robots,
+            &robots,
             &dir.join("describe"),
             config.deterministic,
         );
     }
-    let described = match described {
+    let mut described = match described {
         Ok(described) => described,
         Err(e) => {
             remove_home(&dir);
@@ -886,15 +902,20 @@ pub fn prepare_with(
     if let Some(path) = &config.record {
         config.record = Some(std::path::absolute(path).map_err(|e| e.to_string())?);
     }
+    let others = described.len();
+    described.extend(ide_robots.iter().map(|(_, d)| d.clone()));
     let battle = LocalBattle {
         config,
         robots: battle_statics(&described)
             .into_iter()
-            .map(|s| LocalRobot {
+            .enumerate()
+            .map(|(i, s)| LocalRobot {
                 lookup: lookup_name(&s.name).to_string(),
+                ide: i.checked_sub(others).map(|n| ide_robots[n].0),
                 statics: s,
             })
             .collect(),
+        ide: ide.cloned(),
         jars,
         dir,
         data: env.robot_data(),
@@ -911,6 +932,8 @@ pub struct LocalRobot {
     /// The classic name the robot host looks the robot up by (its name without a
     /// duplicate suffix).
     pub lookup: String,
+    /// A robot from an IDE ([`IdeListener::take`] by this id) instead of a process of ours.
+    pub ide: Option<u64>,
 }
 
 /// A battle to fight locally.
@@ -918,6 +941,8 @@ pub struct LocalRobot {
 pub struct LocalBattle {
     pub config: ServerConfig,
     pub robots: Vec<LocalRobot>,
+    /// Where the battle's robots from an IDE wait.
+    pub ide: Option<IdeListener>,
     /// Jars and class folders containing the robots.
     pub jars: Vec<PathBuf>,
     /// This battle's directory: robot `i` runs in `robot-<i>` below it. It goes when the
@@ -983,7 +1008,23 @@ fn fight(
 ) -> Result<LocalOutcome, String> {
     let mut processes = Vec::new();
     let mut pipes = Vec::new();
+    // Robots from an IDE first: one that left is found before any process starts.
     for (i, robot) in battle.robots.iter().enumerate() {
+        if let Some(id) = robot.ide {
+            let pipe = battle
+                .ide
+                .as_ref()
+                .ok_or("no IDE listener")?
+                .take(id, i)
+                .map_err(|e| format!("{}: {e}", robot.statics.name))?;
+            pipes.push(pipe);
+        }
+    }
+    for (i, robot) in battle.robots.iter().enumerate() {
+        if robot.ide.is_some() {
+            processes.push(None);
+            continue;
+        }
         let launch_spec = RobotLaunch {
             transport: Transport::Stdio,
             robot: robot.lookup.clone(),
@@ -1007,7 +1048,7 @@ fn fight(
                 writer: Box::new(writer),
             });
         }
-        processes.push(process);
+        processes.push(Some(process));
     }
     // The next battle's hosts start while this one runs, unless robots are timed: classic's
     // mode would see the load.
@@ -1023,6 +1064,9 @@ fn fight(
     let stderr = processes
         .iter_mut()
         .map(|p| {
+            let Some(p) = p else {
+                return String::new();
+            };
             for _ in 0..100 {
                 if p.try_wait().ok().flatten().is_some() {
                     break;
@@ -1071,6 +1115,7 @@ pub(crate) fn serve(
         .iter()
         .map(|r| RobotEntry {
             token: random_token(),
+            debug: r.ide.is_some(),
             statics: r.statics.clone(),
         })
         .collect();
