@@ -20,6 +20,8 @@ robocode-s-protocol.workspace = true
 robocode-s-server.workspace = true
 robocode-s-runner.workspace = true
 robocode-s-replay.workspace = true
+robocode-s-rumble-client.workspace = true
+robocode-s-rumble-core.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
 egui-file-dialog = { version = "0.15.0", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }

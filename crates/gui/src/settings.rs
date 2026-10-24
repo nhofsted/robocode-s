@@ -6,6 +6,7 @@
 //! `%APPDATA%\robocode-s\gui.json` on Windows; `ROBOCODES_GUI_CONFIG` overrides it.
 
 use robocode_s_runner::Sandbox;
+use rumble_core::ids::Division;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -57,6 +58,54 @@ pub struct Settings {
     /// The most frames a second the animations draw; 0 for the display's refresh rate
     /// (see [`crate::pace`]).
     pub frame_rate: u32,
+    /// The Run Rumble page's choices (`rumble` in the file).
+    pub rumble: RumbleSettings,
+}
+
+/// The Run Rumble page's choices (docs/rumble-backend.md §13.7).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RumbleSettings {
+    /// The rumble's address; empty: the token file's, else the public one
+    /// ([`crate::rumble::DEFAULT_SERVER`]). `ROBOCODES_RUMBLE_SERVER` overrides it.
+    pub server: String,
+    /// Battles at once; none: the client's default (`rumble_client::contributor::default_slots`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel: Option<usize>,
+    /// The divisions offered, by name (`1v1`, `melee`).
+    pub divisions: Vec<String>,
+    /// The user agreed to run the rumble's robots without a sandbox (sandbox `none`).
+    pub unsandboxed_consent: bool,
+}
+
+impl Default for RumbleSettings {
+    fn default() -> Self {
+        Self {
+            server: String::new(),
+            parallel: None,
+            divisions: Division::ALL.iter().map(|d| d.to_string()).collect(),
+            unsandboxed_consent: false,
+        }
+    }
+}
+
+impl RumbleSettings {
+    /// The divisions chosen (unknown names are dropped).
+    pub fn divisions(&self) -> Vec<Division> {
+        Division::ALL
+            .into_iter()
+            .filter(|d| self.divisions.iter().any(|n| *n == d.to_string()))
+            .collect()
+    }
+
+    /// Chooses or drops a division.
+    pub fn set_division(&mut self, division: Division, on: bool) {
+        let name = division.to_string();
+        self.divisions.retain(|n| *n != name);
+        if on {
+            self.divisions.push(name);
+        }
+    }
 }
 
 #[allow(clippy::ptr_arg)] // the signature serde's `skip_serializing_if` wants
@@ -116,6 +165,7 @@ impl Default for Settings {
             watch_fingerprint: String::new(),
             graphs_battle: false,
             frame_rate: 0,
+            rumble: RumbleSettings::default(),
         }
     }
 }
@@ -390,9 +440,41 @@ mod tests {
             watch_fingerprint: format!("sha256:{}", ["0F"; 32].join(":")),
             graphs_battle: true,
             frame_rate: 60,
+            rumble: RumbleSettings {
+                server: "https://dev.example".into(),
+                parallel: Some(3),
+                divisions: vec!["melee".into()],
+                unsandboxed_consent: true,
+            },
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn the_rumble_settings_are_a_camel_case_object_with_defaults() {
+        let s = Settings::parse(r#"{"rumble": {"unsandboxedConsent": true}}"#).unwrap();
+        assert!(s.rumble.unsandboxed_consent);
+        assert_eq!(s.rumble.divisions(), Division::ALL);
+        assert_eq!(s.rumble.parallel, None);
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(text.contains(r#""unsandboxedConsent":true"#), "{text}");
+        assert!(!text.contains("parallel"), "{text}");
+        // Old files without the object take the defaults.
+        let old = Settings::parse("{}").unwrap();
+        assert_eq!(old.rumble, RumbleSettings::default());
+    }
+
+    #[test]
+    fn divisions_are_chosen_and_dropped_by_name() {
+        let mut r = RumbleSettings::default();
+        r.set_division(Division::Melee, false);
+        assert_eq!(r.divisions, ["1v1"]);
+        r.set_division(Division::Melee, true);
+        r.set_division(Division::Melee, true);
+        assert_eq!(r.divisions(), Division::ALL);
+        r.divisions = vec!["bogus".into(), "melee".into()];
+        assert_eq!(r.divisions(), [Division::Melee]);
     }
 
     #[test]
