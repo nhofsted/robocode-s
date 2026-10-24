@@ -45,7 +45,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Validates a jar in the order of §12.1. Returns the metadata, or the messages for the
 /// author (all messages of the first stage that fails).
 pub fn validate(bytes: &[u8], config: &Config) -> Result<JarInfo, Vec<String>> {
-    validate_inner(bytes, config, None).map(|(info, _)| info)
+    validate_inner(bytes, config, None, None).map(|(info, _)| info)
 }
 
 /// Like [`validate`], for jars from a participants list whose properties may lack
@@ -56,13 +56,27 @@ pub fn validate_with_version(
     config: &Config,
     fallback: &str,
 ) -> Result<(JarInfo, bool), Vec<String>> {
-    validate_inner(bytes, config, Some(fallback))
+    validate_inner(bytes, config, Some(fallback), None)
+}
+
+/// Validation for an import, where the participant list names the robot: a classic jar may
+/// hold several robots, and the one whose `robot.classname` is `want` is taken (the jar's
+/// whole codesize still counts). With one robot, it is taken whatever its name (the caller
+/// compares). `fallback` is as in [`validate_with_version`].
+pub fn validate_named(
+    bytes: &[u8],
+    config: &Config,
+    fallback: Option<&str>,
+    want: &str,
+) -> Result<(JarInfo, bool), Vec<String>> {
+    validate_inner(bytes, config, fallback, Some(want))
 }
 
 fn validate_inner(
     bytes: &[u8],
     config: &Config,
     fallback: Option<&str>,
+    want: Option<&str>,
 ) -> Result<(JarInfo, bool), Vec<String>> {
     let limits = &config.jar;
 
@@ -150,11 +164,26 @@ fn validate_inner(
         }
         1 => robots.remove(0),
         _ => {
-            let names: Vec<_> = robots.iter().map(|(name, _)| name.as_str()).collect();
-            return Err(vec![format!(
-                "more than one robot properties file ({}): a jar holds exactly one robot",
-                names.join(", ")
-            )]);
+            let names: Vec<_> = robots
+                .iter()
+                .map(|(name, props)| format!("{name} ({})", props["robot.classname"].trim()))
+                .collect();
+            let Some(want) = want else {
+                return Err(vec![format!(
+                    "more than one robot properties file ({}): a jar holds exactly one robot",
+                    names.join(", ")
+                )]);
+            };
+            let Some(at) = robots
+                .iter()
+                .position(|(_, props)| props["robot.classname"].trim() == want)
+            else {
+                return Err(vec![format!(
+                    "no robot {want} in the jar, which holds: {}",
+                    names.join(", ")
+                )]);
+            };
+            robots.remove(at)
         }
     };
     let get = |key: &str| props.get(key).map(|v| v.trim().to_string());
@@ -635,6 +664,59 @@ mod tests {
         let mut files = files;
         files.push(("lib/x.properties", b"a=b".to_vec()));
         assert!(errors(&files)[0].contains("no robot properties"));
+    }
+
+    fn several_robots() -> Vec<(&'static str, Vec<u8>)> {
+        let mut files = good_files();
+        files.push((
+            "my/Other.properties",
+            b"robot.classname=my.Other\nrobot.version=7\nrobot.author.name=Them\n".to_vec(),
+        ));
+        files.push(("my/Other.class", class_with_code(10, 52)));
+        files
+    }
+
+    #[test]
+    fn named_robot_in_a_jar_with_several() {
+        let jar = build_vec(&several_robots());
+        let config = Config::default();
+        let (info, _) = validate_named(&jar, &config, None, "my.Other").unwrap();
+        assert_eq!(
+            (info.bot_id.as_str(), info.version.as_str()),
+            ("my.Other", "7")
+        );
+        assert_eq!(info.author, "Them");
+        // The whole jar's codesize.
+        assert_eq!(info.codesize, 130);
+        let (info, _) = validate_named(&jar, &config, Some("9"), "my.Bot").unwrap();
+        assert_eq!(
+            (info.bot_id.as_str(), info.version.as_str()),
+            ("my.Bot", "1.2")
+        );
+        // Without a name, several robots stay refused, and the message names them.
+        let e = validate(&jar, &config).unwrap_err();
+        assert!(
+            e[0].contains("my.Bot") && e[0].contains("my.Other"),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn no_robot_of_that_name() {
+        let jar = build_vec(&several_robots());
+        let e = validate_named(&jar, &Config::default(), None, "my.Nope").unwrap_err();
+        assert!(e[0].contains("no robot my.Nope"), "{e:?}");
+        assert!(
+            e[0].contains("my.Bot") && e[0].contains("my.Other"),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn one_robot_with_another_name_is_left_to_the_caller() {
+        let jar = build_vec(&good_files());
+        let (info, _) = validate_named(&jar, &Config::default(), None, "my.Other").unwrap();
+        assert_eq!(info.bot_id, "my.Bot");
     }
 
     #[test]

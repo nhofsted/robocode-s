@@ -6,18 +6,19 @@
 //!
 //! Library part only; `robocode-s rumble admin import` wraps [`run`].
 
+use crate::backoff;
 use crate::http::{Api, Error as ApiError};
 use rumble_core::Config;
 use rumble_core::api::{UploadUrlRequest, UploadUrlResponse};
 use rumble_core::ids::Division;
-use rumble_core::jar::{JarInfo, validate_with_version};
+use rumble_core::jar::{JarInfo, validate_named};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// RoboWiki's 1v1 participants page, raw.
 pub const LIST_1V1: &str =
@@ -305,7 +306,7 @@ fn percent_encode(text: &str) -> String {
 /// The jar must be valid and say it is this entry. A missing `robot.version` takes the
 /// list's (classic's list is authoritative); a different one is a mismatch.
 fn check(bytes: &[u8], entry: &Entry, config: &Config) -> Result<(JarInfo, bool), String> {
-    let (info, from_list) = validate_with_version(bytes, config, &entry.version)
+    let (info, from_list) = validate_named(bytes, config, Some(&entry.version), &entry.id)
         .map_err(|messages| format!("invalid ({})", messages.join("; ")))?;
     if info.bot_id != entry.id || info.version != entry.version {
         return Err(format!(
@@ -525,17 +526,60 @@ fn failed(entry: &Entry, error: String) -> EntryReport {
     }
 }
 
-fn retrying<T>(mut call: impl FnMut() -> Result<T, ApiError>) -> Result<T, ApiError> {
-    let mut attempt = 0;
+/// Attempts per API call before the entry fails.
+const ATTEMPTS: u32 = 6;
+
+/// The importer's own pace: API calls start at least `gap` apart, over all worker threads.
+pub struct Pacer {
+    gap: Duration,
+    next: Mutex<Instant>,
+}
+
+impl Pacer {
+    pub fn new(gap: Duration) -> Pacer {
+        Pacer {
+            gap,
+            next: Mutex::new(Instant::now()),
+        }
+    }
+
+    /// Two calls a second: the server's limit for other calls is 2/s (spec section 5.3).
+    pub fn api() -> Pacer {
+        Pacer::new(Duration::from_millis(500))
+    }
+
+    /// Blocks until this caller's slot.
+    pub fn wait(&self) {
+        let slot = {
+            let mut next = self.next.lock().unwrap();
+            let slot = (*next).max(Instant::now());
+            *next = slot + self.gap;
+            slot
+        };
+        let now = Instant::now();
+        if slot > now {
+            std::thread::sleep(slot - now);
+        }
+    }
+}
+
+/// Calls `call` paced, again on retryable errors after the server's `Retry-After` (with
+/// jitter), up to [`ATTEMPTS`] attempts.
+fn retrying<T>(
+    pacer: &Pacer,
+    mut call: impl FnMut() -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    let mut attempt = 1;
     loop {
+        pacer.wait();
         match call() {
-            Err(e) if e.is_retryable() && attempt < 2 => {
-                attempt += 1;
-                let wait = e
+            Err(e) if e.is_retryable() && attempt < ATTEMPTS => {
+                let base = e
                     .retry_after()
-                    .unwrap_or(Duration::from_secs(2))
+                    .unwrap_or(Duration::from_secs(1 << attempt.min(5)))
                     .min(Duration::from_secs(60));
-                std::thread::sleep(wait);
+                std::thread::sleep(backoff::retry_after(base, backoff::random_unit()));
+                attempt += 1;
             }
             other => return other,
         }
@@ -543,21 +587,29 @@ fn retrying<T>(mut call: impl FnMut() -> Result<T, ApiError>) -> Result<T, ApiEr
 }
 
 /// Uploads the jar unless the server has it, then registers it. Returns the server's result.
-fn register(api: &Api, found: &Found, entry: &Entry, division: Division) -> Result<String, String> {
+fn register(
+    api: &Api,
+    pacer: &Pacer,
+    found: &Found,
+    entry: &Entry,
+    division: Division,
+) -> Result<String, String> {
     let request = UploadUrlRequest {
         sha256: found.info.sha256.clone(),
         size: found.info.size,
     };
     // `{"exists": true}` has no URL, so it is read as plain JSON.
-    let answer: Value = retrying(|| api.post_json("admin/jars/upload-url", &request))
+    let answer: Value = retrying(pacer, || api.post_json("admin/jars/upload-url", &request))
         .map_err(|e| format!("upload ({e})"))?;
     if answer.get("exists").and_then(Value::as_bool) != Some(true) {
         let upload: UploadUrlResponse = serde_json::from_value(answer)
             .map_err(|e| format!("upload (unreadable upload-url answer: {e})"))?;
         let headers = upload.headers.iter().map(|(k, v)| (k.as_str(), v.as_str()));
         let headers: Vec<_> = headers.collect();
-        retrying(|| api.put_presigned(&upload.url, headers.iter().copied(), &found.bytes))
-            .map_err(|e| format!("upload ({e})"))?;
+        retrying(pacer, || {
+            api.put_presigned(&upload.url, headers.iter().copied(), &found.bytes)
+        })
+        .map_err(|e| format!("upload ({e})"))?;
     }
     let mut body = json!({
         "bot": found.info.bot_id,
@@ -572,7 +624,7 @@ fn register(api: &Api, found: &Found, entry: &Entry, division: Division) -> Resu
         body["versionFromList"] = json!(true);
     }
     debug_assert_eq!(found.info.bot_id, entry.id);
-    let answer = retrying(|| api.admin_import(&body)).map_err(|e| match e {
+    let answer = retrying(pacer, || api.admin_import(&body)).map_err(|e| match e {
         ApiError::Conflict(_) => "conflict".to_string(),
         other => format!("api ({other})"),
     })?;
@@ -587,6 +639,7 @@ fn process(
     options: &Options,
     fetcher: &dyn Fetcher,
     api: Option<&Api>,
+    pacer: &Pacer,
 ) -> EntryReport {
     let found = match resolve(entry, options, fetcher) {
         Ok(f) => f,
@@ -604,7 +657,7 @@ fn process(
         version_from_list: found.version_from_list,
     };
     if let (false, Some(api)) = (options.dry_run, api) {
-        match register(api, &found, entry, options.division) {
+        match register(api, pacer, &found, entry, options.division) {
             Ok(result) => row.result = result,
             Err(why) => {
                 row.result = "failed".to_string();
@@ -625,6 +678,7 @@ pub fn run(
     progress: Progress,
 ) -> Report {
     let total = list.entries.len();
+    let pacer = Pacer::api();
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let rows: Mutex<Vec<Option<EntryReport>>> = Mutex::new(vec![None; total]);
@@ -640,7 +694,7 @@ pub fn run(
                     let row = if api.is_none() && !options.dry_run {
                         failed(entry, "api (no API client)".to_string())
                     } else {
-                        process(entry, options, fetcher, api)
+                        process(entry, options, fetcher, api, &pacer)
                     };
                     let n = done.fetch_add(1, Ordering::SeqCst) + 1;
                     progress(&row, n, total);

@@ -142,3 +142,35 @@ fn conflicts_and_dry_runs() {
     assert_eq!(report.entries[0].result, "valid");
     assert_eq!(server.requests().len(), before);
 }
+
+#[test]
+fn rate_limits_are_retried() {
+    let limited = std::sync::Arc::new(Mutex::new(0));
+    let server = {
+        let limited = limited.clone();
+        Server::start(move |req| match req.path.as_str() {
+            "/api/v1/admin/jars/upload-url" => Resp::json(200, &json!({"exists": true})),
+            "/api/v1/admin/bots/import" => {
+                let mut n = limited.lock().unwrap();
+                *n += 1;
+                if *n <= 2 {
+                    Resp::json(
+                        429,
+                        &json!({"error": {"code": "rate_limited", "message": "slow down"}}),
+                    )
+                    .with_header("Retry-After", "1")
+                } else {
+                    Resp::json(200, &json!({"vid": 1, "result": "created"}))
+                }
+            }
+            _ => Resp::status(404),
+        })
+    };
+    let api = Api::new(&server.url("/api/v1"), Some("rsu_admin".into()), 1);
+    let list = parse_list("<pre>\nsample.MyFirstRobot 1.0,http://list/first.jar\n</pre>");
+    let mut options = Options::new(Division::Melee);
+    options.mirror = None;
+    let report = import::run(&list, &options, &Files, Some(&api), &|_, _, _| {});
+    assert_eq!(report.counts["created"], 1, "{:?}", report.entries);
+    assert_eq!(*limited.lock().unwrap(), 3);
+}

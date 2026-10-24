@@ -229,9 +229,10 @@ pub fn validate_import(
     request: &ImportRequest,
 ) -> Result<JarInfo, ApiError> {
     let result = if request.version_from_list {
-        crate::jar::validate_with_version(bytes, config, &request.version).map(|(info, _)| info)
+        crate::jar::validate_named(bytes, config, Some(&request.version), &request.bot)
+            .map(|(info, _)| info)
     } else {
-        crate::jar::validate(bytes, config)
+        crate::jar::validate_named(bytes, config, None, &request.bot).map(|(info, _)| info)
     };
     result.map_err(|messages| {
         ApiError::new(
