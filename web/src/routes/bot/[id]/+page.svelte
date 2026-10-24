@@ -12,9 +12,12 @@
 		CLASS_NAMES,
 		METRICS,
 		compareBy,
+		formatBytes,
 		formatCount,
 		formatDate,
 		formatNumber,
+		jarFileName,
+		jarHref,
 		packageName,
 		rumbleName,
 		scoreHeat,
@@ -332,7 +335,7 @@
 		<div class="table-scroll">
 			<table class="data">
 				<thead>
-					<tr><th>Version</th><th>Added</th><th>Retired</th><th class="num">Codesize</th><th>SHA-256</th></tr>
+					<tr><th>Version</th><th>Added</th><th>Retired</th><th class="num">Codesize</th><th class="num">Size</th><th>Download</th></tr>
 				</thead>
 				<tbody>
 					{#each bot.versions as v (v.version)}
@@ -341,7 +344,15 @@
 							<td>{formatDate(v.addedAt)}</td>
 							<td>{v.retiredAt ? formatDate(v.retiredAt) : 'current'}</td>
 							<td class="num">{v.codesize === null ? '–' : formatCount(v.codesize)}</td>
-							<td class="mono hash" title={v.sha256}>{v.sha256.slice(0, 12)}…</td>
+							<td class="num">{formatBytes(v.size)}</td>
+							<td>
+								<a
+									href={jarHref(v.sha256)}
+									download={jarFileName(bot.id, v.version)}
+									rel="external"
+									title="SHA-256 {v.sha256}">{jarFileName(bot.id, v.version)}</a
+								>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -511,8 +522,5 @@
 		align-items: center;
 		gap: 0.4rem;
 		white-space: nowrap;
-	}
-	.hash {
-		color: var(--muted);
 	}
 </style>

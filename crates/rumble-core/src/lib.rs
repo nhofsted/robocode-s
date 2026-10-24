@@ -4,6 +4,7 @@
 //! no randomness. Callers pass random bytes and the current time in.
 
 pub mod api;
+pub mod archive;
 pub mod auth;
 pub mod batch;
 pub mod bots;

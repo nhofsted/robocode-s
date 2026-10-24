@@ -161,6 +161,8 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
         }
     }
 
+    super::archive::write(batch, &versions, &bots, &generated_at)?;
+
     // Contributors, from the users the planner saw.
     let index_of_users: UserIndex = batch
         .read_json(Bucket::State, USERS_KEY)?

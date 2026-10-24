@@ -125,6 +125,9 @@ pub struct BotVersion {
     pub weight_class: WeightClass,
     /// SHA-256 of the robot package, hex.
     pub sha256: String,
+    /// Size of the jar in bytes (files written before this field existed read as 0).
+    #[serde(default)]
+    pub size: u64,
     pub added_at: String,
     pub retired_at: Option<String>,
 }
@@ -188,6 +191,35 @@ pub struct Contributor {
     pub tier: String,
     /// When the volunteer first signed in.
     pub since: String,
+}
+
+/// `/data/v1/archive.json`: every downloadable version of every bot that has not been taken
+/// down, for the archive page. Sorted by bot id, each bot's versions newest first.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Archive {
+    pub schema: u32,
+    pub generated_at: String,
+    pub bots: Vec<ArchiveBot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArchiveBot {
+    pub id: String,
+    pub author: String,
+    pub versions: Vec<ArchiveVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArchiveVersion {
+    pub version: String,
+    /// The jar is `/jars/<sha256>.jar`.
+    pub sha256: String,
+    pub size: u64,
+    /// `active`, `probation`, `retired` or `failed`.
+    pub state: String,
+    /// `YYYY-MM-DD`.
+    pub added: String,
 }
 
 /// Days since 1970-01-01 of a `YYYY-MM-DD` date; `None` if it is not one.
@@ -405,6 +437,7 @@ mod tests {
     fn fixture_files_round_trip() {
         round_trip::<RumbleIndex>("rumbles.json");
         round_trip::<Contributors>("contributors.json");
+        round_trip::<Archive>("archive.json");
         round_trip::<Rankings>("rankings/1v1.json");
         round_trip::<Rankings>("rankings/twinduel.json");
         round_trip::<BotDetails>("bots/yb.lab.SlyTortoise.json");

@@ -8,6 +8,7 @@
 
 import {
 	SCHEMA_VERSION,
+	type Archive,
 	type BotDetails,
 	type BotId,
 	type BotRumble,
@@ -41,6 +42,7 @@ export interface Fixtures {
 	rankings(rumble: RumbleId): Rankings | undefined;
 	bot(id: BotId): BotDetails | undefined;
 	contributors(): Contributors;
+	archive(): Archive;
 }
 
 interface Bot {
@@ -170,10 +172,30 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 
 	const contributors = (): Contributors => createContributors(seed, now);
 
+	// Every bot with all its versions; the newest is active, older ones are retired.
+	const archive = (): Archive => ({
+		schema: SCHEMA_VERSION,
+		generatedAt: now.toISOString(),
+		bots: [...bots]
+			.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+			.map((b) => ({
+				id: b.id,
+				author: b.author,
+				versions: b.versions.map((v) => ({
+					version: v.version,
+					sha256: v.sha256,
+					size: v.size,
+					state: v.retiredAt ? ('retired' as const) : ('active' as const),
+					added: v.addedAt.slice(0, 10)
+				}))
+			}))
+	});
+
 	const get = (path: string): unknown | undefined => {
 		const clean = path.replace(/^\/+/, '');
 		if (clean === 'rumbles.json') return index();
 		if (clean === 'contributors.json') return contributors();
+		if (clean === 'archive.json') return archive();
 		let m = /^rankings\/([^/]+)\.json$/.exec(clean);
 		if (m) return rankings(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
@@ -181,7 +203,7 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		return undefined;
 	};
 
-	return { get, index, rankings, bot, contributors };
+	return { get, index, rankings, bot, contributors, archive };
 }
 
 const LOGIN_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night', 'cold', 'dusty'];
@@ -292,6 +314,7 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 			codesize: Math.max(60, Math.round(codesize * (0.85 + 0.03 * i))),
 			weightClass: classOf(codesize),
 			sha256: sha256Like(`${id}@${major}.${minor}`),
+			size: jarSize(`${id}@${major}.${minor}`),
 			addedAt: added.toISOString(),
 			retiredAt: null
 		});
@@ -542,6 +565,11 @@ function isoDay(now: Date, offset: number): string {
 
 function daysBetween(a: Date, b: Date): number {
 	return (b.getTime() - a.getTime()) / 86_400_000;
+}
+
+/** A plausible jar size: 8 to 200 KB. */
+function jarSize(text: string): number {
+	return 8_000 + (hash(`size:${text}`) % 192_000);
 }
 
 function sha256Like(text: string): string {

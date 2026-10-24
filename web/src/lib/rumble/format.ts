@@ -90,3 +90,14 @@ export function scoreHeat(score: number | null): string {
 	const pole = t >= 0 ? '57 135 229' : '230 103 103';
 	return `rgb(${pole} / ${(Math.abs(t) * 0.8).toFixed(3)})`;
 }
+
+/** A jar size, e.g. `12.3 KB` (1 KB = 1,000 bytes). */
+export function formatBytes(bytes: number): string {
+	if (bytes < 1000) return `${bytes} B`;
+	if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(1)} KB`;
+	return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** Where a version's jar is served (same origin), and the name a download is saved under. */
+export const jarHref = (sha256: string): string => `/jars/${sha256}.jar`;
+export const jarFileName = (id: BotId, version: string): string => `${id}_${version}.jar`;

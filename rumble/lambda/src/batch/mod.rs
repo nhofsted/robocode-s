@@ -12,6 +12,7 @@
 //! Reserved concurrency 1 makes it the only writer of the state files. Like the `api`, it
 //! runs on a blocking thread and drives the SDK with [`crate::block_on`].
 
+pub mod archive;
 pub mod cleanup;
 pub mod plan;
 pub mod publish;

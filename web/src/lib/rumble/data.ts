@@ -2,6 +2,7 @@
 
 import { error } from '@sveltejs/kit';
 import type {
+	Archive,
 	BotDetails,
 	BotId,
 	Contributors,
@@ -36,3 +37,5 @@ export const loadRankings = (fetch: Fetch, rumble: RumbleId) =>
 
 export const loadBot = (fetch: Fetch, id: BotId) =>
 	load<BotDetails>(fetch, `bots/${encodeURIComponent(id)}.json`, `bot "${id}"`);
+
+export const loadArchive = (fetch: Fetch) => load<Archive>(fetch, 'archive.json', 'the archive');

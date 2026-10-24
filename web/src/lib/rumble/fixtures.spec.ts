@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classOf, createFixtures } from './fixtures.ts';
-import type { BotDetails, Contributors, Rankings, RumbleIndex } from './types.ts';
+import type { Archive, BotDetails, Contributors, Rankings, RumbleIndex } from './types.ts';
 
 const fixtures = createFixtures({ seed: 42, bots: 120 });
 const index = fixtures.get('rumbles.json') as RumbleIndex;
@@ -118,5 +118,20 @@ describe('classOf', () => {
 		expect(classOf(750)).toBe('mini');
 		expect(classOf(1499)).toBe('mini');
 		expect(classOf(1500)).toBe('mega');
+	});
+});
+
+describe('archive', () => {
+	it('lists every version of every bot, sorted by id, with the bot pages\' jars', () => {
+		const file = fixtures.get('archive.json') as Archive;
+		expect(file.bots.length).toBeGreaterThan(0);
+		file.bots.forEach((b, i) => {
+			if (i > 0) expect(b.id > file.bots[i - 1].id).toBe(true);
+			const details = fixtures.bot(b.id);
+			if (!details) return;
+			expect(b.versions.map((v) => [v.version, v.sha256, v.size])).toEqual(
+				details.versions.map((v) => [v.version, v.sha256, v.size])
+			);
+		});
 	});
 });

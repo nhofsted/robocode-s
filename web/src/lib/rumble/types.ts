@@ -120,6 +120,8 @@ export interface BotVersion {
 	weightClass: WeightClass;
 	/** SHA-256 of the robot package, hex. */
 	sha256: string;
+	/** Size of the jar in bytes. The jar is `/jars/<sha256>.jar`. */
+	size: number;
 	addedAt: string;
 	/** Set when the version was replaced or retired. */
 	retiredAt: string | null;
@@ -190,4 +192,33 @@ export interface Contributor {
 	tier: 'new' | 'verifier' | 'quarantined';
 	/** When the volunteer first signed in. */
 	since: string;
+}
+
+/**
+ * `/data/v1/archive.json`: every downloadable version of every bot that has not been taken
+ * down (removed bots and versions are left out), for the archive page.
+ */
+export interface Archive {
+	schema: number;
+	generatedAt: string;
+	/** Sorted by id. */
+	bots: ArchiveBot[];
+}
+
+export interface ArchiveBot {
+	id: BotId;
+	author: string;
+	/** Newest first. */
+	versions: ArchiveVersion[];
+}
+
+export interface ArchiveVersion {
+	version: string;
+	/** SHA-256 of the jar, hex: the file is `/jars/<sha256>.jar`. */
+	sha256: string;
+	/** Size of the jar in bytes. */
+	size: number;
+	state: 'active' | 'probation' | 'retired' | 'failed';
+	/** `YYYY-MM-DD`. */
+	added: string;
 }

@@ -274,6 +274,7 @@ pub fn bot_details(
                 codesize: v.codesize,
                 weight_class: v.class,
                 sha256: v.sha256.clone(),
+                size: v.size,
                 added_at: rfc3339(v.created),
                 retired_at: v
                     .retired

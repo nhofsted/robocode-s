@@ -11,7 +11,7 @@
 
 use rumble_core::api::UserUpdateRequest;
 use rumble_core::bots;
-use rumble_core::data::{BotDetails, Contributors, Rankings, RumbleIndex};
+use rumble_core::data::{Archive, BotDetails, Contributors, Rankings, RumbleIndex};
 use rumble_core::ids::{Division, WeightClass};
 use rumble_core::plan::Plan;
 use rumble_core::record::{Entry, Record};
@@ -508,6 +508,15 @@ pub fn run(world: &World, data_dir: &Path) {
     );
     assert_eq!(contributors.contributors[0].tier, "verifier");
     assert_eq!(contributors.contributors[2].tier, "quarantined");
+    let archive: Archive = world.json("data/v1/archive.json");
+    assert_eq!(archive.bots.len(), 50);
+    let one = archive.bots.iter().find(|b| b.id == "syn.Bot1").unwrap();
+    let listed: Vec<(&str, &str)> = one
+        .versions
+        .iter()
+        .map(|v| (v.version.as_str(), v.state.as_str()))
+        .collect();
+    assert_eq!(listed, vec![("2.0", "active"), ("1.0", "retired")]);
     assert_eq!(report.bot_files_written, 50);
     assert!(
         world
@@ -695,6 +704,8 @@ pub fn run(world: &World, data_dir: &Path) {
     );
     let rankings: Rankings = world.json("data/v1/rankings/1v1.json");
     assert!(rankings.bots.iter().all(|r| r.id != "syn.Bot7"));
+    let archive: Archive = world.json("data/v1/archive.json");
+    assert!(archive.bots.iter().all(|b| b.id != "syn.Bot7"));
     let contributors: Contributors = world.json("data/v1/contributors.json");
     assert!(
         contributors
