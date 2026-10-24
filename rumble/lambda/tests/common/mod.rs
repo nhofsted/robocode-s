@@ -207,6 +207,8 @@ pub fn plan_1v1(engine: u32) -> Plan {
             .collect(),
         pairs: vec![(1, 2, 10), (1, 3, 10), (2, 3, 10)],
         anchors: vec![],
+        overflow_pairs: vec![],
+        overflow_anchors: vec![],
         partners: BTreeMap::new(),
         top: vec![1],
         slot_pairs: vec![],
