@@ -167,7 +167,8 @@ pub fn now_iso() -> String {
     iso(secs)
 }
 
-fn iso(secs: u64) -> String {
+/// Unix seconds as `2026-10-24T13:05:09Z`.
+pub fn iso(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
