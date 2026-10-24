@@ -521,7 +521,7 @@ Recordings are stored per **round**, not per battle. A rumble recording is a **l
 2. The results Lambda replies with the rounds that fill an empty slot, each with a presigned S3 PUT URL. Most batches upload nothing.
 3. Only users above a reputation threshold are asked for recordings. Each recording's hash must match the round hash reported in the results.
 
-**Everything else on request:** for any other matchup or round, "watch" turns into a high-priority assignment. A volunteer re-runs the battle deterministically and uploads the requested round, which is kept in a small LRU cache with a size cap of about 1 GB.
+**Everything else on request** (not built yet, deferred after M6, #113): for any other matchup or round, "watch" turns into a high-priority assignment. A volunteer re-runs the battle deterministically and uploads the requested round, which is kept in a small LRU cache with a size cap of about 1 GB.
 
 **Estimated cost** (1v1 with about 1,100 bots, plus the other divisions):
 
@@ -537,7 +537,7 @@ Recordings are stored per **round**, not per battle. A rumble recording is a **l
 - Rankings tables per division and weight class, sortable by every metric, with filters and search.
 - Bot pages: metadata, author, versions, rating history chart, best and worst pairings, and a full pairing matrix with heatmap.
 - Pairing pages: per-pairing statistics and a "watch a battle" button (§12.7).
-- **Battle replay in the browser:** the replay decoder (`crates/replay`, compiled to WebAssembly) and a canvas viewer play the recordings. No engine runs in the browser: tracks are what the viewer draws (ADR 0017). Scrubbing jumps between decoded frames.
+- **Battle replay in the browser:** the replay decoder (`crates/replay`, compiled to WebAssembly) and a canvas viewer play the recordings. No engine runs in the browser: tracks are what the viewer draws (ADR 0017). Scrubbing jumps between decoded frames. Done in M6: the replay pages play the stored rumble rounds, the pairing and bot pages list them (from the recordings index, `rumble-data.md`), and `/replay/file` plays a local `.track` file.
 - **Bot archive:** every version of a bot (current and retired) has a download link `<id>_<version>.jar` on its bot page; takedowns disappear from it. (`archive.json` is written for a later listing; the site has no `/archive` page, owner 2026-10-24.) No bulk zip, no classic-style URLs.
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 - **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
@@ -581,7 +581,8 @@ robocode-s/
 │   ├── gui/
 │   ├── rumble-core/          # rumble types, tokens, records, planner, metrics, jar validation
 │   ├── rumble-client/        # rumble client: HTTP, device flow, battles, import
-│   ├── viewer-wasm/          # engine + renderer for the browser
+│   ├── replay/               # lossy replay tracks (ADR 0017)
+│   ├── replay-wasm/          # the replay-track decoder for the browser (ADR 0017)
 │   └── cli/
 ├── rumble/
 │   └── lambda/               # api and batch Lambdas (a workspace of its own)
@@ -614,7 +615,7 @@ robocode-s/
 | M3 | Isolation and distribution | Robots over stdio, built-in OS sandbox (Linux, Windows), Docker runner image as an alternative (ADR 0019), release archives per platform, remote runner agents with TLS and tokens, warm pools |
 | M4 | Rumble | Free-tier AWS backend (`api` and `batch` Lambdas: work, results, auth, submit, plan, rankings), rumble client in the CLI and GUI, seeding import from RoboWiki, website with rankings, reputation-based cross-checks, dev and prod stages. Spec: `docs/rumble-backend.md`, ADR 0021 |
 | M5 | Robots in Python | Python client library on the protocol (§9) plus sample robots; its sandbox and its own work counting and calibration for deterministic mode (#15) |
-| M6 | Battle replays in the browser | Replay decoder (WASM) and canvas viewer; on-demand replays in the browser |
+| M6 | Battle replays in the browser | Replay decoder (WASM) and canvas viewer for the stored rumble rounds (on-demand replays: #113) |
 | M7 | Online editor | Write a robot in the browser, build it and try it against other robots there, then submit it to the rumble (O15) |
 | M8 | Robots in .NET, Rust, C/C++ and Kotlin | Client libraries plus sample robots, each with its own work counting and calibration (#15) |
 | M9+ | Extras | WASM runner, Tank Royale adapter, .NET compat |

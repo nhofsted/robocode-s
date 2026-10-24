@@ -21,3 +21,6 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Built by tools/build-wasm.sh
+/src/lib/replay/wasm/

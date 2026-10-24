@@ -2748,6 +2748,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "robocode-s-replay-wasm"
+version = "0.2.0"
+dependencies = [
+ "robocode-s-replay",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "robocode-s-rumble-client"
 version = "0.2.1"
 dependencies = [

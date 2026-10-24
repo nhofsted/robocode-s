@@ -1,0 +1,19 @@
+[package]
+name = "robocode-s-replay-wasm"
+description = "The replay-track decoder for the website, as WebAssembly (ADR 0017)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+robocode-s-replay.workspace = true
+wasm-bindgen = "=0.2.129"

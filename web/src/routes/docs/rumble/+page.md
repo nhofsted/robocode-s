@@ -71,6 +71,14 @@ See [Developing a robot](/docs/robot-development/release#package-it) for how to 
 
 ## Replays
 
-> **Status:** milestone M6.
+Rounds of rumble battles can be watched in the browser. The rumble records a round as a small replay track (a `.track` file, a few KB per round): what the viewer draws, turn by turn, not the engine's full state, so the browser needs no engine to play it.
 
-Every pairing page will have a **watch** button that plays a battle in the browser, with the same engine that ran it, compiled to WebAssembly. The rumble keeps recordings of five rounds won by each side for every matchup with at least one top-50 bot. Any other round can be requested: a volunteer re-runs that battle (same seed, same result) and uploads the round.
+- **On a pairing page,** the "Watch a battle" section lists the recorded rounds of that pairing, grouped by the bot that won them. Pick one to play it.
+- **On a bot page,** the Replays section lists the opponents with recorded rounds (best pairings first) and, in melee, the rounds the bot won and did not win.
+- **A replay page** plays the round on a canvas, with play, pause, speed, a turn scrubber and the keyboard (Space, arrow keys, Home), and shows the seed, round and engine version. **Download .track** saves the track.
+
+What is recorded: the top 50 bots of a division get recordings against everyone, and every bot gets its best, worst and problem pairings recorded too, with up to five rounds won by each side per pairing (melee: five won and five not won per bot). The slots fill as volunteers run battles, so a new pairing may have no replays yet. A track belongs to the bot versions that fought it: when a bot releases a new version, the old version's recordings are deleted and the new version starts with none.
+
+**Your own files.** The [desktop app](/download) opens a `.track` file in Watch Battle (a track is one round, not the whole battle, and has no robot output or painting; a full recording made with `--record` plays there too). To play a track without installing anything, use [Open a replay file](/replay/file): it reads the file in your browser and sends it nowhere. It plays tracks only, not full recordings.
+
+**Re-running a round exactly.** A track holds the engine version and every round has a seed, so the battle can be run again locally in [deterministic mode](/docs/robot-development/deterministic-mode) with the same bot versions (from the bot pages), seed and rules, and examined under your debugger: see [Debugging](/docs/robot-development/debugging).

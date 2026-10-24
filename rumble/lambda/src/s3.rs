@@ -75,6 +75,8 @@ pub trait Objects: Send + Sync {
     fn delete(&self, bucket: Bucket, key: &str) -> S3Result<()>;
     /// ListObjectsV2 of a prefix, all pages: the keys in key order.
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>>;
+    /// Like [`list`](Objects::list), with each object's ETag (the same listing request).
+    fn list_etags(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<(String, String)>>;
     /// A presigned PUT valid `expires_in` seconds from `now`.
     fn presign_put(
         &self,
@@ -111,6 +113,9 @@ impl<O: Objects + ?Sized> Objects for std::sync::Arc<O> {
     }
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
         (**self).list(bucket, prefix)
+    }
+    fn list_etags(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<(String, String)>> {
+        (**self).list_etags(bucket, prefix)
     }
     fn presign_put(
         &self,
@@ -180,6 +185,35 @@ impl S3Objects {
             .force_path_style(path_style)
             .build();
         aws_sdk_s3::Client::from_conf(s3)
+    }
+
+    /// ListObjectsV2, all pages: key and ETag.
+    fn list_objects(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<(String, String)>> {
+        block_on(async {
+            let mut keys = Vec::new();
+            let mut token: Option<String> = None;
+            loop {
+                let output = self
+                    .client
+                    .list_objects_v2()
+                    .bucket(self.bucket(bucket))
+                    .prefix(prefix)
+                    .set_continuation_token(token.take())
+                    .send()
+                    .await
+                    .map_err(|e| format!("S3 LIST {prefix}: {}", describe(&e)))?;
+                keys.extend(
+                    output.contents().iter().filter_map(|o| {
+                        Some((o.key.clone()?, o.e_tag.clone().unwrap_or_default()))
+                    }),
+                );
+                match output.next_continuation_token {
+                    Some(next) if output.is_truncated == Some(true) => token = Some(next),
+                    _ => break,
+                }
+            }
+            Ok(keys)
+        })
     }
 
     fn bucket(&self, bucket: Bucket) -> &str {
@@ -295,27 +329,15 @@ impl Objects for S3Objects {
     }
 
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
-        block_on(async {
-            let mut keys = Vec::new();
-            let mut token: Option<String> = None;
-            loop {
-                let output = self
-                    .client
-                    .list_objects_v2()
-                    .bucket(self.bucket(bucket))
-                    .prefix(prefix)
-                    .set_continuation_token(token.take())
-                    .send()
-                    .await
-                    .map_err(|e| format!("S3 LIST {prefix}: {}", describe(&e)))?;
-                keys.extend(output.contents().iter().filter_map(|o| o.key.clone()));
-                match output.next_continuation_token {
-                    Some(next) if output.is_truncated == Some(true) => token = Some(next),
-                    _ => break,
-                }
-            }
-            Ok(keys)
-        })
+        Ok(self
+            .list_objects(bucket, prefix)?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect())
+    }
+
+    fn list_etags(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<(String, String)>> {
+        self.list_objects(bucket, prefix)
     }
 
     fn presign_put(
@@ -486,6 +508,17 @@ impl Objects for MemObjects {
             .into_iter()
             .filter(|k| k.starts_with(prefix))
             .collect())
+    }
+
+    fn list_etags(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<(String, String)>> {
+        let objects = self.objects.lock().unwrap();
+        let mut found: Vec<(String, String)> = objects
+            .iter()
+            .filter(|((b, k), _)| *b == bucket && k.starts_with(prefix))
+            .map(|((_, k), o)| (k.clone(), o.etag.clone()))
+            .collect();
+        found.sort();
+        Ok(found)
     }
 
     fn presign_put(

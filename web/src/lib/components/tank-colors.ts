@@ -16,6 +16,16 @@ export function tankColors(id: string): TankColors {
 	};
 }
 
+/** Colours for robot number `i` of a battle with no bot ids: each a golden angle on from the last, as the desktop app does. */
+export function tankColorsByIndex(i: number): TankColors {
+	const hue = (i * 137.508 + 120) % 360;
+	return {
+		body: hsl(hue, 0.55, 0.38),
+		gun: hsl(hue, 0.35, 0.55),
+		radar: hsl((hue + 180) % 360, 0.7, 0.55)
+	};
+}
+
 function hsl(hue: number, s: number, l: number): RGB {
 	const a = s * Math.min(l, 1 - l);
 	const channel = (n: number) => {

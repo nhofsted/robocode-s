@@ -19,6 +19,11 @@ import {
 	type HistoryPoint,
 	type Metrics,
 	type Pairing,
+	type RecordedBot,
+	type Recordings1v1,
+	type RecordingsMelee,
+	type Round1v1,
+	type RoundMelee,
 	type RankingRow,
 	type Rankings,
 	type RumbleId,
@@ -43,6 +48,9 @@ export interface Fixtures {
 	bot(id: BotId): BotDetails | undefined;
 	contributors(): Contributors;
 	archive(): Archive;
+	/** The recordings index of a bot's current version, undefined where it has no rounds. */
+	recordings(division: '1v1', id: BotId): Recordings1v1 | undefined;
+	recordings(division: 'melee', id: BotId): RecordingsMelee | undefined;
 }
 
 interface Bot {
@@ -75,6 +83,11 @@ const DIVISIONS: { division: Division; classes: WeightClass[]; rounds: number; f
 	{ division: 'teams', classes: ['mega'], rounds: 10, field: 1200 },
 	{ division: 'twinduel', classes: ['mega'], rounds: 75, field: 800 }
 ];
+
+/** Bots up to this rank get recordings, as the backend's slots do (rumble-backend.md §12.5). */
+const RECORDED_TOP = 50;
+/** Robots in a synthetic melee round: the melee8.track fixture has eight. */
+const MELEE_ROBOTS = 8;
 
 const CLASS_ORDER: WeightClass[] = ['nano', 'micro', 'mini', 'mega'];
 
@@ -159,6 +172,11 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			const d = r.details.get(id);
 			if (d) entries[rid] = d;
 		}
+		const recorded = {
+			'1v1': recordings1v1(id)?.pairs.reduce((n, p) => n + p.rounds.length, 0) ?? 0,
+			melee: recordingsMelee(id)?.rounds.length ?? 0
+		};
+		const counts = Object.fromEntries(Object.entries(recorded).filter(([, n]) => n > 0));
 		return {
 			schema: SCHEMA_VERSION,
 			id,
@@ -166,9 +184,91 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			description: hash(id) % 4 === 0 ? null : `${shortName(id)}: a ${b.weightClass} bot.`,
 			homepage: hash(id) % 2 === 0 ? `https://robowiki.net/wiki/${shortName(id)}` : null,
 			versions: b.versions,
-			rumbles: entries
+			rumbles: entries,
+			...(Object.keys(counts).length > 0 ? { recordings: counts } : {})
 		};
 	};
+
+	const recordedBot = (b: Bot): RecordedBot => ({
+		bot: b.id,
+		version: b.versions[0].version,
+		sha16: b.versions[0].sha256.slice(0, 16)
+	});
+	const rankIn = (rumble: RumbleId) =>
+		new Map(rumbles.get(rumble)?.rows.map((r) => [r.id, r.rank]) ?? []);
+	const ranks1v1 = rankIn('1v1');
+	const ranksMelee = rankIn('melee');
+
+	// 1v1: a pair that has fought and has a top-50 bot is recorded, with 0 to 6 rounds, decided
+	// by the pair alone so that both bots' files agree. The robot order is the pair's too.
+	function recordings1v1(id: BotId): Recordings1v1 | undefined {
+		const me = byId.get(id);
+		const entry = rumbles.get('1v1')?.details.get(id);
+		if (!me || !entry) return undefined;
+		const pairs: Recordings1v1['pairs'] = [];
+		for (const p of entry.pairings) {
+			const opp = byId.get(p.opponent);
+			if (!opp) continue;
+			if ((ranks1v1.get(id) ?? Infinity) > RECORDED_TOP && (ranks1v1.get(opp.id) ?? Infinity) > RECORDED_TOP) continue;
+			const [first, second] = id < opp.id ? [id, opp.id] : [opp.id, id];
+			const h = hash(`rec:${first}|${second}`);
+			const count = h % 7;
+			if (count === 0) continue;
+			const firstIsMe = first === id;
+			const rounds: Round1v1[] = [];
+			for (let i = 0; i < count; i++) {
+				const hi = hash(`rec:${first}|${second}|${i}`);
+				const side = hi % 2 === 0 ? 'a' : 'b';
+				// The robot index of the bot that sorts first; the other has the other.
+				const firstIndex = (h >>> 3) % 2;
+				rounds.push([
+					`${side}-${i}`,
+					hi % 35,
+					String(BigInt.asIntN(64, BigInt(hi) * 2862933555777941757n + BigInt(h))),
+					3000 + (hi % 20_000),
+					firstIsMe ? firstIndex : 1 - firstIndex
+				]);
+			}
+			rounds.sort((x, y) => (x[0] < y[0] ? -1 : 1));
+			pairs.push({ opp: opp.id, oppVersion: opp.versions[0].version, oppSha16: recordedBot(opp).sha16, rounds });
+		}
+		if (pairs.length === 0) return undefined;
+		pairs.sort((x, y) => (x.opp < y.opp ? -1 : 1));
+		return { schema: SCHEMA_VERSION, engine: ENGINE_VERSION, ...recordedBot(me), pairs };
+	}
+
+	// Melee: top-50 bots have up to 5 rounds each won and not won, in fields of eight bots.
+	function recordingsMelee(id: BotId): RecordingsMelee | undefined {
+		const me = byId.get(id);
+		const members = rumbles.get('melee')?.members;
+		if (!me || !members || (ranksMelee.get(id) ?? Infinity) > RECORDED_TOP) return undefined;
+		const others = members.filter((m) => m.id !== id);
+		const field: RecordedBot[] = [];
+		const rounds: RoundMelee[] = [];
+		for (const kind of ['w', 'l']) {
+			const count = hash(`rec:${id}|${kind}`) % 6;
+			for (let i = 0; i < count; i++) {
+				const h = hash(`rec:${id}|${kind}|${i}`);
+				// Seven opponents picked by stepping through the members; the bot at a random place.
+				const fight = [me, ...Array.from({ length: MELEE_ROBOTS - 1 }, (_, k) => others[(h + k * 37) % others.length])];
+				const order = fight.map((bot) => {
+					let at = field.findIndex((f) => f.bot === bot.id);
+					if (at < 0) at = field.push(recordedBot(bot)) - 1;
+					return at;
+				});
+				const shift = h % MELEE_ROBOTS;
+				rounds.push([
+					`${kind}-${i}`,
+					h % 35,
+					String(BigInt.asIntN(64, BigInt(h) * 6364136223846793005n)),
+					3000 + (h % 30_000),
+					[...order.slice(shift), ...order.slice(0, shift)]
+				]);
+			}
+		}
+		if (rounds.length === 0) return undefined;
+		return { schema: SCHEMA_VERSION, engine: ENGINE_VERSION, ...recordedBot(me), bots: field, rounds };
+	}
 
 	const contributors = (): Contributors => createContributors(seed, now);
 
@@ -200,10 +300,15 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		if (m) return rankings(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
 		if (m) return bot(decodeURIComponent(m[1]));
+		m = /^rec\/(1v1|melee)\/([^/]+)\.json$/.exec(clean);
+		if (m) {
+			const id = decodeURIComponent(m[2]);
+			return m[1] === '1v1' ? recordings1v1(id) : recordingsMelee(id);
+		}
 		return undefined;
 	};
 
-	return { get, index, rankings, bot, contributors, archive };
+	return { get, index, rankings, bot, contributors, archive, recordings: ((division: string, id: BotId) => (division === '1v1' ? recordings1v1(id) : recordingsMelee(id))) as Fixtures['recordings'] };
 }
 
 const LOGIN_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night', 'cold', 'dusty'];

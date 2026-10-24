@@ -20,7 +20,7 @@ use std::fmt;
 pub const CLAIM_SECONDS: u64 = 3600;
 
 /// The versions a slot item belongs to: a 1v1 pairing, or one melee version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Group {
     /// A 1v1 pairing, `lo < hi`.
     Pair { lo: u32, hi: u32 },
@@ -42,7 +42,7 @@ pub enum Side {
 }
 
 impl Side {
-    fn letter(self) -> char {
+    pub fn letter(self) -> char {
         match self {
             Side::A => 'a',
             Side::B => 'b',
@@ -129,6 +129,25 @@ impl fmt::Display for SlotId {
 }
 
 impl SlotId {
+    /// The slot within its group: `<side letter>.<index>` (`a.0`, `w.3`).
+    pub fn suffix(&self) -> String {
+        format!("{}.{}", self.side.letter(), self.index)
+    }
+
+    /// The slot of `group` with this [`suffix`](SlotId::suffix).
+    pub fn with_suffix(group: Group, suffix: &str) -> Option<SlotId> {
+        let (letter, index) = suffix.split_once('.')?;
+        let side = group
+            .sides()
+            .into_iter()
+            .find(|s| letter.len() == 1 && letter.starts_with(s.letter()))?;
+        Some(SlotId {
+            group,
+            side,
+            index: index.parse().ok()?,
+        })
+    }
+
     pub fn parse(text: &str) -> Result<SlotId, String> {
         let bad = || format!("bad slot id {text:?}");
         let parts: Vec<&str> = text.split('.').collect();
@@ -333,6 +352,7 @@ pub fn claim_battle<S: Store + ?Sized>(
                     size: track.size,
                     claim_until: now + CLAIM_SECONDS,
                     seed,
+                    order: vids.to_vec(),
                 };
                 expected.push((
                     id.clone(),
@@ -820,6 +840,8 @@ mod tests {
         .unwrap();
         let ids: Vec<String> = taken.iter().map(|c| c.slot.to_string()).collect();
         assert_eq!(ids, ["1v1.5.9.a.0", "1v1.5.9.b.0", "1v1.5.9.b.1"]);
+        // Every claim records the battle's robot order.
+        assert!(taken.iter().all(|c| c.entry.order == [5, 9]));
         assert_eq!(
             confirm(
                 &store,
@@ -869,6 +891,52 @@ mod tests {
     }
 
     #[test]
+    fn reopening_slots() {
+        let store = MemStore::new();
+        let entry = |status, order: Vec<u32>| SlotEntry {
+            status,
+            batch: "b1".into(),
+            index: 0,
+            round: 0,
+            sha256_b64: "x".into(),
+            size: 1,
+            claim_until: 0,
+            seed: 0,
+            order,
+        };
+        let old = entry(SlotStatus::Filled, vec![]);
+        let new = entry(SlotStatus::Filled, vec![5, 9]);
+        let set = vec![
+            ("1v1.5.9.a.0".to_string(), old.clone()),
+            ("1v1.5.9.a.1".to_string(), new),
+        ];
+        let expected: Vec<(String, Option<SlotEntry>)> =
+            set.iter().map(|(s, _)| (s.clone(), None)).collect();
+        store
+            .update_slots(1, Division::OneVsOne, "5#9", &expected, &set, true)
+            .unwrap();
+        let wrong = entry(SlotStatus::Claimed, vec![]);
+        assert_eq!(
+            store.remove_slots(
+                1,
+                Division::OneVsOne,
+                "5#9",
+                &[("1v1.5.9.a.0".into(), wrong)]
+            ),
+            Err(StoreError::ConditionFailed)
+        );
+        store
+            .remove_slots(1, Division::OneVsOne, "5#9", &[("1v1.5.9.a.0".into(), old)])
+            .unwrap();
+        let item = store
+            .get_slots(1, Division::OneVsOne, "5#9")
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.entries.keys().collect::<Vec<_>>(), ["1v1.5.9.a.1"]);
+        assert!(!item.full);
+    }
+
+    #[test]
     fn racing_claims() {
         let store = MemStore::new();
         let config = Config::default();
@@ -886,6 +954,7 @@ mod tests {
             size: 1,
             claim_until: NOW + CLAIM_SECONDS,
             seed: 0,
+            order: vec![5, 9],
         };
         let expected: Vec<(String, Option<SlotEntry>)> =
             picks.iter().map(|(s, _)| (s.to_string(), None)).collect();

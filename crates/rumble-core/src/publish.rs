@@ -283,6 +283,7 @@ pub fn bot_details(
             })
             .collect(),
         rumbles,
+        recordings: BTreeMap::new(),
     })
 }
 

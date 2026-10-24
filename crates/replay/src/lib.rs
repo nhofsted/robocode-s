@@ -96,6 +96,8 @@ impl BulletTrack {
     }
 }
 
+/// [`decode`] returns the track [`encode`] was given, except that a robot's values after the
+/// frame it died in are not stored: it decodes as it died.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Track {
     /// Engine version (design §4.4) the battle ran with; 0 = unknown (version 1 tracks).
@@ -145,7 +147,8 @@ pub fn encode_with_costs(track: &Track) -> (Vec<u8>, Vec<f64>) {
     // The engine version is in the header, not in the coded stream.
     rebuilt.engine_version = track.engine_version;
     debug_assert_eq!(
-        &rebuilt, track,
+        rebuilt,
+        stored(track),
         "the encoder's reconstruction must match its input"
     );
     let costs = enc.costs.clone();
@@ -153,6 +156,20 @@ pub fn encode_with_costs(track: &Track) -> (Vec<u8>, Vec<f64>) {
     write_leb128(&mut out, track.engine_version);
     out.extend(enc.finish());
     (out, costs)
+}
+
+/// `track` as the codec stores it: dead robots keep their death frame.
+fn stored(track: &Track) -> Track {
+    let mut track = track.clone();
+    for t in 1..track.frames.len() {
+        let (done, rest) = track.frames.split_at_mut(t);
+        for (r, prev) in rest[0].iter_mut().zip(&done[t - 1]) {
+            if prev.state == RobotState::Dead {
+                *r = *prev;
+            }
+        }
+    }
+    track
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Track, DecodeError> {
@@ -894,6 +911,146 @@ mod tests {
         let track = synthetic();
         let bytes = encode(&track);
         assert_eq!(decode(&bytes).unwrap(), track);
+    }
+
+    #[test]
+    fn a_dead_robot_decodes_as_it_died() {
+        let track = synthetic();
+        let mut moving = track.clone();
+        for (t, frame) in moving.frames.iter_mut().enumerate().skip(401) {
+            let r = &mut frame[2];
+            r.x += t as i64;
+            r.body = (r.body + t as i64).rem_euclid(ANGLE_STEPS);
+            r.energy -= 7;
+            r.state = RobotState::Active;
+        }
+        let bytes = encode(&moving);
+        assert_eq!(bytes, encode(&track));
+        assert_eq!(decode(&bytes).unwrap(), track);
+    }
+
+    /// Random tracks within what the format stores: dead robots keep their death frame, bullets
+    /// come from living robots in robot order, residuals stay below 2^40.
+    fn random_track(seed: u64) -> Track {
+        let mut seed = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        let mut rnd = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % m as u64) as i64
+        };
+        let many = rnd(4) == 0;
+        let n = 1 + rnd(if many { 40 } else { 8 }) as usize;
+        let turns = match rnd(5) {
+            0 => rnd(3),
+            1 => rnd(2000),
+            _ => rnd(300),
+        } as u32;
+        let huge = rnd(4) == 0;
+        let width = 1 + rnd(if huge { 1 << 30 } else { 5000 });
+        let height = 1 + rnd(if huge { 1 << 30 } else { 5000 });
+        // Wild tracks jump anywhere each turn; the others move like robots.
+        let wild = rnd(3) == 0;
+        let (w, h) = (width * POS_SCALE, height * POS_SCALE);
+        let edge = |rnd: &mut dyn FnMut(i64) -> i64, m: i64| match rnd(4) {
+            0 => 0,
+            1 => m,
+            _ => rnd(m + 1),
+        };
+        let mut frame: Vec<RobotFrame> = (0..n)
+            .map(|_| RobotFrame {
+                state: RobotState::Active,
+                x: edge(&mut rnd, w),
+                y: edge(&mut rnd, h),
+                body: rnd(ANGLE_STEPS),
+                gun: rnd(ANGLE_STEPS),
+                radar: rnd(ANGLE_STEPS),
+                energy: rnd(if wild { 1 << 30 } else { 20001 }),
+            })
+            .collect();
+        let mut track = Track {
+            engine_version: rnd(1000) as u32,
+            width,
+            height,
+            gun_cooling_milli: rnd(2000),
+            frames: vec![frame.clone()],
+            bullets: vec![],
+        };
+        for t in 1..=turns {
+            let prev = frame.clone();
+            for (i, r) in frame.iter_mut().enumerate() {
+                if r.state == RobotState::Dead {
+                    continue;
+                }
+                if wild {
+                    r.x = edge(&mut rnd, w);
+                    r.y = edge(&mut rnd, h);
+                    r.body = rnd(ANGLE_STEPS);
+                    r.gun = rnd(ANGLE_STEPS);
+                    r.radar = rnd(ANGLE_STEPS);
+                    r.energy = rnd(1 << 30) - (1 << 20);
+                } else {
+                    r.body = (r.body + rnd(21) - 10).rem_euclid(ANGLE_STEPS);
+                    r.gun = (r.gun + rnd(81) - 40).rem_euclid(ANGLE_STEPS);
+                    r.radar = (r.radar + rnd(181) - 90).rem_euclid(ANGLE_STEPS);
+                    r.x = (r.x + rnd(33) - 16).clamp(0, w);
+                    r.y = (r.y + rnd(33) - 16).clamp(0, h);
+                    r.energy = (r.energy - rnd(400) + rnd(30)).max(0);
+                }
+                r.state = match rnd(40) {
+                    0 => RobotState::HitWall,
+                    1 => RobotState::HitRobot,
+                    2 if rnd(10) == 0 => RobotState::Dead,
+                    _ => RobotState::Active,
+                };
+                if prev[i].state == RobotState::Dead || rnd(if wild { 3 } else { 15 }) != 0 {
+                    continue;
+                }
+                let count = if rnd(10) == 0 { 1 + rnd(8) } else { 1 };
+                for _ in 0..count {
+                    let power = if wild { rnd(100_000) } else { 10 + rnd(291) };
+                    let end = match rnd(5) {
+                        0 => None,
+                        k => {
+                            let at = t + rnd(i64::from(turns - t) + 1) as u32;
+                            let kind = match k {
+                                1 => BulletEnd::Wall,
+                                2 => BulletEnd::Bullet,
+                                _ => BulletEnd::Robot(rnd(n as i64) as u8),
+                            };
+                            Some((at, kind, edge(&mut rnd, w), edge(&mut rnd, h)))
+                        }
+                    };
+                    track.bullets.push(BulletTrack {
+                        owner: i as u8,
+                        born: t,
+                        x: if wild {
+                            edge(&mut rnd, w)
+                        } else {
+                            r.x + rnd(81) - 40
+                        },
+                        y: if wild {
+                            edge(&mut rnd, h)
+                        } else {
+                            r.y + rnd(81) - 40
+                        },
+                        heading: rnd(BULLET_ANGLE_STEPS),
+                        power,
+                        end,
+                    });
+                }
+            }
+            track.frames.push(frame.clone());
+        }
+        track
+    }
+
+    #[test]
+    fn random_tracks_round_trip() {
+        for seed in 0..400 {
+            let track = random_track(seed);
+            assert_eq!(decode(&encode(&track)).unwrap(), track, "seed {seed}");
+        }
     }
 
     #[test]

@@ -33,6 +33,38 @@ pub struct CleanupState {
     pub bans: BTreeMap<String, BanCursor>,
     /// Ban removals finished (the alert stays for 90 days; this keeps it from restarting).
     pub banned: BTreeSet<String>,
+    /// M6's reopening of slots without a robot order.
+    #[serde(default)]
+    pub rec_order: RecOrderMigration,
+}
+
+/// The one-time reopening of slot entries without a robot order (`SlotEntry::order`): the
+/// job passes over all recordings until a pass that began at least [`ORDER_GRACE`] after the
+/// first one has completed, so that claims made before the release (and confirmed late) are
+/// caught too. Then it never looks again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecOrderMigration {
+    /// Unix seconds of the first pass.
+    pub since: Option<u64>,
+    pub done: bool,
+}
+
+/// Two claim lifetimes (`slots::CLAIM_SECONDS`, an hour each): after this, no claim made
+/// before the first pass can be confirmed any more.
+pub const ORDER_GRACE: u64 = 2 * crate::slots::CLAIM_SECONDS;
+
+impl RecOrderMigration {
+    /// Notes a pass that began at `now`; returns whether it was the first.
+    pub fn begin(&mut self, now: u64) {
+        self.since.get_or_insert(now);
+    }
+
+    /// A pass that began at `now` has looked at everything.
+    pub fn complete(&mut self, now: u64) {
+        if self.since.is_some_and(|since| now >= since + ORDER_GRACE) {
+            self.done = true;
+        }
+    }
 }
 
 /// The progress of one ban removal: the log is walked backwards, one hourly partition at a

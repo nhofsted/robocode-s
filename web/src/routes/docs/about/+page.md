@@ -27,7 +27,7 @@ On top of that come a GPU-accelerated desktop viewer, a deterministic mode where
 | M3 | Isolation and distribution: robots over stdin/stdout, a built-in sandbox (Linux, Windows), Docker as an alternative, remote runner agents with TLS, warm pools, release archives and installers | Done ([#73](https://github.com/nhofsted/robocode-s/issues/73)); released as 0.1.0 for Windows, Linux and macOS ([download](/download)) |
 | M4 | The rumble: backend, volunteer client, rankings website | Done: the rumble runs on this site; volunteers contribute battles with `robocode-s rumble` or the GUI's Rumble page ([contributing](/docs/rumble/contributing)), authors [submit](/submit) bots, and the RoboRumble participants are imported; released as 0.2.0 |
 | M5 | Robots in Python | Planned |
-| M6 | Battle replays in the browser | Planned |
+| M6 | Battle replays in the browser | Done: replay pages for the rumble's recorded rounds, listed on pairing and bot pages, and a page for local `.track` files; on-demand replays are a follow-up (#113) |
 | M7 | Online editor: write, build and try a robot in the browser | Planned |
 | M8 | Robots in .NET, Rust, C/C++ and Kotlin | Planned |
 

@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { loadBot, loadIndex } from '#lib/rumble/data.ts';
+import { loadBot, loadIndex, loadPairRounds } from '#lib/rumble/data.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, params }) => {
@@ -12,8 +12,16 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	const ea = a.rumbles[params.rumble];
 	const eb = b.rumbles[params.rumble];
 	if (!summary || !ea || !eb) error(404, `${params.a} and ${params.b} don't meet in ${params.rumble}.`);
+	// Recorded rounds (1v1 only), fetched only where a bot file says there are some; the page
+	// shows the rest while they load.
+	const holders = summary.division === '1v1' ? [a, b].filter((x) => (x.recordings?.['1v1'] ?? 0) > 0) : [];
+	const rounds =
+		holders.length > 0
+			? loadPairRounds(fetch, a.id, b.id, holders.map((x) => x.id)).catch(() => null)
+			: Promise.resolve(null);
 	return {
 		summary,
+		rounds,
 		a,
 		b,
 		ea,

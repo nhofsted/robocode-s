@@ -13,6 +13,9 @@
 //! Bot files are written only when their bytes changed: the GET that reads the old file's
 //! history also returns its ETag, the MD5 of a single-part object, compared with the new
 //! bytes' MD5.
+//!
+//! The recordings index (`data/v1/rec/`, [`super::recordings`]) runs after the rankings and
+//! before the bot files, which carry its counts.
 
 use super::plan::{self, PlanReport, USERS_KEY};
 use super::{Batch, Pace, READ_RATE, json_bytes};
@@ -43,6 +46,8 @@ pub struct PublishReport {
     pub bot_files_deleted: usize,
     /// Bots left for the next run (time budget).
     pub bot_files_skipped: usize,
+    /// The recordings index (M6); `None` if it failed (the bot files keep their counts).
+    pub recordings: Option<super::recordings::RecordingsReport>,
     pub contributors: usize,
     pub snapshots_deleted: usize,
 }
@@ -125,6 +130,19 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
     )?;
     super::slot_pairs::write(batch, engine, &runs)?;
 
+    // The recordings index (files under data/v1/rec/) and the counts the bot files carry. A
+    // failure leaves the bot files' counts as they were.
+    let counts = match super::recordings::run(batch, engine, &versions, &bots) {
+        Ok((counts, recordings)) => {
+            report.recordings = Some(recordings);
+            Some(counts)
+        }
+        Err(e) => {
+            println!("publish: recordings index failed: {e}");
+            None
+        }
+    };
+
     // Bot files: written if changed; a removed bot's file goes.
     for (n, bot) in bots.values().enumerate() {
         if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
@@ -150,8 +168,15 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
             }
             continue;
         }
-        let Some(details) = bot_details(bot, &catalog, &runs, previous.as_ref(), &date) else {
+        let Some(mut details) = bot_details(bot, &catalog, &runs, previous.as_ref(), &date) else {
             continue;
+        };
+        details.recordings = match &counts {
+            Some(counts) => counts.get(&bot.id).cloned().unwrap_or_default(),
+            None => previous
+                .as_ref()
+                .map(|p| p.recordings.clone())
+                .unwrap_or_default(),
         };
         let bytes = json_bytes(&details);
         if etag.is_some_and(|e| etag_matches(&e, &bytes)) {

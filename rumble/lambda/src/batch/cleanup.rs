@@ -23,6 +23,7 @@ use rumble_core::cleanup::{
 };
 use rumble_core::ids::Division;
 use rumble_core::plan::Plan;
+use rumble_core::recordings::{entry_key, legacy_entries, listing, version_names};
 use rumble_core::store::{LogItem, StoreError, UserState, VersionState, hour_key};
 use rumble_core::verify::BAN_ALERT;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,9 @@ pub struct CleanupReport {
     pub versions_cleaned: Vec<u32>,
     pub recordings_deleted: usize,
     pub slot_items_deleted: usize,
+    /// Slot entries without a robot order that were reopened (M6) and their tracks deleted.
+    pub slots_reopened: usize,
+    pub reopened_tracks_deleted: usize,
     pub jars_deleted: usize,
     pub invalidated: Vec<String>,
     pub bans: Vec<BanReport>,
@@ -69,7 +73,79 @@ pub fn run(batch: &Batch, config: &Config) -> Result<CleanupReport, String> {
     batch.write_state_json(&key, &state)?;
     bans(batch, engine, &key, &mut state, &mut report, start_ms)?;
     batch.write_state_json(&key, &state)?;
+    // Last: it takes what time the ban removal left.
+    reopen_without_order(batch, engine, &mut state, &mut report, start_ms)?;
+    batch.write_state_json(&key, &state)?;
     Ok(report)
+}
+
+/// M6's one-time migration (spec §12.5): slot entries without a robot order can't be shown,
+/// so each filled or claimed entry that has a recording and no `v` loses its entry (the slot
+/// is open again) and its track. Found through the listing of `rec/e<E>/` (a group with a
+/// track), so a claim in a group without any track stays: it expires and is claimed again,
+/// with an order. Once the
+/// migration is `done` (see [`RecOrderMigration`]) the job does nothing and reads nothing.
+fn reopen_without_order(
+    batch: &Batch,
+    engine: u32,
+    state: &mut CleanupState,
+    report: &mut CleanupReport,
+    start_ms: u64,
+) -> Result<(), String> {
+    if state.rec_order.done {
+        return Ok(());
+    }
+    let now = start_ms / 1000;
+    state.rec_order.begin(now);
+    let store = batch.store();
+    let versions = store.list_versions().map_err(|e| e.to_string())?;
+    let names = version_names(&versions);
+    let keys = batch
+        .objects()
+        .list(Bucket::Jars, &format!("rec/e{engine}/"))?;
+    let listed = listing(&keys, engine, &versions, None);
+    drop(keys);
+    let mut pace = Pace::new(batch, READ_RATE);
+    let mut complete = true;
+    for (group, objects) in listed {
+        if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
+            complete = false;
+            break;
+        }
+        pace.take(0.5);
+        let division = group.division();
+        let Some(item) = store
+            .get_slots(engine, division, &group.key())
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        let legacy = legacy_entries(&item);
+        if legacy.is_empty() {
+            continue;
+        }
+        // The entries first, then the tracks: nobody can claim a slot that still has an entry.
+        // A lost race (the entry changed) is left for the next pass.
+        ignore_condition(store.remove_slots(engine, division, &group.key(), &legacy))?;
+        let after = store
+            .get_slots(engine, division, &group.key())
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        for (id, _) in legacy
+            .iter()
+            .filter(|(id, _)| !after.entries.contains_key(id))
+        {
+            report.slots_reopened += 1;
+            if let Some(track) = entry_key(engine, id, &names).filter(|k| objects.contains(k)) {
+                batch.objects().delete(Bucket::Jars, &track)?;
+                report.reopened_tracks_deleted += 1;
+            }
+        }
+    }
+    if complete {
+        state.rec_order.complete(now);
+    }
+    Ok(())
 }
 
 fn dead_versions_cleanup(

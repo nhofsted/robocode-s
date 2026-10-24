@@ -13,6 +13,6 @@ One caveat: debugger features that run your code (watch expressions, `toString()
 
 **Replay what happened.** [`robocode-s replay FILE`](/docs/cli/replay) (or the GUI's Watch Battle) re-runs a recording turn for turn, with the robots' output and debug painting.
 
-**Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. Replays in the browser (M6) show what happened; a local re-run under your debugger shows why.
+**Reproduce rumble battles.** Every battle the rumble runs has a seed and runs in deterministic mode, so any rumble battle can be re-run locally, turn for turn. The [replays on the website](/docs/rumble#replays) show what happened (each shows the seed and the engine version); a local re-run under your debugger shows why.
 
 Next: [deterministic mode](/docs/robot-development/deterministic-mode), in detail.

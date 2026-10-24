@@ -135,3 +135,47 @@ describe('archive', () => {
 		});
 	});
 });
+
+describe('recordings', () => {
+	const top = (rumble: string) => (fixtures.get(`rankings/${rumble}.json`) as Rankings).bots;
+
+	it('are consistent between the two bots of a 1v1 pairing', () => {
+		let checked = 0;
+		for (const row of top('1v1').slice(0, 10)) {
+			const rec = fixtures.recordings('1v1', row.id);
+			for (const pair of rec?.pairs ?? []) {
+				const back = fixtures.recordings('1v1', pair.opp)!.pairs.find((p) => p.opp === row.id)!;
+				expect(back.rounds.map((r) => r.slice(0, 4))).toEqual(pair.rounds.map((r) => r.slice(0, 4)));
+				pair.rounds.forEach((r, i) => expect(back.rounds[i][4]).toBe(1 - r[4]));
+				expect(back.oppSha16).toBe(rec!.sha16);
+				checked++;
+			}
+		}
+		expect(checked).toBeGreaterThan(0);
+	});
+
+	it('say in the bot file where there are some, and only there', () => {
+		for (const row of top('1v1').slice(0, 60)) {
+			const bot = fixtures.bot(row.id) as BotDetails;
+			const rec = fixtures.recordings('1v1', row.id);
+			const n = rec?.pairs.reduce((sum, p) => sum + p.rounds.length, 0) ?? 0;
+			expect(bot.recordings?.['1v1']).toBe(n > 0 ? n : undefined);
+			expect(fixtures.get(`rec/1v1/${row.id}.json`)).toEqual(rec);
+		}
+	});
+
+	it('have eight distinct robots in every melee round, the bot among them', () => {
+		let rounds = 0;
+		for (const row of top('melee').slice(0, 50)) {
+			const rec = fixtures.recordings('melee', row.id);
+			for (const r of rec?.rounds ?? []) {
+				const ids = r[4].map((i) => rec!.bots[i].bot);
+				expect(new Set(ids).size).toBe(8);
+				expect(ids).toContain(row.id);
+				rounds++;
+			}
+		}
+		expect(rounds).toBeGreaterThan(0);
+		expect(fixtures.recordings('melee', top('melee').at(-1)!.id)).toBeUndefined();
+	});
+});

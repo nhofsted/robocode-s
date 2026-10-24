@@ -1,15 +1,18 @@
 // Loads the rumble data files (types.ts) from /data/v1, or from VITE_RUMBLE_DATA if set.
 
-import { error } from '@sveltejs/kit';
+import { error, isHttpError } from '@sveltejs/kit';
 import type {
 	Archive,
 	BotDetails,
 	BotId,
 	Contributors,
 	Rankings,
+	Recordings1v1,
+	RecordingsMelee,
 	RumbleId,
 	RumbleIndex
 } from './types.ts';
+import { pairRounds, type PairRounds } from './recordings.ts';
 
 type Fetch = typeof fetch;
 
@@ -39,3 +42,35 @@ export const loadBot = (fetch: Fetch, id: BotId) =>
 	load<BotDetails>(fetch, `bots/${encodeURIComponent(id)}.json`, `bot "${id}"`);
 
 export const loadArchive = (fetch: Fetch) => load<Archive>(fetch, 'archive.json', 'the archive');
+
+/** The recordings index of a bot's current version (types.ts); a 404 error where it has none. */
+export function loadRecordings(fetch: Fetch, division: '1v1', bot: BotId): Promise<Recordings1v1>;
+export function loadRecordings(fetch: Fetch, division: 'melee', bot: BotId): Promise<RecordingsMelee>;
+export function loadRecordings(fetch: Fetch, division: string, bot: BotId) {
+	return load<Recordings1v1 | RecordingsMelee>(
+		fetch,
+		`rec/${division}/${encodeURIComponent(bot)}.json`,
+		`replays of "${bot}"`
+	);
+}
+
+/**
+ * The recorded rounds of a 1v1 pairing, from the first of `from` (a or b) whose index has them,
+ * or null. The tracks are in both bots' indexes.
+ */
+export async function loadPairRounds(
+	fetch: Fetch,
+	a: BotId,
+	b: BotId,
+	from: readonly BotId[]
+): Promise<PairRounds | null> {
+	for (const id of from) {
+		try {
+			const found = pairRounds(await loadRecordings(fetch, '1v1', id), a, b);
+			if (found) return found;
+		} catch (e) {
+			if (!isHttpError(e) || e.status !== 404) throw e;
+		}
+	}
+	return null;
+}

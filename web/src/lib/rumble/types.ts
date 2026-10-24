@@ -103,6 +103,12 @@ export interface BotDetails {
 	versions: BotVersion[];
 	/** Only the rumbles this bot takes part in. */
 	rumbles: Record<RumbleId, BotRumble>;
+	/**
+	 * Recorded rounds of the current version per division (`1v1`, `melee`; the weight-class
+	 * rumbles share their division's); absent when there are none. Where a count is above 0,
+	 * `/data/v1/rec/<division>/<id>.json` exists (`Recordings1v1`, `RecordingsMelee`).
+	 */
+	recordings?: Record<string, number>;
 }
 
 export interface Author {
@@ -221,4 +227,57 @@ export interface ArchiveVersion {
 	state: 'active' | 'probation' | 'retired' | 'failed';
 	/** `YYYY-MM-DD`. */
 	added: string;
+}
+
+/** A bot version as the recordings index names it; the track URLs use `bot` and `sha16`. */
+export interface RecordedBot {
+	bot: BotId;
+	version: string;
+	/** The first 16 hex digits of the jar's SHA-256. */
+	sha16: string;
+}
+
+/**
+ * A recorded 1v1 round: `[file, round, seed, size, me]`. `file` is the track's name without
+ * `.track`: `a` or `b` before the slot number says which side won, `a` being the bot whose id
+ * sorts first. `round` is 0-based within the battle, `seed` the battle's seed (a decimal
+ * string, 64 bits), `size` the track's bytes, `me` this bot's robot index in the track.
+ */
+export type Round1v1 = [file: string, round: number, seed: string, size: number, me: number];
+
+/** `/data/v1/rec/1v1/<bot id>.json` (docs/rumble-data.md). */
+export interface Recordings1v1 {
+	schema: number;
+	/** The engine version the tracks were recorded with. */
+	engine: number;
+	bot: BotId;
+	version: string;
+	sha16: string;
+	/** Sorted by opponent id. */
+	pairs: {
+		opp: BotId;
+		oppVersion: string;
+		oppSha16: string;
+		/** Sorted by file. */
+		rounds: Round1v1[];
+	}[];
+}
+
+/**
+ * A recorded melee round: `[file, round, seed, size, order]`. `file` starts with `w` where the
+ * bot won and `l` where it did not; `order[k]` indexes `RecordingsMelee.bots` for the track's
+ * robot `k`.
+ */
+export type RoundMelee = [file: string, round: number, seed: string, size: number, order: number[]];
+
+/** `/data/v1/rec/melee/<bot id>.json` (docs/rumble-data.md). */
+export interface RecordingsMelee {
+	schema: number;
+	engine: number;
+	bot: BotId;
+	version: string;
+	sha16: string;
+	/** The robots of these rounds, in first-use order. */
+	bots: RecordedBot[];
+	rounds: RoundMelee[];
 }

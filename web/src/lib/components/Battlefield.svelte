@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Decorative battlefield for the home page: a few tanks wander, sweep their radars and fire.
-	// Not the engine (that arrives as WebAssembly for replays, design §12.8), just a backdrop,
+	// Not the engine and not a replay (replays play recorded tracks, ADR 0017), just a backdrop,
 	// drawn with classic Robocode's sprites and bullet explosion.
 	// One still frame with prefers-reduced-motion; paused while off-screen.
 	import { drawTank, loadImage, loadSprites, type RGB, type Sprites } from './sprites.ts';

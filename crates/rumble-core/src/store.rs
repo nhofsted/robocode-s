@@ -549,6 +549,9 @@ pub struct SlotEntry {
     pub claim_until: u64,
     /// `sd`.
     pub seed: i64,
+    /// `v`: the battle's robot order (vids, as in `claim_battle`): robot `k` of the track is
+    /// `order[k]`. Empty in entries written before M6, which `cleanup` reopens.
+    pub order: Vec<u32>,
 }
 
 /// A slot item (`S#<E>#<division>#<key>`, `S`).
@@ -682,6 +685,15 @@ pub trait Store {
 
     /// Deletes a slot item (`cleanup`, §12.4); a missing item is no error.
     fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()>;
+    /// One UpdateItem: removes each of `remove`'s entries from `m` and sets `full` to false,
+    /// condition: each is exactly as given (reopening slots, §12.5).
+    fn remove_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        key: &str,
+        remove: &[(String, SlotEntry)],
+    ) -> StoreResult<()>;
 
     // -- alerts --
     fn put_alert(&self, alert: &Alert) -> StoreResult<()>;
@@ -818,6 +830,15 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()> {
         (**self).delete_slots(engine, division, key)
+    }
+    fn remove_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        key: &str,
+        remove: &[(String, SlotEntry)],
+    ) -> StoreResult<()> {
+        (**self).remove_slots(engine, division, key, remove)
     }
 }
 
@@ -1256,6 +1277,31 @@ impl Store for MemStore {
     fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()> {
         self.with(|t| {
             t.slots.remove(&(engine, division, key.to_string()));
+            Ok(())
+        })
+    }
+
+    fn remove_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        key: &str,
+        remove: &[(String, SlotEntry)],
+    ) -> StoreResult<()> {
+        self.with(|t| {
+            let Some(item) = t.slots.get_mut(&(engine, division, key.to_string())) else {
+                return Err(StoreError::ConditionFailed);
+            };
+            if remove
+                .iter()
+                .any(|(slot, entry)| item.entries.get(slot) != Some(entry))
+            {
+                return Err(StoreError::ConditionFailed);
+            }
+            for (slot, _) in remove {
+                item.entries.remove(slot);
+            }
+            item.full = false;
             Ok(())
         })
     }

@@ -18,6 +18,7 @@ pub mod metrics;
 pub mod plan;
 pub mod publish;
 pub mod record;
+pub mod recordings;
 pub mod results;
 pub mod slots;
 pub mod state;

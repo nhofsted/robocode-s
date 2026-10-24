@@ -105,6 +105,10 @@ pub struct BotDetails {
     pub versions: Vec<BotVersion>,
     /// Only the rumbles this bot takes part in.
     pub rumbles: BTreeMap<String, BotRumble>,
+    /// Recorded rounds of the current version by division (`1v1`, `melee`): the bot has
+    /// `/data/v1/rec/<division>/<id>.json` where this is above 0. Absent: none (M6).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recordings: BTreeMap<String, u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
