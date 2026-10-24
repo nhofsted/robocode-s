@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import HistoryChart from '#lib/components/HistoryChart.svelte';
 	import { goto } from '$app/navigation';
+	import BotReplays from '#lib/components/BotReplays.svelte';
 	import Flag from '#lib/components/Flag.svelte';
 	import PairingStrip from '#lib/components/PairingStrip.svelte';
 	import ScatterChart from '#lib/components/ScatterChart.svelte';
@@ -329,6 +330,17 @@
 			</table>
 		</div>
 	</section>
+
+	{#if data.summary.division === '1v1' || data.summary.division === 'melee'}
+		<section id="replays">
+			<h2>Replays</h2>
+			{#await data.replays}
+				<p class="muted">Looking for recorded rounds&hellip;</p>
+			{:then rec}
+				<BotReplays bot={bot.id} {rumble} {rec} pairings={entry.pairings} />
+			{/await}
+		</section>
+	{/if}
 
 	<section>
 		<h2>Versions</h2>

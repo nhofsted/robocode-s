@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
 import type { Connect, Plugin } from 'vite';
@@ -12,11 +13,35 @@ import { createFixtures, type Fixtures } from './src/lib/rumble/fixtures.ts';
  * Serves synthetic rumble data at /data/v1 in `vite dev` and `vite preview`, until the
  * rankings Lambda writes the real files. Builds never contain it.
  * RUMBLE_FIXTURES=off disables it, e.g. to point VITE_RUMBLE_DATA at real data.
+ * Also serves any /rec/**.track as one of the fixture tracks (src/lib/replay/fixtures): a real
+ * 1v1 for /rec/e<E>/1v1, an 8-robot melee for /rec/e<E>/melee. Paths ending in -5.track are
+ * missing, to try the viewer's missing state.
  */
 function rumbleFixtures(): Plugin {
 	let fixtures: Fixtures | undefined;
 	const middleware: Connect.NextHandleFunction = (req, res, next) => {
 		const url = req.url ?? '';
+		if (url.startsWith('/rec/')) {
+			const path = url.split('?')[0];
+			if (!path.endsWith('.track')) return next();
+			if (path.endsWith('-5.track')) {
+				res.statusCode = 404;
+				return void res.end('not found');
+			}
+			const fixture = path.includes('/melee/') ? 'melee8.track' : 'acero-mailmanx.track';
+			readFile(fileURLToPath(new URL(`./src/lib/replay/fixtures/${fixture}`, import.meta.url))).then(
+				(bytes) => {
+					res.setHeader('content-type', 'application/octet-stream');
+					res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+					res.end(bytes);
+				},
+				() => {
+					res.statusCode = 500;
+					res.end('fixture track missing');
+				}
+			);
+			return;
+		}
 		if (!url.startsWith('/data/v1/')) return next();
 		fixtures ??= createFixtures({ now: new Date() });
 		const body = fixtures.get(url.slice('/data/v1/'.length).split('?')[0]);

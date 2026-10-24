@@ -6,7 +6,7 @@
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
 	import { css } from '#lib/components/sprites.ts';
-	import { formatNumber, rumbleName, shortName } from '#lib/rumble/format.ts';
+	import { formatBytes, formatNumber, rumbleName, shortName } from '#lib/rumble/format.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -106,14 +106,54 @@
 		>
 	</p>
 
-	<section class="replay panel">
+	<section id="replays" class="replay panel">
 		<h2>Watch a battle</h2>
-		<p>
-			Replays of this pairing will play right here in the browser, with the same engine that ran
-			the battle compiled to WebAssembly. The rumble keeps five rounds won by each side for every
-			matchup with a top-50 bot; other rounds are re-run by a volunteer on request.
-		</p>
-		<button disabled>Replays arrive with milestone M6</button>
+		{#if data.summary.division !== '1v1'}
+			<p>
+				Melee rounds are recorded per bot, with all the robots in the field: see the replays on
+				<a href={botHref(data.a.id)}>{shortName(data.a.id)}</a>'s and
+				<a href={botHref(data.b.id)}>{shortName(data.b.id)}</a>'s pages.
+			</p>
+		{:else}
+			{#await data.rounds}
+				<p class="muted">Looking for recorded rounds&hellip;</p>
+			{:then found}
+				{#if found}
+					<p class="muted">
+						Rounds recorded from this pairing's battles, played right here in the browser.
+					</p>
+					<div class="groups">
+						{#each [found.a, found.b] as side (side.bot)}
+							{@const won = found.rounds.filter((r) => r.winner === side.bot)}
+							<div>
+								<h3>Won by {shortName(side.bot)} <span class="muted">({won.length})</span></h3>
+								{#if won.length > 0}
+									<ul class="rounds">
+										{#each won as r (r.file)}
+											<li>
+												<a href={resolve('/replay/[rumble]/[a]/[b]/[file]', { rumble, a: data.a.id, b: data.b.id, file: r.file })}>
+													Round {r.round + 1}
+												</a>
+												<span class="muted">{formatBytes(r.size)}</span>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="muted">None recorded yet.</p>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<p>No rounds of this pairing are recorded yet.</p>
+					<p class="muted">
+						The rumble records five rounds won by each side for every pairing that involves one
+						of the top 50 bots of a division, and for each bot its best, worst and problem
+						pairings. The slots fill as volunteers run battles, so check back later.
+					</p>
+				{/if}
+			{/await}
+		{/if}
 	</section>
 </div>
 
@@ -187,7 +227,33 @@
 	.replay h2 {
 		margin-top: 0;
 	}
-	.replay p {
-		color: var(--text-2);
+	.groups {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+		gap: 1rem;
+	}
+	.groups h3 {
+		margin: 0.4rem 0;
+		font-size: 0.95rem;
+	}
+	.rounds {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.rounds li {
+		padding: 0.2rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg);
+		font-size: 0.9rem;
+		white-space: nowrap;
+	}
+	.rounds li span {
+		font-size: 0.8rem;
+		margin-left: 0.3rem;
 	}
 </style>

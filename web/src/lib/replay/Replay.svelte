@@ -257,7 +257,13 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<section class="replay" aria-label="Battle replay" tabindex="0" {onkeydown}>
+<section
+	class="replay"
+	aria-label="Battle replay"
+	tabindex="0"
+	style:--cap="calc(78vh * {track.width / track.height})"
+	{onkeydown}
+>
 	<div class="stage">
 		<!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
 		<canvas
@@ -265,7 +271,6 @@
 			role="img"
 			aria-label="Battlefield, turn {frame} of {last}, {view.survivors} of {track.robotCount} robots alive"
 			style:aspect-ratio="{track.width} / {track.height}"
-			style:max-width="calc(78vh * {track.width / track.height})"
 		></canvas>
 		<div class="controls">
 			<div class="buttons">
@@ -330,18 +335,25 @@
 </section>
 
 <style>
+	/* The canvas, the controls under it and the legend are one block: the stage is as wide as the
+	   canvas may get (the height cap --cap), the legend sits right next to it. */
 	.replay {
 		display: grid;
 		gap: 1rem;
 		grid-template-columns: minmax(0, 1fr);
 		align-items: start;
 	}
+	.stage {
+		max-width: var(--cap);
+		min-width: 0;
+	}
 	.replay:focus-visible {
 		outline-offset: 4px;
 	}
 	@media (min-width: 56rem) {
 		.replay {
-			grid-template-columns: minmax(0, 1fr) 17rem;
+			grid-template-columns: minmax(0, var(--cap)) 17rem;
+			justify-content: start;
 		}
 	}
 	canvas {
@@ -406,7 +418,10 @@
 	.legend {
 		list-style: none;
 		margin: 0;
-		padding: 0.4rem 0.8rem;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		column-gap: 1.2rem;
+		padding: 0.2rem 0.8rem;
 		background: var(--panel);
 		border: 1px solid var(--line);
 		border-radius: var(--radius);
@@ -419,10 +434,11 @@
 			'bar bar bar';
 		column-gap: 0.5rem;
 		align-items: center;
-		padding: 0.4rem 0;
+		padding: 0.3rem 0;
 		border-bottom: 1px solid var(--line);
 	}
-	.legend li:last-child {
+	.legend li:last-child,
+	.legend li:nth-last-child(2):nth-child(odd) {
 		border-bottom: 0;
 	}
 	.swatch {
@@ -476,8 +492,16 @@
 	}
 	@media (min-width: 56rem) {
 		.legend {
+			grid-template-columns: minmax(0, 1fr);
+			padding: 0.4rem 0.8rem;
 			position: sticky;
 			top: 1rem;
+		}
+		.legend li {
+			padding: 0.4rem 0;
+		}
+		.legend li:nth-last-child(2):nth-child(odd) {
+			border-bottom: 1px solid var(--line);
 		}
 	}
 </style>
