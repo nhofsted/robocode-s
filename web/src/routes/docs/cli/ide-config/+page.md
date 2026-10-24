@@ -3,8 +3,6 @@ title: robocode-s ide-config
 description: Print the run configuration for debugging a robot from IntelliJ IDEA, Eclipse or VS Code.
 ---
 
-> **Needs robocode-s 0.2.0** (or a build from source): 0.1.0 has no `ide-config`.
-
 ```sh
 robocode-s ide-config [options]
 ```
