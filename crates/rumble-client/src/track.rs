@@ -68,7 +68,8 @@ pub fn from_snapshots(rules: &Rules, snapshots: &[v1::TurnSnapshot]) -> Track {
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                // The codec keeps a dead robot as it died: so does the track.
+                // The codec keeps a dead robot as it died, so the track does too: then it
+                // equals what decodes from it (#104). The bytes are the same either way.
                 if let Some(last) = track.frames.last().and_then(|f: &Vec<RobotFrame>| f.get(i))
                     && last.state == RobotState::Dead
                 {
