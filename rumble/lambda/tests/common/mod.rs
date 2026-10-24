@@ -114,6 +114,7 @@ pub fn ok_result(batch: &str, battle: &WorkBattle) -> BattleResult {
             RoundResult {
                 turns: 500,
                 winner: winner as i32,
+                firsts: vec![winner as u32],
                 scores,
                 hash: sha_hex(format!("round {r}").as_bytes()),
                 track: Some(TrackClaim {

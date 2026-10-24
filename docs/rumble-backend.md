@@ -216,7 +216,7 @@ Assignments are therefore **not stored**: the token is the assignment. What make
 ```
 
 - One post per batch, with every battle of it. Battles the client didn't run (stopped, deadline near) are `notRun`. `robotFailed` reasons: `load` (the robot couldn't be described or never connected), `crash` (its process ended during the battle); the battle's other fields are optional then. `error` is a client-side failure (no JRE, sandbox broken): not counted, and the client stops after 3 in a row.
-- `robots` in the battle's robot order, as classic's results (the CLI's JSON results without `name`). `rounds[i].scores` is each robot's score in round `i` (the per-round difference of the cumulative `RoundResult`), `winner` the robot whose `firsts` rose in that round, or `-1` if none did.
+- `robots` in the battle's robot order, as classic's results (the CLI's JSON results without `name`). `rounds[i].scores` is each robot's score in round `i` (the per-round difference of the cumulative `RoundResult`), `firsts` the robots whose `firsts` rose in that round (classic gives robots that die together a first each, so a round can have several; added 2026-10-24, absent from older clients), and `winner` the one robot whose `firsts` rose, or `-1` if none or several did (a tie fills no "rounds won by" slot). The server counts wins from `firsts`, or from `winner` when `firsts` is absent.
 - Hashes are defined in §13.4.
 
 Response 200:

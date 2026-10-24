@@ -371,7 +371,11 @@ impl Runner {
                 }
                 RoundResult {
                     turns: r.turns,
-                    winner: r.winner,
+                    winner: match r.firsts[..] {
+                        [only] => only as i32,
+                        _ => -1,
+                    },
+                    firsts: r.firsts,
                     scores: r.scores,
                     hash: hash::hex(&r.hash),
                     track: Some(claim),
@@ -437,7 +441,8 @@ fn robot_result(r: &v1::Results) -> RobotResult {
 /// One finished round, as observed.
 pub struct ObservedRound {
     pub turns: u32,
-    pub winner: i32,
+    /// The robots whose `firsts` rose in the round (classic can give two robots a first).
+    pub firsts: Vec<u32>,
     pub scores: Vec<f64>,
     pub hash: Digest32,
     pub track: Encoded,
@@ -501,10 +506,10 @@ impl Observer {
                     .unwrap_or_else(|| RoundHasher::new(round));
                 let snapshots = std::mem::take(&mut self.snapshots);
                 let track = Encoded::new(&track::from_snapshots(&self.rules, &snapshots));
-                let (scores, winner) = round_scores(self.last.as_ref(), r);
+                let (scores, firsts) = round_scores(self.last.as_ref(), r);
                 self.rounds.push(ObservedRound {
                     turns: snapshots.len().saturating_sub(1) as u32,
-                    winner,
+                    firsts,
                     scores,
                     hash: hasher.finish(r),
                     track,
@@ -522,9 +527,9 @@ impl Observer {
     }
 }
 
-/// Each robot's score in the round (the difference of the cumulative results) and the robot
-/// whose `firsts` rose, or -1.
-fn round_scores(before: Option<&v1::RoundResult>, after: &v1::RoundResult) -> (Vec<f64>, i32) {
+/// Each robot's score in the round (the difference of the cumulative results) and the robots
+/// whose `firsts` rose: none, one, or several when robots died together.
+fn round_scores(before: Option<&v1::RoundResult>, after: &v1::RoundResult) -> (Vec<f64>, Vec<u32>) {
     let prior = |i: usize| before.and_then(|b| b.results.get(i));
     let scores = after
         .results
@@ -532,13 +537,14 @@ fn round_scores(before: Option<&v1::RoundResult>, after: &v1::RoundResult) -> (V
         .enumerate()
         .map(|(i, r)| r.score.unwrap_or(0.0) - prior(i).and_then(|p| p.score).unwrap_or(0.0))
         .collect();
-    let winner = after
+    let firsts = after
         .results
         .iter()
         .enumerate()
-        .position(|(i, r)| r.firsts > prior(i).map_or(0, |p| p.firsts))
-        .map_or(-1, |i| i as i32);
-    (scores, winner)
+        .filter(|(i, r)| r.firsts > prior(*i).map_or(0, |p| p.firsts))
+        .map(|(i, _)| i as u32)
+        .collect();
+    (scores, firsts)
 }
 
 #[cfg(test)]
@@ -562,10 +568,16 @@ mod tests {
     #[test]
     fn round_scores_are_differences_and_the_winner_gained_a_first() {
         let first = results(&[(100.0, 1), (20.0, 0)]);
-        assert_eq!(round_scores(None, &first), (vec![100.0, 20.0], 0));
+        assert_eq!(round_scores(None, &first), (vec![100.0, 20.0], vec![0]));
         let second = results(&[(130.0, 1), (140.0, 1)]);
-        assert_eq!(round_scores(Some(&first), &second), (vec![30.0, 120.0], 1));
-        assert_eq!(round_scores(Some(&second), &second).1, -1);
+        assert_eq!(
+            round_scores(Some(&first), &second),
+            (vec![30.0, 120.0], vec![1])
+        );
+        assert_eq!(round_scores(Some(&second), &second).1, Vec::<u32>::new());
+        // Robots that die together each get a first (classic): both are reported.
+        let tie = results(&[(150.0, 2), (150.0, 2)]);
+        assert_eq!(round_scores(Some(&second), &tie).1, vec![0, 1]);
     }
 
     #[test]

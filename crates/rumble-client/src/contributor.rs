@@ -1013,6 +1013,15 @@ impl Contributor {
             reputation: response.user.reputation,
             tier: response.user.tier,
         });
+        // A rejected battle is a bug on one side or the other: say which and why.
+        for r in &response.rejected {
+            emit(Event::Error {
+                text: format!(
+                    "battle {} of {id} rejected: {}: {}",
+                    r.index, r.error, r.message
+                ),
+            });
+        }
 
         // The tracks the server asked for.
         let mut uploaded: Vec<String> = Vec::new();

@@ -335,8 +335,12 @@ pub struct TrackClaim {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RoundResult {
     pub turns: u32,
-    /// The robot whose `firsts` rose in the round, or -1.
+    /// The robot whose `firsts` rose in the round; -1 if none did, or several (a tie).
     pub winner: i32,
+    /// Every robot whose `firsts` rose in the round. Classic gives robots that die together a
+    /// first each, so a round can have more than one. Absent from older clients: `winner` then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub firsts: Vec<u32>,
     pub scores: Vec<f64>,
     pub hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -469,6 +469,7 @@ mod tests {
         RoundResult {
             turns: 900,
             winner,
+            firsts: vec![],
             scores: vec![],
             hash: sha(0),
             track: Some(TrackClaim {

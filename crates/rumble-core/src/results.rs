@@ -151,10 +151,29 @@ pub fn validate(
                     }
                     sums[r] += score;
                 }
-                match usize::try_from(round.winner) {
-                    Ok(w) if w < n => wins[w] += 1,
-                    Err(_) if round.winner == -1 => {}
-                    _ => return Err(format!("rounds[{i}].winner: {}", round.winner)),
+                if round.firsts.is_empty() {
+                    match usize::try_from(round.winner) {
+                        Ok(w) if w < n => wins[w] += 1,
+                        Err(_) if round.winner == -1 => {}
+                        _ => return Err(format!("rounds[{i}].winner: {}", round.winner)),
+                    }
+                } else {
+                    for (k, &f) in round.firsts.iter().enumerate() {
+                        if f as usize >= n || round.firsts[..k].contains(&f) {
+                            return Err(format!("rounds[{i}].firsts: {:?}", round.firsts));
+                        }
+                        wins[f as usize] += 1;
+                    }
+                    let single = match round.firsts[..] {
+                        [only] => only as i32,
+                        _ => -1,
+                    };
+                    if round.winner != single {
+                        return Err(format!(
+                            "rounds[{i}].winner: {} with firsts {:?}",
+                            round.winner, round.firsts
+                        ));
+                    }
                 }
                 if !is_sha256_hex(&round.hash) {
                     return Err(format!("rounds[{i}].hash: not 64 lowercase hex digits"));
@@ -690,6 +709,7 @@ mod tests {
             .map(|(r, &w)| RoundResult {
                 turns: 900,
                 winner: w,
+                firsts: vec![],
                 scores: if w == 0 {
                     vec![100.0, 20.5]
                 } else {
@@ -870,6 +890,30 @@ mod tests {
         rounds(&mut nobody)[0].winner = -1;
         robots(&mut nobody)[0].firsts = 2;
         assert_eq!(check(nobody), Ok(()));
+        // A tie: robots that die together each get a first (classic); winner -1.
+        let tie = |b: &mut BattleResult| {
+            rounds(b)[0].firsts = vec![0, 1];
+            rounds(b)[0].winner = -1;
+            robots(b)[1].firsts = 2;
+        };
+        let mut tied = ok(0, 1);
+        tie(&mut tied);
+        assert_eq!(check(tied), Ok(()));
+        broken(
+            &|b| {
+                tie(b);
+                rounds(b)[0].winner = 0;
+            },
+            "rounds[0].winner: 0 with firsts",
+        );
+        broken(
+            &|b| {
+                tie(b);
+                rounds(b)[0].firsts = vec![0, 0];
+            },
+            "rounds[0].firsts",
+        );
+        broken(&|b| rounds(b)[0].firsts = vec![2], "rounds[0].firsts");
         // hashes of 64 lowercase hex digits
         broken(&|b| b.battle_hash = None, "battleHash missing");
         broken(
