@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# rumble/lambda is its own workspace (docs/rumble-backend.md §2).
+exclude = ["rumble"]
 
 [workspace.package]
 version = "0.1.0"
