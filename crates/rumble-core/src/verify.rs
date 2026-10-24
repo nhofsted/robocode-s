@@ -12,7 +12,6 @@ use crate::store::{
     ALERT_TTL, Alert, DAY, LOG_TTL, LogItem, Reputation, Run, SYSTEM_UID, Store, StoreError,
     StoreResult, UserState, VERIFY_TTL, VerifyItem, VerifyKind, hour_key,
 };
-use sha2::{Digest, Sha256};
 
 /// Items read per queue query when serving work (§10.4).
 pub const QUEUE_PAGE: usize = 25;
