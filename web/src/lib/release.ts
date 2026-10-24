@@ -1,7 +1,7 @@
 // The published release the download page links to. A new release changes only this file.
 import { REPO_URL } from './site.ts';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.2.1';
 export const TAG = `v${VERSION}`;
 export const RELEASE_URL = `${REPO_URL}/releases/tag/${TAG}`;
 export const DOWNLOAD_BASE = `${REPO_URL}/releases/download/${TAG}`;
