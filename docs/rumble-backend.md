@@ -238,7 +238,7 @@ Response 200:
 
 #### `POST recordings/done`
 
-`{"batch": "<batch token>", "slots": ["1v1.812.77.a.2"]}` → `{"filled": ["1v1.812.77.a.2"], "failed": [{"slot": "...", "error": "missing" | "checksum" | "expired"}]}`. The server reads the object's `ChecksumSHA256` with `HeadObject` (`ChecksumMode=ENABLED`) and marks the slot filled if it matches the claim.
+`{"batch": "<batch token>", "slots": ["1v1.812.77.a.2"]}` → `{"filled": ["1v1.812.77.a.2"], "failed": [{"slot": "...", "error": "missing" | "checksum" | "expired"}]}`. The server reads the object's `ChecksumSHA256` with `HeadObject` (`ChecksumMode=ENABLED`) and marks the slot filled if it matches the claim. At most 200 slots per call (400 `bad_request` otherwise); a batch can claim more, so the client confirms in chunks.
 
 #### `POST auth/token`
 
