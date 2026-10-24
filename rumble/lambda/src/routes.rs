@@ -19,9 +19,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rumble_core::api::{
     AlertInfo, AlertsResponse, ApiError, AuthTokenRequest, AuthTokenResponse, Battlefield,
     BotRequest, BotStateResponse, BotsResponse, ClaimRequest, ErrorCode, FailedSlot, ImportRequest,
-    Info, InfoDivision, MeUpdate, OkResponse, RecordingsDoneRequest, RecordingsDoneResponse,
-    RemoveRequest, ResultsRequest, RevokeRequest, SlotFailure, SubmitRequest, SubmitSource,
-    TokenInfo, TokensResponse, UploadUrlRequest, UploadUrlResponse, UserUpdateRequest, WorkQuery,
+    Info, InfoDivision, MeUpdate, OkResponse, RECORDINGS_DONE_MAX_SLOTS, RecordingsDoneRequest,
+    RecordingsDoneResponse, RemoveRequest, ResultsRequest, RevokeRequest, SlotFailure,
+    SubmitRequest, SubmitSource, TokenInfo, TokensResponse, UploadUrlRequest, UploadUrlResponse,
+    UserUpdateRequest, WorkQuery,
 };
 use rumble_core::auth::{self, Authenticated, SESSION_SECONDS};
 use rumble_core::bots;
@@ -47,8 +48,6 @@ pub const PLAN_MS: u64 = 60_000;
 pub const AUTH_MS: u64 = 5 * 60_000;
 /// A presigned jar upload is valid this long (§5.4).
 pub const UPLOAD_SECONDS: u64 = 15 * 60;
-/// Slots per `recordings/done`.
-pub const MAX_SLOTS: usize = 200;
 /// The OAuth state and its cookie live this long (§7.1).
 pub const OAUTH_SECONDS: u64 = 600;
 
@@ -841,8 +840,10 @@ impl App {
 
     fn recordings_done(&self, request: &Request, caller: &Caller, config: &Config) -> Handled {
         let body: RecordingsDoneRequest = request.body_json()?;
-        if body.slots.len() > MAX_SLOTS {
-            return Err(bad_request(format!("at most {MAX_SLOTS} slots")));
+        if body.slots.len() > RECORDINGS_DONE_MAX_SLOTS {
+            return Err(bad_request(format!(
+                "at most {RECORDINGS_DONE_MAX_SLOTS} slots"
+            )));
         }
         let payload = token::verify_signature(&body.batch, &self.keys)
             .map_err(|e| bad_request(format!("batch: {e}")))?;

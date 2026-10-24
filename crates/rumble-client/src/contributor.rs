@@ -17,8 +17,8 @@ use crate::tokenfile::now_iso;
 use robocode_s_engine::ENGINE_VERSION;
 use rumble_core::api::{
     BattleResult, BattleStatus, ClientInfo, Failure, FailureReason, Info, Me,
-    RecordingsDoneRequest, ResultsRequest, ResultsResponse, Tier, WorkBattle, WorkBot, WorkQuery,
-    WorkResponse,
+    RECORDINGS_DONE_MAX_SLOTS, RecordingsDoneRequest, ResultsRequest, ResultsResponse, Tier,
+    WorkBattle, WorkBot, WorkQuery, WorkResponse,
 };
 use rumble_core::ids::Division;
 use serde::{Deserialize, Serialize};
@@ -1075,17 +1075,17 @@ impl Contributor {
                 }
             }
         }
-        let mut confirmed = uploaded.len();
-        if !uploaded.is_empty() {
+        let mut confirmed = 0;
+        for chunk in uploaded.chunks(RECORDINGS_DONE_MAX_SLOTS) {
             let request = RecordingsDoneRequest {
                 batch: batch.request.batch.clone(),
-                slots: uploaded.clone(),
+                slots: chunk.to_vec(),
             };
             let mut tries = 0;
             loop {
                 match self.api.recordings_done(&request) {
                     Ok(done) => {
-                        confirmed = done.filled.len();
+                        confirmed += done.filled.len();
                         for failed in &done.failed {
                             emit(Event::Error {
                                 text: format!("slot {}: {:?}", failed.slot, failed.error),
@@ -1113,6 +1113,8 @@ impl Contributor {
                     }
                 }
             }
+        }
+        if !uploaded.is_empty() {
             emit(Event::Uploaded {
                 batch: id.clone(),
                 n: confirmed,

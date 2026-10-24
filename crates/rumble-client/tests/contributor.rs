@@ -19,6 +19,7 @@ use rumble_client::battle::Options;
 use rumble_client::contributor::{Config, Contributor, Event, Fatal, Stop};
 use rumble_client::http::sha256_hex;
 use rumble_client::tokenfile::iso;
+use rumble_core::api::RECORDINGS_DONE_MAX_SLOTS;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -207,6 +208,12 @@ impl Fake {
                 let body: Value = serde_json::from_slice(&req.body).unwrap();
                 let slots = body["slots"].clone();
                 self.done.lock().unwrap().push(body);
+                if slots.as_array().unwrap().len() > RECORDINGS_DONE_MAX_SLOTS {
+                    return Resp::json(
+                        400,
+                        &json!({"error": "bad_request", "message": "too many slots"}),
+                    );
+                }
                 Resp::json(200, &json!({"filled": slots, "failed": []}))
             }
             _ => Resp::json(404, &json!({"error": "not_found", "message": req.path})),
@@ -421,6 +428,30 @@ fn a_batch_runs_is_posted_uploaded_and_confirmed() {
     // The jars are cached under their hash.
     let sha = sha256_hex(&fake.jar);
     assert!(data.join("rumble/jars").join(sha).is_dir());
+}
+
+#[test]
+#[ignore = "needs Java and the built robots"]
+fn more_recordings_than_one_confirmation_takes_are_confirmed_in_chunks() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let rounds = RECORDINGS_DONE_MAX_SLOTS as u32 + 1;
+    let (fake, server) = Fake::new(1, rounds).start();
+    let data = temp("chunks");
+    let contributor = Contributor::new(config(&server, &data, 1)).unwrap();
+    let mut events = Vec::new();
+    let summary = contributor.run(&Stop::new(), |e| events.push(e));
+    assert_eq!(summary.fatal, None);
+    assert_eq!(summary.uploaded, rounds, "{events:#?}");
+    let done = fake.done.lock().unwrap().clone();
+    let sizes: Vec<usize> = done
+        .iter()
+        .map(|d| d["slots"].as_array().unwrap().len())
+        .collect();
+    assert_eq!(sizes, vec![RECORDINGS_DONE_MAX_SLOTS, 1]);
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Error { .. })),
+        "{events:#?}"
+    );
 }
 
 #[test]

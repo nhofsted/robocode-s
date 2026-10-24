@@ -436,6 +436,9 @@ pub struct ResultsResponse {
 
 // ---- POST recordings/done ----
 
+/// Slots per `recordings/done`; a batch can claim more, so clients confirm in chunks.
+pub const RECORDINGS_DONE_MAX_SLOTS: usize = 200;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordingsDoneRequest {
     pub batch: String,
