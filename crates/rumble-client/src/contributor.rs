@@ -33,6 +33,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// The least time between two `GET work`s: the server's `rate.workSeconds` (10) and a second.
+const WORK_INTERVAL: Duration = Duration::from_secs(11);
 /// How much work one `GET work` asks for (§13.3).
 pub const BATCH_WORK: Duration = Duration::from_secs(20 * 60);
 /// Fewest battles asked for.
@@ -684,6 +686,9 @@ pub struct Contributor {
     platform: String,
     slots: usize,
     offered: Vec<Division>,
+    /// When `GET work` was last asked: the server takes one a token every 10 s (spec §5.3),
+    /// so a prefetch right after a batch would only be refused.
+    last_work: std::sync::Mutex<Option<Instant>>,
 }
 
 impl fmt::Debug for Contributor {
@@ -755,6 +760,7 @@ impl Contributor {
             platform,
             slots,
             offered,
+            last_work: std::sync::Mutex::new(None),
             config,
         })
     }
@@ -831,6 +837,13 @@ impl Contributor {
 
     /// `GET work` and the jars of what comes.
     fn fetch(&self, max: u32) -> Fetched {
+        {
+            let mut last = self.last_work.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(at) = *last {
+                std::thread::sleep(WORK_INTERVAL.saturating_sub(at.elapsed()));
+            }
+            *last = Some(Instant::now());
+        }
         let query = WorkQuery {
             engine: ENGINE_VERSION,
             max,
