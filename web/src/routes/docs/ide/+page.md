@@ -108,8 +108,6 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 ## Debug it with your IDE's debugger
 
-> **Needs robocode-s 0.2.0** (or a build from source): 0.1.0 has no `ide-config`, `@ide` or *From your IDE…* yet.
-
 The IDE starts the robot itself (its Debug button), so breakpoints, stepping and watches work as in any Java program; there is no remote debug port to attach to. The robot waits for a battle, and robocode-s makes the battle from it.
 
 **Set it up once.** `robocode-s ide-config` prints the run configuration, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows the same with Copy buttons). It has:
