@@ -543,9 +543,10 @@ impl Pacer {
         }
     }
 
-    /// Two calls a second: the server's limit for other calls is 2/s (spec section 5.3).
+    /// Ten calls a second: admins are exempt from the server's per-token limits (spec
+    /// section 5.3); the pace keeps the importer's load on the API modest.
     pub fn api() -> Pacer {
-        Pacer::new(Duration::from_millis(500))
+        Pacer::new(Duration::from_millis(100))
     }
 
     /// Blocks until this caller's slot.

@@ -357,28 +357,6 @@ impl App {
         };
         let hash = auth::hash_token(token);
         let now = now_ms / 1000;
-        {
-            let mut inner = self.lock();
-            let limited = match limit {
-                Limit::Work => {
-                    inner
-                        .limiter
-                        .interval(&format!("w:{hash}"), config.rate.work_seconds, now_ms)
-                }
-                Limit::Results => inner.limiter.interval(
-                    &format!("r:{hash}"),
-                    config.rate.results_seconds,
-                    now_ms,
-                ),
-                Limit::Other => inner.limiter.check(&format!("o:{hash}"), 2.0, 10.0, now_ms),
-            };
-            if let Err(retry) = limited {
-                return Ok(Err(rate_limited(retry)));
-            }
-        }
-        if via_cookie && request.method == "POST" {
-            auth::check_origin(request.get("origin"), &self.settings.site_origin)?;
-        }
         let cached = {
             let inner = self.lock();
             inner.auth.get(&hash).and_then(|c| {
@@ -393,9 +371,18 @@ impl App {
                 ..auth
             },
             None => {
-                let auth = auth::authenticate(self.store(), token, now)?;
+                let auth = match auth::authenticate(self.store(), token, now) {
+                    Ok(auth) => auth,
+                    Err(e) => {
+                        // Unknown tokens are limited like any other (they cost a read).
+                        if let Err(retry) = self.limited(&hash, config, limit, now_ms) {
+                            return Ok(Err(rate_limited(retry)));
+                        }
+                        return Err(e);
+                    }
+                };
                 self.lock().auth.insert(
-                    hash,
+                    hash.clone(),
                     CachedAuth {
                         auth: auth.clone(),
                         at_ms: now_ms,
@@ -404,7 +391,32 @@ impl App {
                 auth
             }
         };
+        // Admins (the importer) are exempt from the per-token limits (§5.3).
+        if !auth::is_admin(config, &auth.user)
+            && let Err(retry) = self.limited(&hash, config, limit, now_ms)
+        {
+            return Ok(Err(rate_limited(retry)));
+        }
+        if via_cookie && request.method == "POST" {
+            auth::check_origin(request.get("origin"), &self.settings.site_origin)?;
+        }
         Ok(Ok(Caller { auth, via_cookie }))
+    }
+
+    /// Takes one token from the caller's bucket for this kind of call.
+    fn limited(&self, hash: &str, config: &Config, limit: Limit, now_ms: u64) -> Result<(), u64> {
+        let mut inner = self.lock();
+        match limit {
+            Limit::Work => inner
+                .limiter
+                .interval(&format!("w:{hash}"), config.rate.work_seconds, now_ms),
+            Limit::Results => inner.limiter.interval(
+                &format!("r:{hash}"),
+                config.rate.results_seconds,
+                now_ms,
+            ),
+            Limit::Other => inner.limiter.check(&format!("o:{hash}"), 2.0, 10.0, now_ms),
+        }
     }
 
     /// Drops cached lookups of a user (after a revocation or an admin change).

@@ -116,6 +116,10 @@ fn rate_limits() {
     let statuses: Vec<u16> = (0..12).map(|_| h.get("me", &token).status).collect();
     assert_eq!(&statuses[..10], &[200; 10]);
     assert_eq!(statuses[11], 429);
+    // Admins are exempt (the importer).
+    let admin = h.user(ADMIN_ID, 0);
+    let statuses: Vec<u16> = (0..30).map(|_| h.get("me", &admin).status).collect();
+    assert_eq!(statuses, [200; 30]);
     // auth/* per viewer IP: 1/s, burst 20.
     let login = || {
         h.send(

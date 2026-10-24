@@ -129,7 +129,7 @@ Base `https://<domain>/api/v1/`. JSON bodies, UTF-8, `camelCase`. 64-bit seeds a
 
 ### 5.3 Rate limits
 
-Per token, in each Lambda instance's memory (approximate: at most reserved-concurrency instances): work requests `rate.workSeconds`, results posts `rate.resultsSeconds`, other calls 2/s burst 10. Per viewer IP without a token: 1/s burst 20 for `auth/*`. Global limits come from reserved concurrency (§14.3) and DynamoDB's fixed capacity (§9.5). No DynamoDB rate counters.
+Per token, in each Lambda instance's memory (approximate: at most reserved-concurrency instances): work requests `rate.workSeconds`, results posts `rate.resultsSeconds`, other calls 2/s burst 10. **Admin tokens are exempt** from these per-token limits (the importer paces itself at 10 calls/s and still retries 429s, which a failed deploy or a proxy could produce). Per viewer IP without a token: 1/s burst 20 for `auth/*`. Global limits come from reserved concurrency (§14.3) and DynamoDB's fixed capacity (§9.5). No DynamoDB rate counters.
 
 ### 5.4 Endpoints
 
