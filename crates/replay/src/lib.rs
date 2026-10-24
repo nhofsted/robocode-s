@@ -264,7 +264,9 @@ fn field<I: Io, const N: usize>(
     v
 }
 
-fn angle_units(radians: f64, steps: i64) -> i64 {
+/// A heading in radians as units of `steps` per turn, in `[0, steps)`: how tracks quantize
+/// headings ([`ANGLE_STEPS`], [`BULLET_ANGLE_STEPS`]).
+pub fn angle_units(radians: f64, steps: i64) -> i64 {
     ((radians * steps as f64 / (2.0 * PI)).round() as i64).rem_euclid(steps)
 }
 

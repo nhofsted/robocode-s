@@ -1,6 +1,6 @@
 [package]
 name = "robocode-s-rumble-client"
-description = "Client of the rumble backend: HTTP, device-flow login, token file, jar cache (M4)"
+description = "Client of the rumble backend: HTTP, device-flow login, token file, jar cache, battles (M4)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,3 +21,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.11.0"
 ureq = "3.4.2"
+robocode-s-engine.workspace = true
+robocode-s-protocol.workspace = true
+robocode-s-replay.workspace = true
+robocode-s-runner.workspace = true
+robocode-s-server.workspace = true
+prost = "0.14.4"
