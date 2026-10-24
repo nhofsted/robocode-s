@@ -394,32 +394,36 @@ We run our own distributed rumble. Volunteers run battles with the robocode-s ru
 ```
  rumble clients (cli / gui)                     AWS (eu-west-1 + CloudFront)
  ┌──────────────────────┐   HTTPS    ┌──────────────────────────────────────────────┐
- │ GET  /api/work       │──────────► │ CloudFront (rumble.planethofstede.be)        │
- │ run battles locally  │            │   ├─ /*      → S3: static site, ranking JSON │
- │ POST /api/results    │──────────► │   ├─ /jars/* → S3: mirrored robot jars       │
- │ PUT recording        │──────────► │   ├─ /rec/*  → S3: recordings                │
- │   (presigned S3 URL) │            │   └─ /api/*  → Lambda function URL (OAC)     │
- └──────────────────────┘            │                  work · results · auth ·     │
- browser ──────────────────────────► │                  submit · admin              │
-                                     │ DynamoDB (provisioned, within free tier)     │
-                                     │ EventBridge Scheduler → rankings Lambda      │
+ │ GET  /api/v1/work    │──────────► │ CloudFront (rumble.planethofstede.be)        │
+ │ run battles locally  │            │   ├─ /*      → S3: static site, /data/v1     │
+ │ POST /api/v1/results │──────────► │   ├─ /jars/* → S3: jars bucket               │
+ │ PUT recording        │──────────► │   ├─ /rec/*  → S3: recordings (jars bucket)  │
+ │   (presigned S3 URL) │            │   └─ /api/v1/* → api Lambda (function URL,   │
+ └──────────────────────┘            │                  OAC)                        │
+ browser ──────────────────────────► │ DynamoDB: one table, no GSIs                 │
+                                     │ state bucket: config, pairing state, plan    │
+                                     │ EventBridge Scheduler → batch Lambda         │
                                      └──────────────────────────────────────────────┘
 ```
 
-- **Lambdas in Rust** (`cargo-lambda`, arm64), so they share the protocol and recording code with the rest of the project. Rust Lambdas start quickly and use little memory, so GB-seconds stay low.
-- **No API Gateway.** The HTTP API is only free for the first 12 months. Lambda **function URLs** sit behind CloudFront (origin access control), and everything is served from one domain, `rumble.planethofstede.be`. That means one certificate (ACM, us-east-1), no CORS and no separate API domain.
+Details: `docs/rumble-backend.md` §14 (infrastructure), ADR 0021.
+
+- **Two Lambdas in Rust** (arm64, built with cargo-zigbuild), sharing `crates/rumble-core` with the client. Rust Lambdas start quickly and use little memory, so GB-seconds stay low. `api` serves `/api/v1` (work, results, auth, submit, admin). `batch` runs on EventBridge Scheduler: **plan** hourly at :12 (folds the result log into the pairing state and writes the work plan, §12.3), **publish** every 6 hours (rankings, §12.6) and **cleanup** daily.
+- **Buckets:** the site bucket, a **jars bucket** (`jars/`, `rec/`) and a private **state bucket** (config, pairing state, plan, uploads).
+- **Stages:** prod, and a **dev** stage at `dev.rumble.planethofstede.be` with its own certificate, DynamoDB on-demand and its own secrets. Both are the same construct.
+- **No API Gateway.** The HTTP API is only free for the first 12 months. Lambda **function URLs** sit behind CloudFront (origin access control), and everything is served from one domain per stage, `rumble.planethofstede.be`, the API under `/api/v1`. That means one certificate per stage (ACM, us-east-1), no CORS and no separate API domain.
 - **Infrastructure as code:** AWS CDK (TypeScript) in `infra/`.
 - **Website:** SvelteKit built with `adapter-static` on S3 + CloudFront (ADR 0015). It also hosts the user documentation. The home page and docs are prerendered; ranking, bot and pairing pages render in the browser from pre-computed JSON (`docs/rumble-data.md`). Interactive features (login, bot submission, "watch", reputation and account pages) call the `/api` Lambdas from the browser, and those Lambdas read and write DynamoDB. Unknown paths fall back to `200.html` (CloudFront custom error response), so client-side routes like `/bot/<id>` work; a CloudFront Function maps extensionless URLs to the prerendered `.html` files (`web/README.md`).
-- **Deployment:** a dedicated member account `robocode-s` in the owner's AWS Organization (ADR 0016), region **eu-west-1** (Ireland). An SCP limits it to eu-west-1 and us-east-1 and to services within the free-tier plan. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack. The DNS zone `planethofstede.be` stays in the management account: the `rumble` CNAME and the certificate's validation record are added there by hand, once.
+- **Deployment:** a dedicated member account `robocode-s` in the owner's AWS Organization (ADR 0016), region **eu-west-1** (Ireland). An SCP limits it to eu-west-1 and us-east-1 and to services within the free-tier plan. The CloudFront certificate needs a small us-east-1 stack next to the main eu-west-1 stack. The DNS zone `planethofstede.be` stays in the management account: the `rumble` and `dev.rumble` CNAMEs and the certificates' validation records are added there by hand, once.
 
 ### 12.2 Free-tier budget
 
 | Service | Always-free allowance (approx.) | How we stay within it |
 |---|---|---|
 | Lambda | 1M requests + 400k GB-s / month | Rust on arm64 with small memory; clients fetch work and upload results in **batches**, not one request per battle |
-| DynamoDB | 25 GB storage, 25 RCU + 25 WCU **provisioned** | Provisioned mode in prod (on-demand is not covered by the free tier) and no auto-scaling beyond 25; aggregates instead of per-battle rows (§12.6). A dev stage uses on-demand, which costs cents at test traffic and leaves the free capacity to prod |
+| DynamoDB | 25 GB storage, 25 RCU + 25 WCU **provisioned** | Provisioned mode in prod (on-demand is not covered by the free tier) and no auto-scaling beyond 25; one compact log item per results post, folded into S3 (§12.6). A dev stage uses on-demand, which costs cents at test traffic and leaves the free capacity to prod |
 | CloudFront | 1 TB transfer + 10M requests / month | Site, ranking JSON, jars and recordings are all served through CloudFront and cached |
-| EventBridge Scheduler | 14M invocations / month | One scheduled ranking run per day |
+| EventBridge Scheduler | 14M invocations / month | Three schedules: plan hourly, publish every 6 hours, cleanup daily |
 | CloudWatch Logs | 5 GB ingestion | Low log level and short retention (7 days) |
 | SSM Parameter Store | Standard parameters free | GitHub OAuth secret stored there (not Secrets Manager, which costs $0.40/month per secret) |
 | ACM | Public certificates free | — |
@@ -437,20 +441,21 @@ Guardrails:
 
 ### 12.3 Server-assigned work
 
-Clients do not choose pairings themselves:
+Clients do not choose pairings themselves. Details: `docs/rumble-backend.md` §10, ADR 0021.
 
-1. A client calls `GET /api/work`. It gets a **batch** of battle assignments: division, robot IDs and jar hashes, number of rounds, **seed** and assignment ID. Pairings with the fewest battles come first, as in LiteRumble.
-2. The client runs the battles in **deterministic mode** (§7.2). It downloads jars through CloudFront and verifies them by hash.
-3. The client calls `POST /api/results` with all results of the batch: per-round scores, a recording hash for each battle, and the engine version.
-4. The results Lambda checks that each assignment exists, is unexpired and belongs to this user, then updates the aggregates (§12.6). Results of another engine version than the current one are not counted.
+1. A client calls `GET /api/v1/work`. It gets a **batch** of battle assignments as a **signed batch token** (HMAC-SHA256, key in SSM): division, robot IDs and jar hashes, rounds, **seeds**, engine version and a deadline of 3 hours. Nothing is stored for an assignment, so handing out work reads and writes nothing in DynamoDB.
+2. The client runs the battles in **deterministic mode** (§7.2) and downloads jars through CloudFront, verifying them by hash.
+3. The client calls `POST /api/v1/results` with the whole batch: per-round scores and the robots that got a first, a battle hash and per-round track hashes, and the engine version. A batch marker makes the post idempotent. Results of another engine version than the current one are not counted.
 
-Clients on an older engine version can't produce current results: assignments carry the engine version, and a client refuses work for one it doesn't run.
+**No hard cap on work** (owner's decision, replacing #23's threshold): every battle volunteers offer is used and directed to the most useful pairings. The `plan` job runs hourly and gives each pairing a quota, water-filled over all pairings by the expected variance reduction of one more battle (LiteRumble's shrunk variance). Pairings whose CI still contains 50 weigh ten times as much, and bots close in rank and bots with incomplete pairings get more. The `api` samples battles from the plan in memory. Verification, probation and watch work come first, for clients allowed to run them.
+
+Clients on an older engine version can't produce current results: tokens carry the engine version, and a client refuses work for one it doesn't run.
 
 Note: in deterministic mode slow robots skip turns by their counted work, not their time (ADR 0018). Their behavior can still differ slightly from classic on a given machine. This is accepted and documented for the rumble.
 
 ### 12.4 Trust and verification (volunteers only)
 
-- **Authentication:** GitHub OAuth. The auth Lambda exchanges the code and issues a long-lived upload token for the client and a session cookie for the web UI.
+- **Authentication:** GitHub OAuth. The web uses the code flow and gets a `__Host-` session cookie; the CLI and GUI use the device flow and get a long-lived upload token (sent as `X-Rumble-Token`). The GitHub token is checked against our app and then deleted (`docs/rumble-backend.md` §7).
 - **Assumption:** most of the community is honest. Verification should be cheap, while still catching cheating and broken clients (bugs, modified engines, nondeterminism).
 - **All verification is done by other volunteers.** The backend only decides which battles to hand out twice and compares the results.
 - **Reputation-based verification rate:** each user has a reputation that controls what fraction of their battles is re-run by someone else:
@@ -466,32 +471,39 @@ Note: in deterministic mode slow robots skip turns by their counted work, not th
   3. If all three runs disagree, it's an engine bug. An alert is raised and nobody is penalized.
   4. Repeated confirmed mismatches lead to a ban, and that user's results are removed from the aggregates.
 
-Removing a user's results requires their per-battle contributions. These are kept in a compact per-user log in S3 (append-only batches); per-battle rows in DynamoDB would exceed the free tier.
+- **Failure reports** (a robot that fails to load or crashes) count only from verifiers, users above the reputation threshold; deactivating an active bot also needs 3 distinct reporters (`docs/rumble-backend.md` §12.3).
+- **Verified runs don't count twice.** A wrong counted result is corrected by a -1/+1 pair of records.
+
+Removing a user's results requires their per-battle contributions. These are the result log's records (§12.6), kept 400 days; a ban writes records with weight -1.
 
 ### 12.5 Participants and robot jars
 
-- **Submission:** a web form with GitHub login. Authors upload a jar (via presigned S3 URL) or provide a URL to mirror. They choose divisions (1v1, melee, teams, twin duel) and can later replace the version or retire the bot.
-- **Validation without running robots:**
-  1. **Static checks in the submit Lambda:** jar structure, robot `.properties`, the main class exists, and codesize for Java weight classes (nano/micro/mini/mega). Codesize is computed by parsing class files in Rust, without a JVM.
-  2. **Probation:** a new bot first gets a few battles assigned to high-reputation clients. If it fails to load, crashes or is disabled every round, clients report this and the bot is deactivated with a message to the author. Only after probation does it enter normal scheduling.
-- **Seeding:** a one-time import of all robots in the current RoboWiki participant lists. It runs from the owner's machine (a `cli` admin command), not in Lambda, and the jars are mirrored to S3. Imported bots are attributed to their original author and are claimable by that author after logging in with GitHub.
+- **Submission:** a web form with GitHub login. Authors upload a jar (via presigned S3 URL) or provide a URL to mirror. They choose divisions and can later replace the version or retire the bot. **Limits:** 5 bots per user, 5 new versions per bot per day, and a GitHub account younger than 30 days needs the owner's approval. Admins and imported bots are exempt.
+- **Validation without running robots:** static checks in the submit code (`rumble_core::jar`): jar structure, one robot `.properties`, the main class, and codesize for Java weight classes, computed by parsing class files in Rust as classic's tool does (the sum of all methods' `Code` lengths). A jar that also ships a `.team` file counts as a robot.
+- **Probation:** a new version first gets battles assigned to verifiers only. If it fails to load, crashes or is disabled every round, it is deactivated with a message to the author. A new version replaces the old one in the rankings only after probation, so bots don't vanish meanwhile. Imported bots skip probation.
+- **Seeding:** a one-time import of all robots in the current RoboWiki participant lists, run from the owner's machine (an admin command of the rumble CLI), not in Lambda. For each jar the sources are, in order: a local directory, the list's URL, and the strangeautomata archive that classic clients also fall back on. Jars are mirrored to S3. Imported bots are attributed to their original author; the author claims them after logging in with GitHub, and the owner approves the claim.
 - **Mirror and takedown policy:** jars are mirrored to keep the rumble working when original URLs die. Authors can request removal through the site or a GitHub issue, and removals are handled promptly. The import is announced on RoboWiki.
 - Other-language robots (M5, M8) use the same flow with their own package format. Weight classes only apply where codesize is defined.
 
+Details: `docs/rumble-backend.md` §12 and §16.
+
 ### 12.6 Data model and rankings
 
-DynamoDB holds only aggregates; there are no per-battle rows.
-- **Pairing statistics:** battles and the running sums needed for each metric, per (engine version, division, bot A, bot B).
-- **Per-bot aggregates:** sums of pairing averages, per engine version, updated by delta in the same transaction as the pairing statistic. APS, PWIN and survival can then be read from the bots table alone, without a scan.
-- **Users:** reputation, quarantine flag, counters.
-- **Assignments:** outstanding work, with a DynamoDB TTL so expired ones disappear for free.
+DynamoDB holds one table without GSIs; per-battle data is a compact result log, and statistics live in S3 (`docs/rumble-backend.md` §6, §9, ADR 0021).
+- **Result log:** each results post writes one transaction: the batch marker, one log item with the batch's compact records (24 bytes for a 1v1 battle, 104 for a melee battle) and the user's counters. The log is kept 400 days and is the per-user record for removing a banned user's results (§12.4).
+- **Pairing state:** the hourly `plan` job folds new log items into an S3 file per engine version and division (n, sum of score, sum of score squared, sum of survival per pairing). It replaces the per-pairing items and per-bot sums updated by delta that this design first had, for three reasons: a melee battle would touch 45 pairing items, the daily scan of about 600k items does not fit in a Lambda run at the free read rate, and the log already is the per-user record. The cost is that planning data is up to an hour old.
+- **Users, bots and versions:** reputation, quarantine flag, counters; bot and version items with their state (probation, active, retired).
+- **Melee pairings** use classic's split: each of the 45 pairs is scored by the two bots' total scores in the battle.
+- **Rounds report every robot that got a first** (classic gives robots that die together a first each), so a round can have several winners; such a round fills no "rounds won by" slot.
+- **Fresh data:** every rumble battle starts with no robot data files; only data shipped in the jar counts. Verification needs equal runs, so robots that learn across battles start fresh here, unlike in classic's rumble. The work item reserves `data` for server-held snapshots later.
 
-Write cost: a battle costs roughly 4–10 WCU (transactional), so 25 WCU sustains about 3 battles/s, more than 200k battles/day. Batching uploads smooths out spikes.
+Write cost: one transaction per results post, so at 3 battles/s the backend uses about 4 WCU/s and 1 RCU/s of the 25/25 provisioned; the free capacity carries about 15 battles/s, so throughput is limited by volunteers.
 
 Rankings:
 - **Engine versions are never mixed** (O14). Results carry the engine version they were run with. Rankings use only the current engine version. When it changes, the rumble fills the new version's pairings from scratch (fewest battles first does that by itself); the old aggregates are kept, but not ranked. The data files say which engine version they rank.
-- **Once a day** a scheduled Lambda computes all metrics together: APS, PWIN and survival from the per-bot aggregates; Glicko-2, ANPP, Vote and pairing matrices from a slow, rate-limited scan of the pairing statistics, kept inside the free read capacity. It writes the data files of `docs/rumble-data.md`: per-rumble rankings and per-bot files with pairings and history. The website shows the rumble as of that run.
-- **History:** a daily snapshot of each bot's rank and score, appended to small per-bot JSON files, for trend charts.
+- **Every 6 hours** (owner's decision) the `publish` job computes all metrics from the pairing state file, with no table scan: APS, PWIN, survival, Glicko-2 (from scratch, 20 rating periods over the pairing matrix), ANPP, Vote and pairing matrices. It writes the data files of `docs/rumble-data.md`: per-rumble rankings and per-bot files with pairings and history. The website shows the rumble as of that run.
+- **Contributors** are public (`contributors.json`, a `/contributors` page); a user can opt out on the account page.
+- **History:** a snapshot of each bot's rank and score, appended to small per-bot JSON files, for trend charts; history and snapshots keep one point a day.
 
 ### 12.7 Recordings and replays
 
@@ -528,7 +540,7 @@ Recordings are stored per **round**, not per battle. A rumble recording is a **l
 - **Battle replay in the browser:** the replay decoder (`crates/replay`, compiled to WebAssembly) and a canvas viewer play the recordings. No engine runs in the browser: tracks are what the viewer draws (ADR 0017). Scrubbing jumps between decoded frames.
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 - **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
-- **Data contract:** the rankings Lambda writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). Until it exists, the site's dev server serves seeded synthetic data in the same format.
+- **Data contract:** the `publish` job writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). The site's local dev server serves seeded synthetic data in the same format; the dev stage publishes real rankings.
 - **Look:** classic Robocode, with its own images: the blue-metal floor tiles as background, its tank sprites (recoloured like classic) and explosions, and a roaming battlefield behind the home page. Bot pages show rating history across versions, with a marker at every release.
 
 ## 13. Compatibility reference and differential testing
@@ -566,12 +578,12 @@ robocode-s/
 │   ├── server/
 │   ├── runner/
 │   ├── gui/
+│   ├── rumble-core/          # rumble types, tokens, records, planner, metrics, jar validation
+│   ├── rumble-client/        # rumble client: HTTP, device flow, battles, import
 │   ├── viewer-wasm/          # engine + renderer for the browser
 │   └── cli/
-├── rumble/                   # Lambda functions (Rust, cargo-lambda)
-│   ├── api/                  # work, results, auth, submit, admin
-│   ├── codesize/             # class-file parser for weight classes
-│   └── rankings/
+├── rumble/
+│   └── lambda/               # api and batch Lambdas (a workspace of its own)
 ├── web/                      # rumble website (SvelteKit, adapter-static)
 ├── infra/                    # AWS CDK (TypeScript)
 ├── proto/                    # .proto schema (source of truth)
@@ -584,6 +596,7 @@ robocode-s/
 │   └── c/
 ├── docker/                   # runner images, relay
 ├── tools/difftest/
+├── tools/rumble/             # rumble tools (corpus runs, import support)
 ├── tools/release/            # release script, third-party notices, archive texts
 └── docs/
     ├── design.md
@@ -598,7 +611,7 @@ robocode-s/
 | **M1** | **Headless engine + Java compat (MVP)** | Engine, server, local-process runner, java-compat library, `cli` battles; difftest is bit-exact for all classic sample robots over ≥1000 seeded rounds |
 | M2 | GUI | Viewer, battle setup, debug paint, recording and replay |
 | M3 | Isolation and distribution | Robots over stdio, built-in OS sandbox (Linux, Windows), Docker runner image as an alternative (ADR 0019), release archives per platform, remote runner agents with TLS and tokens, warm pools |
-| M4 | Rumble | Free-tier AWS backend (work/results/auth/submit/rankings), rumble client, seeding import from RoboWiki, website with rankings, reputation-based cross-checks |
+| M4 | Rumble | Free-tier AWS backend (`api` and `batch` Lambdas: work, results, auth, submit, plan, rankings), rumble client in the CLI and GUI, seeding import from RoboWiki, website with rankings, reputation-based cross-checks, dev and prod stages. Spec: `docs/rumble-backend.md`, ADR 0021 |
 | M5 | Robots in Python | Python client library on the protocol (§9) plus sample robots; its sandbox and its own work counting and calibration for deterministic mode (#15) |
 | M6 | Battle replays in the browser | Replay decoder (WASM) and canvas viewer; on-demand replays in the browser |
 | M7 | Online editor | Write a robot in the browser, build it and try it against other robots there, then submit it to the rumble (O15) |
@@ -613,11 +626,11 @@ robocode-s/
 - **O4** ~~Meaning of bit-exact~~ Decided: exact against classic with StrictMath (fdlibm) semantics (§4.3).
 - **O5** ~~JRE distribution~~ Decided: a pinned Temurin JRE, downloaded on demand (§6.1).
 - **O6** ~~Sample robot licensing~~ Decided: bundled under EPL-2.0. All 27 files were checked and carry the EPL-1.0 header (§13.1).
-- **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The API is served under `/api` on the same domain.
+- **O7** ~~AWS account, region and domain~~ Decided: owner's account, eu-west-1, `rumble.planethofstede.be` (§12.1). The API is served under `/api/v1` on the same domain; a dev stage uses `dev.rumble.planethofstede.be`.
 - **O8** ~~Cross-check fraction~~ Decided: reputation-based, verified by volunteers only (§12.4). The exact numbers (start rate, floor, curve) get tuned once real data exists.
 - **O9** ~~Recording retention~~ Decided: per-round recordings, 5 rounds won by each side, for matchups involving a top-50 bot; no expiry; the rest on demand (§12.7).
 - **O10** ~~Frontend framework~~ Decided: SvelteKit (static) calling the `/api` Lambdas from the browser (§12.1, ADR 0015).
-- **O11** Is the daily full scan for Glicko-2/ANPP enough, or should those metrics be updated incrementally? Revisit once the bot count is known.
+- **O11** ~~Full scan for Glicko-2/ANPP~~ Decided: all metrics are computed every 6 hours from the S3 pairing state file, with no table scan (§12.6).
 - **O12** ~~JDK geometry and licensing~~ Decided: independent implementation in `crates/geom`, verified against the JDK with ~24,000 edge cases and 5M random cases, all matching (ADR 0011).
 - **O13** ~~`Utils.getRandom()`~~ Decided: a per-robot generator, and the oracle patches classic to match (ADR 0010, engine-spec §15.1).
 - **O14** ~~Engine version (§4.4, #22)~~ Decided: one integer, `ENGINE_VERSION`. Rumble results of different engine versions are never mixed: aggregates are kept per version, only the current one is ranked, a new version starts its pairings from scratch (§12.6).
@@ -646,11 +659,21 @@ robocode-s/
 | Classic sample robots | Bundled under EPL-2.0 |
 | Engine version | One integer (`ENGINE_VERSION`), bumped with every change that can alter a battle's outcome; stored in replays, results and reports; rumble results of different versions are never mixed (§4.4, §12.6) |
 | Rumble frontend | SvelteKit, static, with browser-side API calls; also hosts the user documentation |
-| Rumble | Own distributed rumble on AWS serverless (Rust Lambdas, DynamoDB, S3, CloudFront) |
+| Rumble | Own distributed rumble on AWS serverless (Rust Lambdas `api` and `batch`, DynamoDB, S3, CloudFront), prod and dev stages (`docs/rumble-backend.md`, ADR 0021) |
 | Rumble participants | Web form with GitHub login; seeded from RoboWiki participant lists |
 | Robot jars | Mirrored to S3, with a takedown policy |
 | Rumble clients | Anyone with GitHub login; server-assigned seeded work; reputation-based verification by other volunteers (new users ~20%, trusted users ~1%) with optimistic acceptance |
 | IaC | AWS CDK (TypeScript) |
-| AWS deployment | Own member account `robocode-s` (ADR 0016), eu-west-1; `rumble.planethofstede.be` (API under `/api`) in the existing Route 53 zone of the management account |
+| AWS deployment | Own member account `robocode-s` (ADR 0016), eu-west-1; `rumble.planethofstede.be` (API under `/api/v1`; dev at `dev.rumble.planethofstede.be`) in the existing Route 53 zone of the management account |
 | Replays | Per-round lossy viewer tracks (ADR 0017): 5 rounds won by each side, for matchups involving at least one top-50 bot; never expire, replaced only by new bots or versions; the rest on demand. About $0.40/month plus about $2.75 one-time |
 | AWS cost | Stay within the free tier (S3 aside, which costs cents): AWS never runs battles; Lambda function URLs behind CloudFront (no API Gateway); provisioned DynamoDB at 25/25; capped S3 |
+| Rumble statistics | Result log in DynamoDB, folded hourly into an S3 pairing-state file; no pairing items, no scans (§12.6, ADR 0021) |
+| Rumble assignments | Signed batch tokens (HMAC), not stored rows (§12.3) |
+| Rumble work | No hard cap (replaces #23's threshold); hourly plan by variance reduction, closeness to 50 and rank contest, LiteRumble-style (§12.3) |
+| Rumble rankings | Published every 6 hours; contributors public with opt-out (§12.6) |
+| Rumble crates | `rumble-core` and `rumble-client` in the root workspace; `rumble/lambda` a separate workspace (§15) |
+| Rumble battles | Deterministic, sandboxed (the client refuses to run unsandboxed without `--unsandboxed`), fresh robot data in every battle (§12.6) |
+| Rumble limits | 5 bots per user, 5 versions per bot per day, GitHub accounts under 30 days need approval; new versions on probation, imports skip it (§12.5) |
+| Rumble failure reports | Only verifiers' count; deactivating an active bot needs 3 distinct reporters (§12.4) |
+| Rumble melee | Classic's split: 45 pairs scored by the two bots' total scores; every robot that got a first is reported (§12.6) |
+| Rumble import | RoboWiki lists; jar from a local directory, the list's URL, then the strangeautomata archive (§12.5) |
