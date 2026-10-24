@@ -117,10 +117,21 @@
 		text-decoration: none;
 		padding: 0.2rem 0;
 	}
+	/* The links wrap rather than push the page wider than a phone. */
 	nav {
 		display: flex;
-		gap: 1.2rem;
+		flex-wrap: wrap;
+		gap: 0.3rem 1.2rem;
 		font-size: 0.95rem;
+	}
+	@media (max-width: 600px) {
+		nav {
+			column-gap: 0.9rem;
+		}
+		/* Wrapped onto several rows the header would take a big bite of a phone's screen. */
+		header {
+			position: static;
+		}
 	}
 	nav a {
 		color: var(--text-2);

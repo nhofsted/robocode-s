@@ -59,6 +59,11 @@
 		overflow-x: auto;
 		margin: 1rem 0;
 	}
+	/* Long inline paths and names wrap instead of widening the page on a phone (code blocks
+	   scroll inside themselves). */
+	.doc :global(:not(pre) > code) {
+		overflow-wrap: anywhere;
+	}
 	.doc :global(th),
 	.doc :global(td) {
 		border-bottom: 1px solid var(--line);

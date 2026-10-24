@@ -92,22 +92,30 @@
 		font-size: 0.85rem;
 	}
 	@media (max-width: 760px) {
+		/* minmax(0, …): a plain 1fr won't shrink below its widest code block, which would widen
+		   the whole page on a phone; code blocks scroll inside themselves instead. */
 		.docs {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr);
 			gap: 0.5rem;
 		}
 		nav {
 			position: static;
 		}
+		/* A row of separate pills, as the rumble's class links, instead of a run of words. */
 		ul {
 			display: flex;
 			flex-wrap: wrap;
-			gap: 0.2rem 0;
+			gap: 0.4rem;
 			border-left: 0;
 		}
 		li a {
-			border-left: 0;
-			padding: 0.2rem 0.6rem 0.2rem 0;
+			display: block;
+			border: 1px solid var(--line-strong);
+			border-radius: var(--radius);
+			padding: 0.2rem 0.6rem;
+		}
+		li a[aria-current='page'] {
+			border-color: var(--radar);
 		}
 		ul.sub {
 			display: none;
