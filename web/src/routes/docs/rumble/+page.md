@@ -41,7 +41,7 @@ The rankings are recomputed every 6 hours, all metrics together. A bot that hasn
 The rumble's servers never run a robot. **Volunteers** do: anyone with a GitHub account can run the rumble client (built into the robocode-s command line and GUI) and contribute battles.
 
 1. The client asks for work and gets a batch of battles: which bots, which rumble, how many rounds, and a **seed**. The rumble picks pairings with the fewest battles first.
-2. It downloads the robot jars (mirrored by the rumble and checked by hash) and runs the battles in [deterministic mode](/docs/robot-development#deterministic-mode).
+2. It downloads the robot jars (mirrored by the rumble and checked by hash) and runs the battles in [deterministic mode](/docs/robot-development/deterministic-mode).
 3. It uploads the results of the whole batch.
 
 Because battles are deterministic, a battle with the same robots and seed gives the same result on any machine. That makes results **checkable**:
@@ -54,20 +54,7 @@ In deterministic mode no turn is ever skipped for being slow, so a slow bot may 
 
 ## Contributing battles
 
-Anyone can lend their computer. You need a GitHub account and the [download](/download), which contains the client.
-
-```
-robocode-s rumble login
-robocode-s rumble run
-```
-
-`login` is GitHub's device flow: it shows a code, you confirm it in the browser, and the client keeps an upload token in its settings folder (revoke it on your [account page](/account), or with `robocode-s rumble logout`, which revokes it and removes it). `run` loops until you stop it with Ctrl+C: it gets a batch of battles, runs them (`--parallel N` battles at once), posts the results, uploads the recordings the rumble asks for and asks for more, printing a line per battle and per post (`--json` prints the events as JSON lines instead). One Ctrl+C finishes the running battles and posts what is done; a second abandons them. `--divisions 1v1,melee` chooses what to offer (a melee battle takes five of the parallel slots), `--batches N` stops after N batches, and `robocode-s rumble status` shows who you are, your tier and counters, and whether this version fits the rumble. Results that could not be posted wait in the data folder and are posted at the next start. The GUI has the same on its **Rumble** page. `robocode-s rumble --help` lists every option.
-
-**What runs.** Other people's robots, in [deterministic mode](/docs/robot-development#deterministic-mode), each in a sandbox (no network, no files outside its own folder). The client refuses to run without one: Linux and Windows have one built in; on macOS use Docker, or accept the risk with `--unsandboxed`.
-
-**Fresh data in every battle.** A robot's data folder starts empty in every rumble battle, so a robot cannot carry learned data from one battle to the next, and results do not depend on which volunteer's computer ran what before. Robots that learn *during* a battle are unaffected.
-
-**Verification.** Some of your battles are re-run by others, and you re-run theirs. Matching results raise your reputation and lower the share that is checked (see above); a mismatch is settled by a third volunteer. Your tier, reputation and counters are on your [account page](/account); the [contributors](/contributors) list shows who has contributed, and you can hide yourself there.
+Anyone with a GitHub account can lend their computer: `robocode-s rumble login`, then `robocode-s rumble run`, or switch Contribute on in the GUI. [Contributing battles](/docs/rumble/contributing) has the steps, the sandboxes and what runs on your machine.
 
 ## Entering a bot
 
@@ -76,7 +63,7 @@ robocode-s rumble run
 3. **Probation:** a few battles on trusted clients. Bots that fail to load, crash or get disabled every round are deactivated, with a message to the author.
 4. **Ranked:** the bot enters normal scheduling. A new version starts with fresh pairings; the previous version is retired.
 
-See [Developing a robot](/docs/robot-development#package-it) for how to package a bot, and [My bots](/account/bots) for the versions you submitted, their states (probation, active, failed, retired) and why a version failed.
+See [Developing a robot](/docs/robot-development/release#package-it) for how to package a bot, and [My bots](/account/bots) for the versions you submitted, their states (probation, active, failed, retired) and why a version failed.
 
 **Limits.** A jar of up to 5 MiB; at most 5 bots per account and 5 new versions of a bot per day; every release needs a new `robot.version`. A GitHub account younger than 30 days needs the owner's approval first: [open an issue](https://github.com/nhofsted/robocode-s/issues). A bot can only get new versions from its owner. Team files are not accepted yet.
 

@@ -538,7 +538,7 @@ Recordings are stored per **round**, not per battle. A rumble recording is a **l
 - Bot pages: metadata, author, versions, rating history chart, best and worst pairings, and a full pairing matrix with heatmap.
 - Pairing pages: per-pairing statistics and a "watch a battle" button (§12.7).
 - **Battle replay in the browser:** the replay decoder (`crates/replay`, compiled to WebAssembly) and a canvas viewer play the recordings. No engine runs in the browser: tracks are what the viewer draws (ADR 0017). Scrubbing jumps between decoded frames.
-- **Bot archive:** every version of a bot (current and retired) has a download link `<id>_<version>.jar` on its bot page, and `/archive` lists all bots and versions, searchable, with downloads (`archive.json`); takedowns disappear from both. No bulk zip, no classic-style URLs.
+- **Bot archive:** every version of a bot (current and retired) has a download link `<id>_<version>.jar` on its bot page; takedowns disappear from it. (`archive.json` is written for a later listing; the site has no `/archive` page, owner 2026-10-24.) No bulk zip, no classic-style URLs.
 - Contributor stats (battles run, reputation tier) and a page for submitting or managing bots.
 - **User documentation** for robot authors: about the project, getting started, developing, testing, debugging and releasing a robot, and how the rumble works. Markdown in `web/src/routes/docs`, prerendered.
 - **Data contract:** the `publish` job writes versioned JSON files under `/data/v1` (`docs/rumble-data.md`). The site's local dev server serves seeded synthetic data in the same format; the dev stage publishes real rankings.

@@ -16,6 +16,15 @@
 			{#each DOCS as d (d.href)}
 				<li>
 					<a href={d.href} aria-current={page.url.pathname === d.href ? 'page' : undefined}>{d.title}</a>
+					{#if d.children}
+						<ul class="sub">
+							{#each d.children as c (c.href)}
+								<li>
+									<a href={c.href} aria-current={page.url.pathname === c.href ? 'page' : undefined}>{c.title}</a>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -58,6 +67,13 @@
 		margin-left: -1px;
 		border-left: 2px solid transparent;
 	}
+	ul.sub {
+		border-left: 0;
+	}
+	ul.sub li a {
+		padding: 0.15rem 0.8rem 0.15rem 1.6rem;
+		font-size: 0.85rem;
+	}
 	li a:hover {
 		color: var(--text);
 	}
@@ -92,6 +108,9 @@
 		li a {
 			border-left: 0;
 			padding: 0.2rem 0.6rem 0.2rem 0;
+		}
+		ul.sub {
+			display: none;
 		}
 	}
 </style>

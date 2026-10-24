@@ -708,9 +708,9 @@ An author asks through a GitHub issue (template "Claim my bot") or the site; the
 ## 17. Website changes (M4)
 
 - `web/src/lib/api.ts`: the one fetch wrapper (adds `x-amz-content-sha256`, JSON, error mapping).
-- `/download`: the release's archives and installers (GitHub release links, the apt/dnf instructions of §6.9), and how to start contributing (`robocode-s rumble login`, `run`, the GUI's Rumble page).
+- `/download`: a chooser for Windows, Linux, macOS and Build from source, each its own page (`/download/<os>`, `/download/source`) with that system's installers (GitHub release links, the apt/dnf instructions of §6.9). How to start contributing (`robocode-s rumble login`, `run`, the GUI's Rumble page) is the docs page `/docs/rumble/contributing`.
 - `/account`: sign in/out, profile (country, "hide me from the contributors list"), tier and counters, tokens (revoke).
-- Bot pages: every version (current and retired) has a download link `<a href="/jars/<sha256>.jar" download="<id>_<version>.jar">`, same origin (§8), with its size and dates. `/archive` (nav link): all bots and versions from `archive.json`, searchable by id or author, with the same download links. Taken-down bots and versions are in neither. No classic-style URLs and no bulk zip.
+- Bot pages: every version (current and retired) has a download link `<a href="/jars/<sha256>.jar" download="<id>_<version>.jar">`, same origin (§8), with its size and dates. There is no `/archive` page (owner, 2026-10-24); `archive.json` stays in the data for a later listing. Taken-down bots and versions are in neither. No classic-style URLs and no bulk zip.
 - `/contributors`: the public leaderboard from `contributors.json`. `/submit` and `/account/bots`: submit by upload or URL, see versions and their states, retire.
 - Docs: `docs/rumble` gets the contributor guide (status note removed, the replays note kept for M6); `docs/robot-development` links to submission.
 

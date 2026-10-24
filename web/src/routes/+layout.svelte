@@ -19,7 +19,6 @@
 	const nav = [
 		{ href: '/download', label: 'Download' },
 		{ href: '/rankings', label: 'Rankings' },
-		{ href: '/archive', label: 'Archive' },
 		{ href: '/contributors', label: 'Contributors' },
 		{ href: '/submit', label: 'Submit' },
 		{ href: '/docs', label: 'Docs' }

@@ -59,7 +59,7 @@ Maven (`pom.xml`):
 <!-- classes go to target/classes -->
 ```
 
-JDK 21 compiles `--release 8` with a warning that the level is deprecated; it works. Put robot metadata in `src/main/resources/<package>/<Robot>.properties` ([Packaging](/docs/robot-development#package-it)); the build copies it next to the class.
+JDK 21 compiles `--release 8` with a warning that the level is deprecated; it works. Put robot metadata in `src/main/resources/<package>/<Robot>.properties` ([Packaging](/docs/robot-development/release#package-it)); the build copies it next to the class.
 
 ## 3. Point robocode-s at the output
 
@@ -140,7 +140,7 @@ Besides the debugger:
 - **Debug painting.** `onPaint(Graphics2D)` draws on the battlefield. In the GUI switch it on per robot with the pencil in its output tab. `--record FILE --paint` keeps the painting in a recording.
 - **Debug properties.** `setDebugProperty(key, value)` shows the robot's current values in the GUI, and they are recorded with the battle.
 - **Recordings and replays.** `--record FILE` records a battle; `robocode-s replay FILE` or the GUI's Watch Battle re-runs it, with scrubbing, output and painting.
-- **Seeds.** Battles are deterministic by default: the same robots and `--seed N` give the same battle on every machine. When something goes wrong, note the seed and run it again. `--classic` uses classic's real-time timing instead. See [deterministic mode](/docs/robot-development#deterministic-mode).
+- **Seeds.** Battles are deterministic by default: the same robots and `--seed N` give the same battle on every machine. When something goes wrong, note the seed and run it again. `--classic` uses classic's real-time timing instead. See [deterministic mode](/docs/robot-development/deterministic-mode).
 - **Sandbox.** Robots run in a sandbox: no network, no files outside their own data folder. A robot that tries gets an exception. `--sandbox none` is for local experiments only.
 - **Data files.** A robot's data files are kept from battle to battle, as in classic. `--fresh-data` starts every robot with none and keeps none; use it to reproduce a battle exactly.
 
