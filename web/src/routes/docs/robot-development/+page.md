@@ -131,9 +131,9 @@ The rumble identifies a robot as `classname version` (here `yourinitials.Kestrel
 
 ## Release it to the rumble
 
-> **Status:** planned with the rumble (M4). See [The rumble](/docs/rumble) for how it will work.
+> **Status:** submissions open with the rumble (M4). See [The rumble](/docs/rumble) for how it works.
 
-1. **Sign in with GitHub** on this site and submit your jar, or a URL the rumble mirrors it from. Choose the divisions to enter.
+1. **Sign in with GitHub** on this site and [submit](/submit) your jar, or a URL the rumble mirrors it from. Choose the divisions to enter (limits: a 5 MiB jar, 5 bots per account, 5 new versions of a bot per day). Your versions and their states are on [My bots](/account/bots).
 2. **Static checks** run on upload: jar structure, the properties file, the robot class, codesize.
 3. **Probation:** your new version fights a few battles on trusted clients. If it fails to load, crashes or gets disabled every round, it is deactivated and you get a message.
 4. **Ranked:** after probation it enters normal scheduling and fights every other bot in its rumbles. Pairings start fresh for every new version; your previous version is retired.

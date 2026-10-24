@@ -143,7 +143,7 @@ Auth column: `-` none, `T` upload token or session, `S` session cookie only (bro
 | `POST auth/logout` | S | Ends the session |
 | `POST auth/token` | - | Exchanges a GitHub device-flow token for an upload token |
 | `GET me` | T | Profile, reputation tier, counters |
-| `POST me` | T | Change `country` |
+| `POST me` | T | `{"country"?, "hidden"?}`: change the country (ISO 3166-1 alpha-2 or `null`) and whether the user is hidden from the contributors list (§15) |
 | `GET me/tokens` | T | Upload tokens and sessions (id, label, created, last used) |
 | `POST me/tokens/revoke` | T | `{"id": "..."}`; `"current"` revokes the caller's own |
 | `GET me/bots` | T | The user's bots with versions and states |
@@ -252,7 +252,11 @@ Response 200:
 
 #### `GET me`
 
-`{"uid": "g583231", "login": "nhofsted", "name": "Nick Hofstede", "country": "be", "reputation": 61, "tier": "new" | "verifier" | "quarantined" | "banned", "verifyRate": 0.044, "battles": 1834, "verifiedMatches": 61, "mismatches": 0, "admin": true, "since": "2026-10-24T..."}`.
+`{"uid": "g583231", "login": "nhofsted", "name": "Nick Hofstede", "country": "be", "reputation": 61, "tier": "new" | "verifier" | "quarantined" | "banned", "verifyRate": 0.044, "battles": 1834, "verifiedMatches": 61, "mismatches": 0, "hidden": false, "admin": true, "since": "2026-10-24T..."}`.
+
+#### `GET me/tokens`, `GET me/bots`
+
+`me/tokens`: `{"tokens": [{"id", "kind": "upload" | "session", "label", "created", "lastUsed", "current"}]}` (`id` is the opaque handle `me/tokens/revoke` takes, not the token). `me/bots`: `{"bots": [{"id", "state", "versions": [{"version", "vid", "state", "codesize", "weightClass", "created", "probation": {"battles", "failed"}, "failures": ["<detail>"]}]}]}`, versions newest first; `state` is `probation`, `active`, `failed`, `retired` or `removed`; `failures` holds the clients' `detail` strings of a failed version. The website (`web/src/lib/api.ts`) relies on these shapes.
 
 ## 6. Data model of results
 

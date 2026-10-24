@@ -140,6 +140,35 @@ sudo dnf install robocode-s`;
 		</section>
 	</div>
 
+	<section class="notes" id="contribute">
+		<h2>Contribute battles to the rumble</h2>
+		<p>
+			The <a href={resolve('/docs/rumble')}>rumble</a> runs on volunteers' computers, and
+			robocode-s is the client. Install it from a package manager or a download above, sign in
+			with GitHub once, and let it run:
+		</p>
+		<pre>robocode-s rumble login
+robocode-s rumble run</pre>
+		<p>
+			<code>login</code> shows a code and opens GitHub in your browser. <code>run</code> fetches
+			batches of battles, runs them and uploads the results until you press Ctrl+C
+			(<code>--parallel N</code> sets how many battles run at once). The GUI does the same on its
+			Rumble page: sign in, then switch Contribute on. Check the
+			<a href={resolve('/contributors')}>contributors list</a> for your name, and your
+			<a href={resolve('/account')}>account</a> for your counters.
+		</p>
+		<pre>sudo apt install robocode-s                                 # Debian, Ubuntu, after adding the repository above
+sudo dnf install robocode-s                                 # Fedora, RHEL, Rocky, likewise
+winget install NickHofstede.robocode-s                      # Windows, once accepted
+brew install --cask nhofsted/robocode-s/robocode-s          # macOS</pre>
+		<p>
+			<strong>Sandboxes.</strong> The rumble runs other people's robots, so the client runs them
+			in a sandbox and refuses to contribute without one. Linux (Landlock and seccomp) and Windows
+			(AppContainer) have one built in. macOS has none: install Docker, or pass
+			<code>--unsandboxed</code> if you accept running robots with your user's rights.
+		</p>
+	</section>
+
 	<section class="notes">
 		<h2>Before you run it</h2>
 		<ul>

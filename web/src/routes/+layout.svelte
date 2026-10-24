@@ -1,17 +1,26 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import Ground from '#lib/components/Ground.svelte';
 	import Logo from '#lib/components/Logo.svelte';
+	import { loginUrl } from '#lib/api.ts';
+	import { session } from '#lib/session.svelte.ts';
 	import { REPO_URL } from '#lib/site.ts';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
 
+	onMount(() => void session.load());
+
+	const signIn = $derived(loginUrl(page.url.pathname + page.url.search));
+
 	const nav = [
 		{ href: '/download', label: 'Download' },
 		{ href: '/rankings', label: 'Rankings' },
+		{ href: '/contributors', label: 'Contributors' },
+		{ href: '/submit', label: 'Submit' },
 		{ href: '/docs', label: 'Docs' }
 	] as const;
 
@@ -42,6 +51,16 @@
 				</a>
 			{/each}
 		</nav>
+		<div class="account">
+			{#if session.state === 'in' && session.me}
+				<a href={resolve('/account')} aria-current={current('/account') ? 'page' : undefined}>
+					{session.me.login}
+				</a>
+				<button class="link" onclick={() => session.signOut()}>Sign out</button>
+			{:else if session.state !== 'loading'}
+				<a class="signin" href={signIn} rel="external">Sign in with GitHub</a>
+			{/if}
+		</div>
 	</div>
 </header>
 
@@ -115,6 +134,40 @@
 	nav a[aria-current='page'] {
 		color: var(--radar);
 		border-bottom-color: var(--radar);
+	}
+
+	.account {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+		font-size: 0.95rem;
+		min-height: 1.6rem;
+	}
+	.account a {
+		color: var(--text-2);
+		text-decoration: none;
+	}
+	.account a:hover,
+	.account a[aria-current='page'] {
+		color: var(--radar);
+	}
+	.account a.signin {
+		color: var(--radar);
+		border: 1px solid var(--radar-dim);
+		border-radius: var(--radius);
+		padding: 0.15rem 0.7rem;
+	}
+	button.link {
+		all: unset;
+		cursor: pointer;
+		color: var(--muted);
+	}
+	button.link:hover {
+		color: var(--text);
+		text-decoration: underline;
+	}
+	button.link:focus-visible {
+		outline: 2px solid var(--amber);
 	}
 
 	main {
