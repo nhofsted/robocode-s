@@ -25,7 +25,7 @@ On top of that come a GPU-accelerated desktop viewer, a deterministic mode where
 | M1 | Headless engine, protocol, server, classic Java robots, bit-exact | Done: every sample robot and real RoboRumble robots fight identically to classic; `robocode-s battle` runs headless battles |
 | M2 | Desktop GUI: battle setup, viewer, debug painting, replay | Done: setup, live viewer with debug paint, exact recordings with replay and scrubbing |
 | M3 | Isolation and distribution: robots over stdin/stdout, a built-in sandbox (Linux, Windows), Docker as an alternative, remote runner agents with TLS, warm pools, release archives and installers | Done ([#73](https://github.com/nhofsted/robocode-s/issues/73)); released as 0.1.0 for Windows, Linux and macOS ([download](/download)) |
-| M4 | The rumble: backend, volunteer client, rankings website | Done: the rumble runs on this site; volunteers contribute battles with `robocode-s rumble` or the GUI's Rumble page ([contributing](/docs/rumble/contributing)), authors [submit](/submit) bots, and the RoboRumble participants are imported |
+| M4 | The rumble: backend, volunteer client, rankings website | Done: the rumble runs on this site; volunteers contribute battles with `robocode-s rumble` or the GUI's Rumble page ([contributing](/docs/rumble/contributing)), authors [submit](/submit) bots, and the RoboRumble participants are imported; released as 0.2.0 |
 | M5 | Robots in Python | Planned |
 | M6 | Battle replays in the browser | Planned |
 | M7 | Online editor: write, build and try a robot in the browser | Planned |
