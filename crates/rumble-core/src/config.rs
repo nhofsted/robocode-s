@@ -10,6 +10,12 @@ use serde_json::Value;
 /// The engine version handed out by default (the Lambdas override it with their build's).
 pub const DEFAULT_ENGINE_VERSION: u32 = 1;
 
+/// The deterministic rules of the robot hosts the rumble ranks
+/// (`robocode_s_server::DETERMINISTIC_RULES`, which the Lambdas don't link). `GET info`
+/// reports it; a test in `rumble-client` keeps the two equal, as it does for the engine
+/// version.
+pub const DETERMINISTIC_RULES: u32 = 1;
+
 /// All tunables. Every field has a default, so a partial JSON object deserializes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

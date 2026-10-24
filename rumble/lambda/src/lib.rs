@@ -17,10 +17,7 @@ pub mod ssm;
 
 use std::future::Future;
 
-/// The deterministic rules version of the robot hosts this engine version ranks
-/// (`robocode_s_server::DETERMINISTIC_RULES`, which the Lambdas don't link: the server
-/// crate is far heavier than this constant). `GET info` reports it.
-pub const DETERMINISTIC_RULES: u32 = 1;
+pub use rumble_core::config::DETERMINISTIC_RULES;
 
 /// The engine version of this build: the default of `engineVersion` (spec §3).
 pub const ENGINE_VERSION: u32 = robocode_s_engine::ENGINE_VERSION;

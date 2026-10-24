@@ -604,3 +604,20 @@ mod tests {
         assert_eq!(named_robot("no Java runtime", &names), None);
     }
 }
+
+#[cfg(test)]
+mod constants {
+    /// The Lambdas take these from `rumble-core`, which can't see the engine's or the
+    /// server's: they must not drift apart.
+    #[test]
+    fn core_constants_match_the_engine() {
+        assert_eq!(
+            rumble_core::config::DEFAULT_ENGINE_VERSION,
+            robocode_s_engine::ENGINE_VERSION
+        );
+        assert_eq!(
+            rumble_core::config::DETERMINISTIC_RULES,
+            robocode_s_server::DETERMINISTIC_RULES
+        );
+    }
+}
