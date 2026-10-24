@@ -17,10 +17,11 @@
 	const signIn = $derived(loginUrl(page.url.pathname + page.url.search));
 
 	const nav = [
-		{ href: '/download', label: 'Download' },
+		// `phone: false`: left out of the menu on a phone (reachable from the home page and docs).
+		{ href: '/download', label: 'Download', phone: false },
 		{ href: '/rankings', label: 'Rankings' },
 		{ href: '/contributors', label: 'Contributors' },
-		{ href: '/submit', label: 'Submit' },
+		{ href: '/submit', label: 'Submit', phone: false },
 		{ href: '/docs', label: 'Docs' }
 	] as const;
 
@@ -46,7 +47,11 @@
 		</a>
 		<nav aria-label="Main">
 			{#each nav as item (item.href)}
-				<a href={resolve(item.href)} aria-current={current(item.href) ? 'page' : undefined}>
+				<a
+					href={resolve(item.href)}
+					aria-current={current(item.href) ? 'page' : undefined}
+					class:not-on-phone={'phone' in item && !item.phone}
+				>
 					{item.label}
 				</a>
 			{/each}
@@ -111,6 +116,13 @@
 		min-height: 56px;
 		flex-wrap: wrap;
 	}
+	/* Where the bar can wrap, room above and below its rows. Wider it is one row of 57px, which
+	   the data tables' sticky headers count on. */
+	@media (max-width: 999px) {
+		.bar {
+			padding-block: 0.5rem;
+		}
+	}
 	.logo {
 		display: inline-flex;
 		align-items: center;
@@ -131,6 +143,9 @@
 		/* Wrapped onto several rows the header would take a big bite of a phone's screen. */
 		header {
 			position: static;
+		}
+		.not-on-phone {
+			display: none;
 		}
 	}
 	nav a {
