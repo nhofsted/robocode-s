@@ -4,6 +4,7 @@
 		"domain": "rumble.planethofstede.be",
 		"devDomain": "dev.rumble.planethofstede.be",
 		"sampleData": "false",
+		"githubClientId": "Ov23liXLFC2GMGs8DbxK",
 		"githubClientIdDev": "Ov23liSYapXc4MfQJEaa"
 	}
 }
