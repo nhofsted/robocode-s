@@ -189,7 +189,7 @@ Auth column: `-` none, `T` upload token or session, `S` session cookie only (bro
 ```
 
 - `data` (reserved, always `null` in M4): a later server-held data snapshot per bot (`{"sha256", "size", "url"}`, a zip of the robot's data folder) that the client copies in before the battle. Clients of M4 refuse a battle whose `data` isn't `null` (they report it `notRun`), so the feature can be added without misrunning battles.
-- `kind`: `normal`, `verify` (a re-run of someone's battle, §11), `probation` (a new version's battles, §12.3), `watch` (M6). Robot order in `bots` is the battle's robot order (the server randomizes it).
+- `kind`: `normal`, `verify` (a re-run of someone's battle, §11), `probation` (a new version's battles, §12.3), `watch` (deferred after M6, #113). Robot order in `bots` is the battle's robot order (the server randomizes it).
 - 204 with `Retry-After` when `paused`, or when no division the client offers has two active bots. Otherwise there is always work (no cap, §10).
 - 409 `engine_mismatch` if `engine` isn't `engineVersion`.
 
@@ -341,7 +341,7 @@ Table `rumble` (prod) / `rumble-dev`: partition key `pk` (S), sort key `sk` (S),
 | Verification | `V#<E>` | `<created ms>#<id>` | `div`, `seed`, `bots` (L of vids), `rounds`, `runs` (L of `{uid, h, rec, held}`), `uids` (SS), `stage` (1, 2), `cl` (claimant uid), `cu` (claim until), `kind` (`check`/`probation`/`recheck`) | 30 days |
 | Slot | `S#<E>#<division>#<key>` | `S` | `m` (M: slot id → `{st: c/f, b: batchId, r: round, h: sha256 b64, n: size, x: claim expiry, sd: seed, v: L of N}`; `v` (M6) is the battle's robot order, the vids as passed to `claim_battle`, absent in entries written before M6), `full` (BOOL) | - |
 | Alert | `ALERT` | `<ms>#<id>` | `kind`, `text`, `ref` | 90 days |
-| Watch (M6, model only) | `W#<E>` | `<ms>#<id>` | `div`, `bots`, `seed`, `round`, `uid`, `st` (`open`/`claimed`/`done`), `cl`, `cu` | 1 day |
+| Watch (deferred after M6, #113, model only) | `W#<E>` | `<ms>#<id>` | `div`, `bots`, `seed`, `round`, `uid`, `st` (`open`/`claimed`/`done`), `cl`, `cu` | 1 day |
 
 Slot `key` (§12.5): 1v1 `<vidLo36>#<vidHi36>`, melee `<vid36>`. Slot ids in the API: `<division>.<vid>.<vid>.<side>.<i>` (1v1, `side` `a` for the lower vid winning, `b` for the higher) and `melee.<vid>.<w|l>.<i>`.
 
@@ -534,7 +534,7 @@ A retired version's pairings leave the pairing state at the next plan; its histo
 - **Robot order (M6):** a claim stores the battle's robot order `v` (vids, server-randomized), so a viewer can name the track's tanks. **Migration:** entries without `v` (claimed before M6) are reopened by the first `cleanup` runs: each filled or claimed entry of a group that has recordings, and without `v`, is removed from its slot item (`full` cleared) and its track deleted, so the slot fills again with an order. Found through the listing of `rec/e<E>/` (a claim in a group without any track expires and is claimed again). It reads each listed group once (0.5 RCU) and is `done` (`state/e<E>/cleanup.json`, `rec_order`) after a complete pass that began 2 h after the first pass (claims made before the release can't be confirmed later); then it reads nothing. It runs after the ban removals and stops at the time budget. No CDN invalidation: no viewer fetched those tracks before M6.
 - **Recordings index (M6):** `publish` writes `data/v1/rec/<division>/<bot id>.json` for every bot with filled slots with an order, for its current version (`rumble-data.md`). There is no slot partition to query, so it lists `rec/e<E>/` once (1,000 keys a request), maps each object to its slot item and GetItems only the groups whose objects differ from `state/e<E>/rec-cache/<division>.json` (the filled slots read so far: filled slots don't change while their versions are current), at most what 5 min of the 10 RCU/s allowance reads per run. Files are put only if their MD5 differs from the ETag in one listing of `data/v1/rec/`; files of bots without recordings are deleted. `BotDetails.recordings` (`{"1v1": n, "melee": m}`, rounds of the current version) tells the site whether to fetch.
 - **Size cap:** `slots.maxBytes` per track; the total stays bounded by construction: top-50 matchups as before, plus at most 15 extra matchups per bot (5 best, 5 worst, 5 problem), about 16.5k matchups at 1,100 bots, 10 tracks each, so about 0.6 GB more (about 3.6 KB a track), within design §12.7's budget; the slot items add 16.5k items of at most 2 KB.
-- **Watch requests (M6):** a `W#` item; served like verification work to recorders; the round is uploaded to `rec/watch/<id>.track`, an LRU cache capped at 1 GB by `cleanup`. M4 defines the item only.
+- **Watch requests (deferred after M6, #113, not built yet):** a `W#` item; served like verification work to recorders; the round is uploaded to `rec/watch/<id>.track`, an LRU cache capped at 1 GB by `cleanup`. M4 defines the item only.
 
 ## 13. The client (`rumble-client`)
 
@@ -677,7 +677,7 @@ Standard tier, the AWS-managed key: free. CDK doesn't create them (CloudFormatio
 
 At 1,500 bots the run takes a few minutes: about 1,500 GETs and up to 1,500 PUTs, 32 at a time. The index adds, at full fill (about 70k slot items, 700k tracks), 700 LIST requests and about 1,500 index files (first run: 1,500 PUTs; later runs only the files of bots with new tracks).
 
-`cleanup` (daily 04:45): delete slot items and recordings of versions retired, failed or removed; run ban removals (§11.3); reopen slots without a robot order (§12.5, once); trim the watch cache (M6).
+`cleanup` (daily 04:45): delete slot items and recordings of versions retired, failed or removed; run ban removals (§11.3); reopen slots without a robot order (§12.5, once); trim the watch cache (deferred after M6, #113).
 
 ## 16. Seeding import
 

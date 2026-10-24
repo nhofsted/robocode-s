@@ -80,7 +80,7 @@ A release archive has all this next to the program (see Installing); a program b
 
 ## Repository layout
 
-- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli, gui, replay)
+- `crates/`: Rust workspace (engine, fdlibm, java-random, geom, protocol, server, runner, difftest, cli, gui, replay, replay-wasm, rumble-core, rumble-client)
 - `proto/`: wire protocol schema
 - `clients/java-compat/`: the robot host for classic Java robots (classic's robot side over the robocode-s protocol)
 - `clients/java-determinism/`: Java agent for per-robot seeded randomness

@@ -11,7 +11,7 @@
 		{ id: 'M3', name: 'Sandbox, remote runners, installers', state: 'done' },
 		{ id: 'M4', name: 'The rumble: rankings, volunteers, submissions', state: 'done' },
 		{ id: 'M5', name: 'Robots in Python', state: 'planned' },
-		{ id: 'M6', name: 'Battle replays in the browser', state: 'planned' },
+		{ id: 'M6', name: 'Battle replays in the browser', state: 'done' },
 		{ id: 'M7', name: 'Online editor', state: 'planned' },
 		{ id: 'M8', name: 'Robots in .NET, Rust, C/C++, Kotlin', state: 'planned' }
 	];
