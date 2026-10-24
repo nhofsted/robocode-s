@@ -16,7 +16,7 @@ use crate::store::{
     ALERT_TTL, Alert, BotItem, BotSource, BotState, DAY, Store, StoreError, StoreResult, User,
     UserPatch, UserState, VersionItem, VersionState, rfc3339,
 };
-use crate::verify::update_reputation;
+use crate::verify::{ban_alert, update_reputation};
 
 fn not_found(what: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::NotFound, what)
@@ -515,10 +515,13 @@ pub fn list_bots<S: Store + ?Sized>(store: &S, user: &User) -> StoreResult<Vec<B
 }
 
 /// `admin/users/update` (§11.1): sets reputation and state (a return to `new` clears the
-/// quarantine count), the admin flag and the account-age exemption (`tr`). Returns the user.
+/// quarantine count), the admin flag and the account-age exemption (`tr`). A ban leaves the
+/// alert the `cleanup` job looks for (`verify::ban_alert`). Returns the user. `now_ms` in
+/// milliseconds.
 pub fn update_user<S: Store + ?Sized>(
     store: &S,
     request: &UserUpdateRequest,
+    now_ms: u64,
 ) -> Result<User, ApiError> {
     let state = request
         .state
@@ -526,8 +529,11 @@ pub fn update_user<S: Store + ?Sized>(
         .map(UserState::parse)
         .transpose()
         .map_err(|e| ApiError::new(ErrorCode::BadRequest, e))?;
-    if store.get_user(&request.uid)?.is_none() {
+    let Some(before) = store.get_user(&request.uid)? else {
         return Err(not_found(format!("no user {}", request.uid)));
+    };
+    if state == Some(UserState::Banned) && before.reputation.state != UserState::Banned {
+        store.put_alert(&ban_alert(&request.uid, "banned by an admin", now_ms))?;
     }
     if request.rep.is_some() || state.is_some() {
         update_reputation(store, &request.uid, |reputation| {
@@ -1014,6 +1020,7 @@ mod tests {
                 admin: Some(true),
                 trusted: Some(true),
             },
+            NOW * 1000,
         )
         .unwrap();
         assert_eq!(updated.reputation.rep, 1000);
@@ -1026,7 +1033,7 @@ mod tests {
             ..UserUpdateRequest::default()
         };
         assert_eq!(
-            update_user(&store, &bad).unwrap_err().code,
+            update_user(&store, &bad, NOW * 1000).unwrap_err().code,
             ErrorCode::BadRequest
         );
         let missing = UserUpdateRequest {
@@ -1034,7 +1041,7 @@ mod tests {
             ..UserUpdateRequest::default()
         };
         assert_eq!(
-            update_user(&store, &missing).unwrap_err().code,
+            update_user(&store, &missing, NOW * 1000).unwrap_err().code,
             ErrorCode::NotFound
         );
     }

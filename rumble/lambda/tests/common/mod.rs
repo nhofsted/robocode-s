@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod batch_scenario;
+
 use rumble_core::api::{
     BattleResult, BattleStatus, ClientInfo, ResultsRequest, RobotResult, RoundResult, TrackClaim,
     WorkBattle, WorkResponse,

@@ -5,7 +5,9 @@
 
 pub mod api;
 pub mod auth;
+pub mod batch;
 pub mod bots;
+pub mod cleanup;
 pub mod codesize;
 pub mod config;
 pub mod data;
@@ -13,6 +15,7 @@ pub mod ids;
 pub mod jar;
 pub mod metrics;
 pub mod plan;
+pub mod publish;
 pub mod record;
 pub mod results;
 pub mod slots;

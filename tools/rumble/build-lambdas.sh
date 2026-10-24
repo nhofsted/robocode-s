@@ -22,12 +22,13 @@ rustup target list --installed | grep -qx "$target" || rustup target add "$targe
 cd "$lambda"
 cargo zigbuild --release --target "$target.$glibc" --bins
 
-# Every [[bin]] of the crate (api now, batch with P8).
+# Every [[bin]] of the crate: api and batch.
 bins=$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; m=json.load(sys.stdin); print(" ".join(t["name"] for p in m["packages"] for t in p["targets"] if "bin" in t["kind"]))')
 for name in $bins; do
   out="$lambda/target/lambda/$name"
   mkdir -p "$out"
-  cp "$lambda/target/$target/release/$name" "$out/bootstrap"
+  # install sets the mode (a plain cp kept a non-executable mode on WSL once).
+  install -m 0755 "$lambda/target/$target/release/$name" "$out/bootstrap"
   echo "$out/bootstrap ($(du -h "$out/bootstrap" | cut -f1))"
 done

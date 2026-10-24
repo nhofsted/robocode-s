@@ -14,6 +14,21 @@ use crate::store::{
     StoreResult, UserState, VERIFY_TTL, VerifyItem, VerifyKind, hour_key,
 };
 
+/// The `kind` of the alert a ban leaves.
+pub const BAN_ALERT: &str = "ban";
+
+/// The alert of a ban (§11.3): the `cleanup` job finds banned users by these alerts (the
+/// table has no index of users) and writes the correction records. `reference` is the uid.
+pub fn ban_alert(uid: &str, why: &str, now_ms: u64) -> Alert {
+    Alert {
+        sort: format!("{now_ms:013}#ban.{uid}"),
+        kind: BAN_ALERT.to_string(),
+        text: format!("{uid} banned: {why}"),
+        reference: uid.to_string(),
+        ttl: now_ms / 1000 + ALERT_TTL,
+    }
+}
+
 /// Items read per queue query when serving work (§10.4).
 pub const QUEUE_PAGE: usize = 25;
 /// Hours of the result log searched for a penalized user's recent battles (§11.3).
@@ -474,6 +489,7 @@ pub fn penalize_user<S: Store + ?Sized>(
         return Ok(false);
     };
     if reputation.state == UserState::Banned {
+        store.put_alert(&ban_alert(uid, "confirmed mismatches", now_ms))?;
         for token in store.list_tokens(uid)? {
             store.delete_token(uid, &token.hash)?;
         }

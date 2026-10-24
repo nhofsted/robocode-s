@@ -148,10 +148,10 @@ async fn create_table(client: &aws_sdk_dynamodb::Client) {
         .expect("ttl");
 }
 
-async fn wait_for_s3(client: &aws_sdk_s3::Client) {
+async fn wait_for_s3(client: &aws_sdk_s3::Client, buckets: usize) {
     for attempt in 0.. {
         match client.list_buckets().send().await {
-            Ok(output) if output.buckets().len() >= 2 => return,
+            Ok(output) if output.buckets().len() >= buckets => return,
             _ if attempt < 120 => tokio::time::sleep(Duration::from_millis(500)).await,
             other => panic!("S3 mock not ready: {other:?}"),
         }
@@ -197,7 +197,7 @@ fn api_against_dynamodb_local_and_s3() {
         let dynamo_config = sdk_config(&dynamo.url()).await;
         let s3_config = sdk_config(&s3.url()).await;
         create_table(&aws_sdk_dynamodb::Client::new(&dynamo_config)).await;
-        wait_for_s3(&S3Objects::client(&s3_config, true)).await;
+        wait_for_s3(&S3Objects::client(&s3_config, true), 2).await;
         (dynamo_config, s3_config)
     });
     runtime
@@ -469,6 +469,53 @@ fn scenario(dynamo_config: &aws_config::SdkConfig, s3_config: &aws_config::SdkCo
         &json!({"source": "upload", "sha256": sha, "divisions": ["1v1"]}),
     );
     assert_eq!(again.status, 400, "the upload is gone after a submission");
+}
+
+/// The `batch` Lambda's scenario (`common::batch_scenario`) on DynamoDB Local and the S3
+/// mock: fold → plan → publish of a 50-bot rumble, a crash rerun, a ban and a takedown.
+#[test]
+#[ignore = "needs Docker: cargo test --test aws_local -- --ignored"]
+fn batch_against_dynamodb_local_and_s3() {
+    let dynamo = Container::start(DYNAMODB_IMAGE, 8000, &[]);
+    let s3 = Container::start(
+        S3_IMAGE,
+        9090,
+        &[
+            "-e",
+            "COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=jars,state,site",
+            "-e",
+            "initialBuckets=jars,state,site",
+        ],
+    );
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (dynamo_config, s3_config) = runtime.block_on(async {
+        let dynamo_config = sdk_config(&dynamo.url()).await;
+        let s3_config = sdk_config(&s3.url()).await;
+        create_table(&aws_sdk_dynamodb::Client::new(&dynamo_config)).await;
+        wait_for_s3(&S3Objects::client(&s3_config, true), 3).await;
+        (dynamo_config, s3_config)
+    });
+    runtime
+        .block_on(async {
+            tokio::task::spawn_blocking(move || {
+                let store = Arc::new(DynamoStore::new(
+                    aws_sdk_dynamodb::Client::new(&dynamo_config),
+                    TABLE,
+                ));
+                let objects = Arc::new(
+                    S3Objects::new(S3Objects::client(&s3_config, true), "jars", "state")
+                        .with_site("site"),
+                );
+                let world = common::batch_scenario::World::new(store, objects);
+                let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("batch-data-aws");
+                common::batch_scenario::run(&world, &dir);
+            })
+            .await
+        })
+        .unwrap();
 }
 
 /// A `&dyn` stand-in for `impl Serialize` in the closures above.

@@ -1030,6 +1030,21 @@ impl Store for DynamoStore {
         self.put(version_item(version), None)
     }
 
+    fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()> {
+        block_on(
+            self.client
+                .put_item()
+                .table_name(&self.table)
+                .set_item(Some(version_item(version)))
+                .condition_expression("#st = :expected")
+                .expression_attribute_names("#st", "st")
+                .expression_attribute_values(":expected", s(expected.as_str()))
+                .send(),
+        )
+        .map(|_| ())
+        .map_err(map_err)
+    }
+
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         self.get(marker_key(batch_id))?
             .as_ref()
@@ -1233,6 +1248,20 @@ impl Store for DynamoStore {
             .iter()
             .map(alert_from)
             .collect()
+    }
+
+    fn delete_slots(&self, engine: u32, division: Division, slot_key: &str) -> StoreResult<()> {
+        let pk = slot_pk(engine, division, slot_key);
+        self.full_slots.lock().unwrap().remove(&pk);
+        block_on(
+            self.client
+                .delete_item()
+                .table_name(&self.table)
+                .set_key(Some(key(&pk, "S")))
+                .send(),
+        )
+        .map(|_| ())
+        .map_err(map_err)
     }
 }
 

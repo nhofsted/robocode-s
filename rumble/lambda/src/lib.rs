@@ -4,8 +4,11 @@
 //! synchronous (its `Store` trait in particular), so every request runs on a
 //! `tokio::task::spawn_blocking` thread and the AWS and GitHub calls inside it are driven
 //! with [`block_on`]. The `api` binary routes every `/api/v1` endpoint ([`routes`]); the
-//! `batch` binary (P8) shares [`dynamo`], [`s3`] and [`ssm`].
+//! `batch` binary runs the [`batch`] jobs on the same [`dynamo`] and [`s3`] implementations
+//! (and [`cloudfront`]).
 
+pub mod batch;
+pub mod cloudfront;
 pub mod dynamo;
 pub mod fetch;
 pub mod github;

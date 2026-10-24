@@ -29,6 +29,8 @@ pub enum Bucket {
     Jars,
     /// Private: `state/`, `uploads/`.
     State,
+    /// The site (`data/v1/`), written by `publish` only.
+    Site,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -71,6 +73,8 @@ pub trait Objects: Send + Sync {
     /// HeadObject with `ChecksumMode=ENABLED`: `None` if missing, else its `ChecksumSHA256`.
     fn head_checksum(&self, bucket: Bucket, key: &str) -> S3Result<Option<Option<String>>>;
     fn delete(&self, bucket: Bucket, key: &str) -> S3Result<()>;
+    /// ListObjectsV2 of a prefix, all pages: the keys in key order.
+    fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>>;
     /// A presigned PUT valid `expires_in` seconds from `now`.
     fn presign_put(
         &self,
@@ -105,6 +109,9 @@ impl<O: Objects + ?Sized> Objects for std::sync::Arc<O> {
     fn delete(&self, bucket: Bucket, key: &str) -> S3Result<()> {
         (**self).delete(bucket, key)
     }
+    fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
+        (**self).list(bucket, prefix)
+    }
     fn presign_put(
         &self,
         bucket: Bucket,
@@ -122,11 +129,26 @@ pub fn sha256_b64(bytes: &[u8]) -> String {
     STANDARD.encode(Sha256::digest(bytes))
 }
 
+/// The MD5 of bytes in hex: S3's ETag of an object put in one part (SSE-S3).
+pub fn md5_hex(bytes: &[u8]) -> String {
+    use md5::Digest;
+    md5::Md5::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Whether an ETag (quoted or not) is the MD5 of `bytes`, i.e. the object holds them.
+pub fn etag_matches(etag: &str, bytes: &[u8]) -> bool {
+    etag.trim_matches('"').eq_ignore_ascii_case(&md5_hex(bytes))
+}
+
 /// S3 itself.
 pub struct S3Objects {
     client: aws_sdk_s3::Client,
     jars: String,
     state: String,
+    site: String,
 }
 
 impl S3Objects {
@@ -135,7 +157,14 @@ impl S3Objects {
             client,
             jars: jars_bucket.to_string(),
             state: state_bucket.to_string(),
+            site: String::new(),
         }
+    }
+
+    /// With the site bucket (the `batch` Lambda's `publish`).
+    pub fn with_site(mut self, site_bucket: &str) -> S3Objects {
+        self.site = site_bucket.to_string();
+        self
     }
 
     /// The S3 client configuration the Lambdas use: checksums only when an operation
@@ -157,6 +186,7 @@ impl S3Objects {
         match bucket {
             Bucket::Jars => &self.jars,
             Bucket::State => &self.state,
+            Bucket::Site => &self.site,
         }
     }
 }
@@ -264,6 +294,30 @@ impl Objects for S3Objects {
         })
     }
 
+    fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
+        block_on(async {
+            let mut keys = Vec::new();
+            let mut token: Option<String> = None;
+            loop {
+                let output = self
+                    .client
+                    .list_objects_v2()
+                    .bucket(self.bucket(bucket))
+                    .prefix(prefix)
+                    .set_continuation_token(token.take())
+                    .send()
+                    .await
+                    .map_err(|e| format!("S3 LIST {prefix}: {}", describe(&e)))?;
+                keys.extend(output.contents().iter().filter_map(|o| o.key.clone()));
+                match output.next_continuation_token {
+                    Some(next) if output.is_truncated == Some(true) => token = Some(next),
+                    _ => break,
+                }
+            }
+            Ok(keys)
+        })
+    }
+
     fn presign_put(
         &self,
         bucket: Bucket,
@@ -333,7 +387,7 @@ pub struct MemObject {
     pub etag: String,
 }
 
-/// In-memory objects for tests. ETags are the hex SHA-256 of the body.
+/// In-memory objects for tests. ETags are the quoted hex MD5 of the body, as S3's.
 #[derive(Default)]
 pub struct MemObjects {
     pub objects: Mutex<HashMap<(Bucket, String), MemObject>>,
@@ -401,7 +455,7 @@ impl Objects for MemObjects {
             content_type: content_type.to_string(),
             cache_control: cache_control.map(str::to_string),
             sha256_b64: sha256_b64(bytes),
-            etag: rumble_core::jar::sha256_hex(bytes),
+            etag: format!("\"{}\"", md5_hex(bytes)),
         };
         self.objects
             .lock()
@@ -426,6 +480,14 @@ impl Objects for MemObjects {
         Ok(())
     }
 
+    fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
+        Ok(self
+            .keys(bucket)
+            .into_iter()
+            .filter(|k| k.starts_with(prefix))
+            .collect())
+    }
+
     fn presign_put(
         &self,
         bucket: Bucket,
@@ -448,6 +510,7 @@ impl Objects for MemObjects {
         let bucket = match bucket {
             Bucket::Jars => "jars",
             Bucket::State => "state",
+            Bucket::Site => "site",
         };
         Ok(Presigned {
             url: format!("https://{bucket}.s3.example/{key}?X-Amz-Expires={expires_in}"),

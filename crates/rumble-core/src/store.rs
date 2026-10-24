@@ -615,6 +615,9 @@ pub trait Store {
     /// Unconditional puts, for transitions the planner and admin commands make.
     fn put_bot(&self, bot: &BotItem) -> StoreResult<()>;
     fn put_version(&self, version: &VersionItem) -> StoreResult<()>;
+    /// Put of the version, condition: the stored version's `st` is `expected` (the planner's
+    /// transitions, so that a concurrent retirement or takedown is not overwritten).
+    fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()>;
 
     // -- results --
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>>;
@@ -677,6 +680,9 @@ pub trait Store {
         full: bool,
     ) -> StoreResult<()>;
 
+    /// Deletes a slot item (`cleanup`, §12.4); a missing item is no error.
+    fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()>;
+
     // -- alerts --
     fn put_alert(&self, alert: &Alert) -> StoreResult<()>;
     fn list_alerts(&self) -> StoreResult<Vec<Alert>>;
@@ -736,6 +742,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn put_version(&self, version: &VersionItem) -> StoreResult<()> {
         (**self).put_version(version)
+    }
+    fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()> {
+        (**self).update_version(version, expected)
     }
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         (**self).get_marker(batch_id)
@@ -806,6 +815,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn list_alerts(&self) -> StoreResult<Vec<Alert>> {
         (**self).list_alerts()
+    }
+    fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()> {
+        (**self).delete_slots(engine, division, key)
     }
 }
 
@@ -1041,6 +1053,17 @@ impl Store for MemStore {
         })
     }
 
+    fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()> {
+        self.with(|t| {
+            match t.versions.get(&version.vid) {
+                Some(existing) if existing.state == expected => {}
+                _ => return Err(StoreError::ConditionFailed),
+            }
+            t.versions.insert(version.vid, version.clone());
+            Ok(())
+        })
+    }
+
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         self.with(|t| Ok(t.markers.get(batch_id).cloned()))
     }
@@ -1228,6 +1251,13 @@ impl Store for MemStore {
 
     fn list_alerts(&self) -> StoreResult<Vec<Alert>> {
         self.with(|t| Ok(t.alerts.values().cloned().collect()))
+    }
+
+    fn delete_slots(&self, engine: u32, division: Division, key: &str) -> StoreResult<()> {
+        self.with(|t| {
+            t.slots.remove(&(engine, division, key.to_string()));
+            Ok(())
+        })
     }
 }
 

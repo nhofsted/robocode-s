@@ -139,6 +139,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-cloudfront"
+version = "1.139.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5a085b12381a0db1823c3674d9026570bae8b2ee7ff8f362948bc6bdc00855c"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-dynamodb"
 version = "1.134.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1830,12 +1855,15 @@ name = "robocode-s-rumble-lambda"
 version = "0.1.0"
 dependencies = [
  "aws-config",
+ "aws-sdk-cloudfront",
  "aws-sdk-dynamodb",
  "aws-sdk-s3",
  "aws-sdk-ssm",
  "base64 0.23.1",
  "getrandom 0.3.4",
  "lambda_http",
+ "lambda_runtime",
+ "md-5",
  "reqwest",
  "robocode-s-engine",
  "robocode-s-rumble-core",

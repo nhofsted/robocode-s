@@ -527,7 +527,7 @@ impl App {
             ("POST", "admin/bots/import") => self.import(request, &caller, &config, now_ms),
             ("POST", "admin/bots/claim") => self.claim(request),
             ("POST", "admin/bots/remove") => self.remove(request, now_ms),
-            ("POST", "admin/users/update") => self.update_user(request, &config),
+            ("POST", "admin/users/update") => self.update_user(request, &config, now_ms),
             ("GET", "admin/alerts") => self.alerts(),
             ("GET", "admin/config") => self.get_config(),
             ("POST", "admin/config") => self.set_config(request),
@@ -1122,9 +1122,9 @@ impl App {
         }))
     }
 
-    fn update_user(&self, request: &Request, config: &Config) -> Handled {
+    fn update_user(&self, request: &Request, config: &Config, now_ms: u64) -> Handled {
         let body: UserUpdateRequest = request.body_json()?;
-        let user = bots::update_user(self.store(), &body)?;
+        let user = bots::update_user(self.store(), &body, now_ms)?;
         self.forget_user(&user.uid);
         Ok(Response::ok(&auth::me(config, &user)))
     }
