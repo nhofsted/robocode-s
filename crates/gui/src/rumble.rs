@@ -36,7 +36,7 @@ const GITHUB_VAR: &str = "ROBOCODES_RUMBLE_GITHUB";
 /// How long closing the window waits for the contributor to post what is done.
 pub const CLOSE_WAIT: Duration = Duration::from_secs(10);
 
-const RESULT_LINES: usize = 6;
+const RESULT_LINES: usize = 200;
 const LOG_LINES: usize = 300;
 
 /// `https://host` without the trailing slash, or nothing if `text` isn't a URL.
@@ -1052,9 +1052,7 @@ impl Rumble {
             self.totals_ui(ui);
             if !self.model.results.is_empty() {
                 section(ui, "Last results");
-                for line in self.model.results.iter().rev() {
-                    ui.label(RichText::new(line).monospace().small());
-                }
+                self.results_ui(ui);
             }
             section(ui, "Log");
             self.log_ui(ui);
@@ -1271,58 +1269,64 @@ impl Rumble {
 
         options_grid(ui, "rumble-contribute", |ui| {
             ui.label("Contribute");
-            ui.horizontal(|ui| match phase {
-                Phase::Idle => {
-                    let ready = signed_in && !offered.is_empty();
-                    let button = egui::Button::new(
-                        RichText::new("Start contributing")
-                            .size(16.0)
-                            .strong()
-                            .color(shell::BAR),
-                    )
-                    .fill(shell::ACCENT)
-                    .min_size(egui::vec2(190.0, 36.0));
-                    let r = ui.add_enabled(ready, button);
-                    let r = if !signed_in {
-                        r.on_disabled_hover_text("Sign in first")
-                    } else if offered.is_empty() {
-                        r.on_disabled_hover_text("Choose a division the parallel battles fit")
-                    } else {
-                        r
-                    };
-                    start = r.clicked();
-                }
-                Phase::Starting | Phase::Running => {
-                    let r = ui.add(
-                        egui::Button::new(RichText::new("Stop").size(16.0).strong())
-                            .min_size(egui::vec2(190.0, 36.0)),
-                    );
-                    stop = r
-                        .on_hover_text(
-                            "No new battles; the running ones finish and their results are \
-                             posted",
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| match phase {
+                    Phase::Idle => {
+                        let ready = signed_in && !offered.is_empty();
+                        let button = egui::Button::new(
+                            RichText::new("Start contributing")
+                                .size(16.0)
+                                .strong()
+                                .color(shell::BAR),
                         )
-                        .clicked();
-                    if phase == Phase::Starting {
-                        ui.spinner();
-                        ui.label(RichText::new("Checking the rumble and this machine...").weak());
-                    } else {
-                        ui.label(RichText::new("Contributing").color(shell::ACCENT));
+                        .fill(shell::ACCENT)
+                        .min_size(egui::vec2(190.0, 36.0));
+                        let r = ui.add_enabled(ready, button);
+                        let r = if !signed_in {
+                            r.on_disabled_hover_text("Sign in first")
+                        } else if offered.is_empty() {
+                            r.on_disabled_hover_text("Choose a division the parallel battles fit")
+                        } else {
+                            r
+                        };
+                        start = r.clicked();
                     }
-                }
-                Phase::Stopping => {
-                    let r = ui.add(
-                        egui::Button::new(RichText::new("Stop now").size(16.0).strong())
-                            .min_size(egui::vec2(190.0, 36.0)),
-                    );
-                    stop = r
-                        .on_hover_text("Abandon the running battles (they are not posted)")
-                        .clicked();
-                    ui.spinner();
-                    ui.label(
-                        RichText::new("Finishing the running battles and posting them...").weak(),
-                    );
-                }
+                    Phase::Starting | Phase::Running => {
+                        let r = ui.add(
+                            egui::Button::new(RichText::new("Stop").size(16.0).strong())
+                                .min_size(egui::vec2(190.0, 36.0)),
+                        );
+                        stop = r
+                            .on_hover_text(
+                                "No new battles; the running ones finish and their results are \
+                             posted",
+                            )
+                            .clicked();
+                        if phase == Phase::Starting {
+                            ui.spinner();
+                            ui.label(
+                                RichText::new("Checking the rumble and this machine...").weak(),
+                            );
+                        } else {
+                            ui.label(RichText::new("Contributing").color(shell::ACCENT));
+                        }
+                    }
+                    Phase::Stopping => {
+                        let r = ui.add(
+                            egui::Button::new(RichText::new("Stop now").size(16.0).strong())
+                                .min_size(egui::vec2(190.0, 36.0)),
+                        );
+                        stop = r
+                            .on_hover_text("Abandon the running battles (they are not posted)")
+                            .clicked();
+                        ui.spinner();
+                        ui.label(
+                            RichText::new("Finishing the running battles and posting them...")
+                                .weak(),
+                        );
+                    }
+                });
+                ui.add_space(12.0);
             });
             ui.end_row();
 
@@ -1499,6 +1503,24 @@ impl Rumble {
                 None => "-".into(),
             });
             ui.end_row();
+        });
+    }
+
+    /// The last results in a scrolling list like the log: newest at the bottom.
+    fn results_ui(&self, ui: &mut egui::Ui) {
+        list_frame(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("rumble-results")
+                .auto_shrink([false, false])
+                .min_scrolled_height(150.0)
+                .max_height(150.0)
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    for line in &self.model.results {
+                        ui.label(RichText::new(line).monospace().small());
+                    }
+                });
         });
     }
 
@@ -1926,7 +1948,7 @@ mod tests {
                 .text
                 .ends_with(&format!("e{}", LOG_LINES + 49))
         );
-        for _ in 0..20 {
+        for _ in 0..RESULT_LINES + 20 {
             m.apply(done(BattleStatus::Ok, &["a", "b"], &[1.0, 1.0], None), now);
         }
         assert_eq!(m.results.len(), RESULT_LINES);
