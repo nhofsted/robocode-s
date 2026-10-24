@@ -44,13 +44,8 @@ pub fn is_verifier(reputation: &Reputation, config: &Config) -> bool {
     reputation.state == UserState::New && reputation.rep >= config.rep.verifier_min
 }
 
-/// A compact, stable id of a failure reporter: the first 4 bytes (LE) of SHA-256 of the
-/// uid. For the "failures reported by at least 3 distinct users" rule of §12.3: the planner
-/// keeps these ids of the reporters of each version's recent failures (see the P6 notes).
-pub fn reporter_id(uid: &str) -> u32 {
-    let digest = Sha256::digest(uid.as_bytes());
-    u32::from_le_bytes(digest[..4].try_into().unwrap())
-}
+/// The id of a failure reporter (§12.3), kept by the planner in the pairing state.
+pub use crate::state::reporter_hash as reporter_id;
 
 /// A match credited to a user (§11.3): `rep += 1, vm += 1`; a quarantined user gets
 /// `qm += 1` instead of `rep` and returns to `new` with `rep` 0 at `rep.quarantineMatches`.

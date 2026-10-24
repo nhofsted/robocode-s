@@ -262,6 +262,10 @@ pub struct WorkBot {
     pub sha256: String,
     pub size: u64,
     pub url: String,
+    /// Reserved for server-held data snapshots (spec §5.4): always `null` in M4. A client
+    /// refuses a battle whose `data` it doesn't understand.
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -576,8 +580,8 @@ mod tests {
    "rules": {"rounds": 35, "width": 800, "height": 600, "gunCoolingRate": 0.1,
              "inactivityTime": 450, "sentryBorder": 100, "hideEnemyNames": false},
    "bots": [{"id": "jk.mega.DrussGT", "version": "3.1.16", "vid": 812,
-             "sha256": "9f1c...", "size": 210345, "url": "/jars/9f1c....jar"},
-            {"id": "voidious.Diamond", "version": "1.8.28", "vid": 77, "sha256": "...", "size": 98123, "url": "/jars/....jar"}]}
+             "sha256": "9f1c...", "size": 210345, "url": "/jars/9f1c....jar", "data": null},
+            {"id": "voidious.Diamond", "version": "1.8.28", "vid": 77, "sha256": "...", "size": 98123, "url": "/jars/....jar", "data": null}]}
  ]}"#;
 
     const RESULTS: &str = r#"{"batch": "<batch token>", "engineVersion": 1,
