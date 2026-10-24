@@ -281,6 +281,13 @@ pub fn verify(token: &str, keys: &Keys, now: u64) -> Result<BatchPayload, TokenE
     verify_state(token, keys, now)
 }
 
+/// Verifies a batch token's format, key and signature but not its expiry: for
+/// `recordings/done`, which may come after the deadline (the slot claims have their own
+/// expiry, §12.5).
+pub fn verify_signature(token: &str, keys: &Keys) -> Result<BatchPayload, TokenError> {
+    verify_state(token, keys, 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +421,11 @@ mod tests {
         assert!(verify(&token, &keys, 1_999).is_ok());
         assert_eq!(verify(&token, &keys, 2_000), Err(TokenError::Expired));
         assert_eq!(verify(&token, &keys, 9_999), Err(TokenError::Expired));
+        // The signature alone still checks out after the deadline.
+        assert_eq!(verify_signature(&token, &keys).unwrap().id, "b-01JB2");
+        let mut forged = token.clone();
+        forged.push('A');
+        assert!(verify_signature(&forged, &keys).is_err());
     }
 
     #[test]

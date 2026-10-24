@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod bots;
 pub mod codesize;
 pub mod config;
 pub mod data;
@@ -19,6 +20,7 @@ pub mod state;
 pub mod store;
 pub mod token;
 pub mod verify;
+pub mod work;
 
 pub use config::Config;
 pub use ids::{Division, RumbleId, WeightClass};

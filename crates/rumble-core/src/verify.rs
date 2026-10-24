@@ -7,6 +7,7 @@
 
 use crate::api::Tier;
 use crate::config::Config;
+use crate::ids::Division;
 use crate::record::Record;
 use crate::store::{
     ALERT_TTL, Alert, DAY, LOG_TTL, LogItem, Reputation, Run, SYSTEM_UID, Store, StoreError,
@@ -142,6 +143,20 @@ pub fn take_work<S: Store + ?Sized>(
     until: u64,
     now: u64,
 ) -> StoreResult<Vec<VerifyItem>> {
+    take_work_in(store, engine, uid, None, max, until, now)
+}
+
+/// [`take_work`] restricted to one division (a batch is one division, §10.4): items of
+/// other divisions in the page are skipped.
+pub fn take_work_in<S: Store + ?Sized>(
+    store: &S,
+    engine: u32,
+    uid: &str,
+    division: Option<Division>,
+    max: usize,
+    until: u64,
+    now: u64,
+) -> StoreResult<Vec<VerifyItem>> {
     let mut taken = Vec::new();
     if max == 0 {
         return Ok(taken);
@@ -150,7 +165,10 @@ pub fn take_work<S: Store + ?Sized>(
         if taken.len() >= max {
             break;
         }
-        if item.uids.iter().any(|u| u == uid) || !item.claimable(now) {
+        if division.is_some_and(|d| d != item.division)
+            || item.uids.iter().any(|u| u == uid)
+            || !item.claimable(now)
+        {
             continue;
         }
         match store.claim_verify(engine, &item.sort, uid, until, now) {

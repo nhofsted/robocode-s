@@ -499,11 +499,18 @@ pub struct UploadUrlRequest {
     pub size: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A presigned PUT, or (`admin/jars/upload-url` only) `{"exists": true}` when the jar is
+/// already in the jars bucket and needs no upload (§16.2); the other fields are then empty.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UploadUrlResponse {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub expires: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exists: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -536,6 +543,190 @@ pub struct SubmitResponse {
     pub state: String,
     pub codesize: u32,
     pub weight_class: WeightClass,
+}
+
+// ---- POST me, GET me/tokens, POST me/tokens/revoke, GET me/bots ----
+
+/// `POST me`: the fields to change (absent ones stay). `country` is an ISO 3166-1 alpha-2
+/// code in lower case, or `""` to clear it; `hidden` hides the user from the contributors
+/// list (§15).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MeUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+}
+
+/// One upload token or session of `GET me/tokens`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenInfo {
+    /// The first 12 hex digits of the token's hash: what `me/tokens/revoke` takes.
+    pub id: String,
+    /// `upload` or `session`.
+    pub kind: String,
+    pub label: String,
+    pub created: String,
+    pub last_used: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
+    /// The token of this request.
+    pub current: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokensResponse {
+    pub tokens: Vec<TokenInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RevokeRequest {
+    pub id: String,
+}
+
+/// The body of calls that have nothing else to say.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OkResponse {
+    pub ok: bool,
+}
+
+/// A version in `GET me/bots`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotVersionInfo {
+    pub vid: u32,
+    pub version: String,
+    /// `probation`, `active`, `failed`, `retired`, `removed`.
+    pub state: String,
+    pub sha256: String,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codesize: Option<u32>,
+    pub weight_class: WeightClass,
+    pub divisions: Vec<Division>,
+    pub created: String,
+    pub probation_battles: u32,
+    pub probation_failures: u32,
+}
+
+/// A bot in `GET me/bots`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BotInfo {
+    pub id: String,
+    /// `active`, `retired`, `removed`.
+    pub state: String,
+    pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    pub divisions: Vec<Division>,
+    /// The ranked version's vid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<u32>,
+    /// Newest first.
+    pub versions: Vec<BotVersionInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BotsResponse {
+    pub bots: Vec<BotInfo>,
+}
+
+/// `POST bots/retire`: `{"bot": "id"}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BotRequest {
+    pub bot: String,
+}
+
+/// The answer of `bots/retire`, `admin/bots/claim` and `admin/bots/remove`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BotStateResponse {
+    pub bot: String,
+    /// The bot's state afterwards.
+    pub state: String,
+    /// The owner afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+}
+
+// ---- admin ----
+
+/// `POST admin/bots/import` (§16.2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRequest {
+    pub bot: String,
+    pub version: String,
+    pub sha256: String,
+    pub division: Division,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// `list`, `mirror` or `local`: informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The jar's properties have no `robot.version`; the list's `version` is authoritative
+    /// (the server validates with `jar::validate_with_version`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub version_from_list: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportResult {
+    Created,
+    Exists,
+    DivisionAdded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportResponse {
+    pub vid: u32,
+    pub result: ImportResult,
+}
+
+/// `POST admin/bots/claim`: `github` is a GitHub login or a user id (`g<id>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClaimRequest {
+    pub bot: String,
+    pub github: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RemoveRequest {
+    pub bot: String,
+    pub reason: String,
+}
+
+/// `POST admin/users/update`: absent fields stay as they are. `state` is `new`, `quar` or
+/// `ban`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UserUpdateRequest {
+    pub uid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rep: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AlertInfo {
+    /// The alert's sort key.
+    pub id: String,
+    pub kind: String,
+    pub text: String,
+    #[serde(rename = "ref")]
+    pub reference: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AlertsResponse {
+    pub alerts: Vec<AlertInfo>,
 }
 
 #[cfg(test)]

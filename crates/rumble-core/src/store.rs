@@ -217,6 +217,14 @@ impl TokenKind {
             TokenKind::Session => "session",
         }
     }
+
+    pub fn parse(text: &str) -> Result<TokenKind, String> {
+        match text {
+            "upload" => Ok(TokenKind::Upload),
+            "session" => Ok(TokenKind::Session),
+            _ => Err(format!("unknown token kind {text:?}")),
+        }
+    }
 }
 
 /// A token or session: the item `T#<hash>`/`T` and its index item `U#<uid>`/`T#<hash12>`
@@ -253,10 +261,46 @@ pub enum BotState {
     Removed,
 }
 
+impl BotState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BotState::Active => "active",
+            BotState::Retired => "retired",
+            BotState::Removed => "removed",
+        }
+    }
+
+    pub fn parse(text: &str) -> Result<BotState, String> {
+        match text {
+            "active" => Ok(BotState::Active),
+            "retired" => Ok(BotState::Retired),
+            "removed" => Ok(BotState::Removed),
+            _ => Err(format!("unknown bot state {text:?}")),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BotSource {
     Import,
     Submit,
+}
+
+impl BotSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BotSource::Import => "import",
+            BotSource::Submit => "submit",
+        }
+    }
+
+    pub fn parse(text: &str) -> Result<BotSource, String> {
+        match text {
+            "import" => Ok(BotSource::Import),
+            "submit" => Ok(BotSource::Submit),
+            _ => Err(format!("unknown bot source {text:?}")),
+        }
+    }
 }
 
 /// The bot item (`BOT#<id>`, `M`).
@@ -286,6 +330,33 @@ pub enum VersionState {
     Failed,
     Retired,
     Removed,
+}
+
+impl VersionState {
+    pub const ALL: [VersionState; 5] = [
+        VersionState::Probation,
+        VersionState::Active,
+        VersionState::Failed,
+        VersionState::Retired,
+        VersionState::Removed,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VersionState::Probation => "probation",
+            VersionState::Active => "active",
+            VersionState::Failed => "failed",
+            VersionState::Retired => "retired",
+            VersionState::Removed => "removed",
+        }
+    }
+
+    pub fn parse(text: &str) -> Result<VersionState, String> {
+        VersionState::ALL
+            .into_iter()
+            .find(|state| state.as_str() == text)
+            .ok_or_else(|| format!("unknown version state {text:?}"))
+    }
 }
 
 /// The version item (`REG`, `V#<vid36>`).
@@ -381,6 +452,15 @@ impl VerifyKind {
             VerifyKind::Recheck => "recheck",
         }
     }
+
+    pub fn parse(text: &str) -> Result<VerifyKind, String> {
+        match text {
+            "check" => Ok(VerifyKind::Check),
+            "probation" => Ok(VerifyKind::Probation),
+            "recheck" => Ok(VerifyKind::Recheck),
+            _ => Err(format!("unknown verification kind {text:?}")),
+        }
+    }
 }
 
 /// One run of a verification item.
@@ -432,6 +512,23 @@ pub enum SlotStatus {
     Claimed,
     /// `f`
     Filled,
+}
+
+impl SlotStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SlotStatus::Claimed => "c",
+            SlotStatus::Filled => "f",
+        }
+    }
+
+    pub fn parse(text: &str) -> Result<SlotStatus, String> {
+        match text {
+            "c" => Ok(SlotStatus::Claimed),
+            "f" => Ok(SlotStatus::Filled),
+            _ => Err(format!("unknown slot status {text:?}")),
+        }
+    }
 }
 
 /// One slot in a slot item's map `m`.
@@ -583,6 +680,133 @@ pub trait Store {
     // -- alerts --
     fn put_alert(&self, alert: &Alert) -> StoreResult<()>;
     fn list_alerts(&self) -> StoreResult<Vec<Alert>>;
+}
+
+/// A shared store is a store (the Lambdas share one between the router and their tests).
+impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
+    fn get_user(&self, uid: &str) -> StoreResult<Option<User>> {
+        (**self).get_user(uid)
+    }
+    fn create_user(&self, user: &User) -> StoreResult<()> {
+        (**self).create_user(user)
+    }
+    fn patch_user(&self, uid: &str, patch: &UserPatch) -> StoreResult<()> {
+        (**self).patch_user(uid, patch)
+    }
+    fn set_reputation(&self, uid: &str, expected: u64, reputation: &Reputation) -> StoreResult<()> {
+        (**self).set_reputation(uid, expected, reputation)
+    }
+    fn put_token(&self, token: &TokenItem) -> StoreResult<()> {
+        (**self).put_token(token)
+    }
+    fn get_token(&self, hash: &str) -> StoreResult<Option<TokenItem>> {
+        (**self).get_token(hash)
+    }
+    fn list_tokens(&self, uid: &str) -> StoreResult<Vec<TokenItem>> {
+        (**self).list_tokens(uid)
+    }
+    fn touch_token(&self, hash: &str, last_used: u64, expires: Option<u64>) -> StoreResult<()> {
+        (**self).touch_token(hash, last_used, expires)
+    }
+    fn delete_token(&self, uid: &str, hash: &str) -> StoreResult<()> {
+        (**self).delete_token(uid, hash)
+    }
+    fn next_vid(&self) -> StoreResult<u32> {
+        (**self).next_vid()
+    }
+    fn get_bot(&self, id: &str) -> StoreResult<Option<BotItem>> {
+        (**self).get_bot(id)
+    }
+    fn get_version(&self, vid: u32) -> StoreResult<Option<VersionItem>> {
+        (**self).get_version(vid)
+    }
+    fn list_versions(&self) -> StoreResult<Vec<VersionItem>> {
+        (**self).list_versions()
+    }
+    fn register_version(
+        &self,
+        bot: &BotItem,
+        expected_versions: Option<&[u32]>,
+        version: &VersionItem,
+    ) -> StoreResult<()> {
+        (**self).register_version(bot, expected_versions, version)
+    }
+    fn put_bot(&self, bot: &BotItem) -> StoreResult<()> {
+        (**self).put_bot(bot)
+    }
+    fn put_version(&self, version: &VersionItem) -> StoreResult<()> {
+        (**self).put_version(version)
+    }
+    fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
+        (**self).get_marker(batch_id)
+    }
+    fn commit_results(&self, transaction: &ResultsTransaction) -> StoreResult<()> {
+        (**self).commit_results(transaction)
+    }
+    fn add_marker_slots(&self, batch_id: &str, slots: &[String]) -> StoreResult<()> {
+        (**self).add_marker_slots(batch_id, slots)
+    }
+    fn append_log(&self, item: &LogItem) -> StoreResult<()> {
+        (**self).append_log(item)
+    }
+    fn query_log(&self, engine: u32, hour: u32) -> StoreResult<Vec<LogItem>> {
+        (**self).query_log(engine, hour)
+    }
+    fn put_verify(&self, item: &VerifyItem) -> StoreResult<()> {
+        (**self).put_verify(item)
+    }
+    fn get_verify(&self, engine: u32, sort: &str) -> StoreResult<Option<VerifyItem>> {
+        (**self).get_verify(engine, sort)
+    }
+    fn query_verify(
+        &self,
+        engine: u32,
+        after: Option<&str>,
+        limit: usize,
+    ) -> StoreResult<Vec<VerifyItem>> {
+        (**self).query_verify(engine, after, limit)
+    }
+    fn claim_verify(
+        &self,
+        engine: u32,
+        sort: &str,
+        uid: &str,
+        until: u64,
+        now: u64,
+    ) -> StoreResult<()> {
+        (**self).claim_verify(engine, sort, uid, until, now)
+    }
+    fn replace_verify(&self, item: &VerifyItem, claimant: &str) -> StoreResult<()> {
+        (**self).replace_verify(item, claimant)
+    }
+    fn delete_verify(&self, engine: u32, sort: &str, claimant: Option<&str>) -> StoreResult<()> {
+        (**self).delete_verify(engine, sort, claimant)
+    }
+    fn get_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        key: &str,
+    ) -> StoreResult<Option<SlotItem>> {
+        (**self).get_slots(engine, division, key)
+    }
+    fn update_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        key: &str,
+        expected: &[(String, Option<SlotEntry>)],
+        set: &[(String, SlotEntry)],
+        full: bool,
+    ) -> StoreResult<()> {
+        (**self).update_slots(engine, division, key, expected, set, full)
+    }
+    fn put_alert(&self, alert: &Alert) -> StoreResult<()> {
+        (**self).put_alert(alert)
+    }
+    fn list_alerts(&self) -> StoreResult<Vec<Alert>> {
+        (**self).list_alerts()
+    }
 }
 
 /// Civil date and time of a unix time (UTC): (year, month, day, hour, minute, second).
