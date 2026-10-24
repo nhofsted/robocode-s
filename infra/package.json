@@ -9,7 +9,7 @@
 		"diff": "cdk diff --profile robocode-s",
 		"build:lambdas": "../tools/rumble/build-lambdas.sh",
 		"deploy": "pnpm build:site && pnpm build:lambdas && cdk deploy --all --profile robocode-s",
-		"deploy:dev": "pnpm build:site && pnpm build:lambdas && cdk deploy RobocodeS-Dev-Site -c stage=dev --profile robocode-s",
+		"deploy:dev": "pnpm build:site && pnpm build:lambdas && cdk deploy --all -c stage=dev --profile robocode-s",
 		"typecheck": "tsc -p tsconfig.json",
 		"test": "node --test 'test/**/*.test.ts'"
 	},

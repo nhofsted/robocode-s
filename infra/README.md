@@ -6,7 +6,8 @@ AWS CDK (TypeScript) for the rumble (design §12, ADR 0007), in its own AWS acco
 |---|---|---|
 | `RobocodeS-Cert` | us-east-1 | ACM certificate for `rumble.planethofstede.be` (CloudFront needs us-east-1) |
 | `RobocodeS-Site` | eu-west-1 | S3 bucket, CloudFront distribution, the page-request function, the site and the sample data; the packages bucket (`packages/*`: the apt and dnf repositories, filled by `tools/release/repo.py`, not by CDK); the rumble backend ([`lib/rumble.ts`](lib/rumble.ts), below) |
-| `RobocodeS-Dev-Site` | eu-west-1 | The same stack for `-c stage=dev`: no domain, no certificate (`dxxxx.cloudfront.net`), on-demand table, its own buckets, sample data kept. Deployed instead of the two above |
+| `RobocodeS-Dev-Cert` | us-east-1 | `-c stage=dev`: the certificate for `dev.rumble.planethofstede.be` |
+| `RobocodeS-Dev-Site` | eu-west-1 | `-c stage=dev`: the same stack at `dev.rumble.planethofstede.be`, on-demand table, its own buckets, sample data kept. The dev stacks are deployed instead of the two above |
 
 The account itself (member account, Identity Center access, guardrail SCP, budget, CDK bootstrap) is set up once by [`account/setup.sh`](account/setup.sh).
 
@@ -73,7 +74,7 @@ CloudFront follows the objects' `Cache-Control`: hashed assets under `_app/immut
 
 ### Secrets and the GitHub OAuth app
 
-One GitHub OAuth app per stage (Settings, Developer settings, OAuth Apps). Callback URL `https://<domain>/api/v1/auth/callback` (prod: `rumble.planethofstede.be`; dev: the `dxxxx.cloudfront.net` domain, known after the first deploy; GitHub accepts a changed callback later). Tick "Enable Device Flow". The client id goes into `githubClientId` / `githubClientIdDev`; the secret into SSM:
+One GitHub OAuth app per stage (Settings, Developer settings, OAuth Apps). Callback URL `https://<domain>/api/v1/auth/callback` (prod: `rumble.planethofstede.be`; dev: `dev.rumble.planethofstede.be`). Tick "Enable Device Flow". The client id goes into `githubClientId` / `githubClientIdDev`; the secret into SSM:
 
 ```sh
 tools/rumble/secrets.sh dev    # or prod: creates the signing key if absent, prompts for the client secret
@@ -81,10 +82,6 @@ tools/rumble/secrets.sh dev    # or prod: creates the signing key if absent, pro
 
 The Lambdas read both SecureStrings at cold start; CDK never sees their values. Run it before the first request, not necessarily before the deploy.
 
-### The dev stage and its origin
+### The dev stage
 
-Dev has no domain, so its URL is only known after the first deploy, and the `api` Lambda needs it (`SITE_ORIGIN`: CSRF check and redirects) while the distribution points at the Lambda (the distribution cannot be read from the Lambda's environment: a dependency cycle). So dev deploys twice, and the second is a one-off:
-
-1. Create the OAuth app with any callback URL, then `pnpm deploy:dev -c githubClientIdDev=<id>`. `SITE_ORIGIN` is a placeholder (`*.invalid`); the state bucket allows browser `PUT`s from `https://*.cloudfront.net`.
-2. Take `DistributionDomainName` from the outputs, set the OAuth app's callback to `https://<it>/api/v1/auth/callback`, run `tools/rumble/secrets.sh dev`.
-3. `pnpm deploy:dev -c githubClientIdDev=<id> -c devOrigin=https://<it>` (keep passing both from then on; the domain only changes if the distribution is replaced).
+`pnpm deploy:dev` deploys `RobocodeS-Dev-Cert` and `RobocodeS-Dev-Site` (`-c stage=dev`) at `dev.rumble.planethofstede.be` (`devDomain` in `cdk.json`). Its DNS records are added by hand like prod's: the certificate's validation CNAME while the first deploy waits for it (the command under DNS, with `dev.rumble.planethofstede.be`), and a CNAME `dev.rumble.planethofstede.be` → the dev stack's `DistributionDomainName`. The client id of the dev OAuth app is the context `githubClientIdDev`.

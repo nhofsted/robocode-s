@@ -1,5 +1,5 @@
 // CDK app for the robocode-s account (ADR 0016): the certificate in us-east-1 and the site in
-// eu-west-1; `-c stage=dev` instead deploys the dev site alone. `pnpm deploy` builds web/, the
+// eu-west-1; `-c stage=dev` instead deploys the dev stage's two. `pnpm deploy` builds web/, the
 // sample data and the Lambdas first (infra/README.md).
 
 import { existsSync } from 'node:fs';
@@ -48,28 +48,28 @@ const site = {
 	code
 };
 
-if (stage === 'prod') {
-	const domain: string = app.node.getContext('domain');
-	const cert = new CertStack(app, 'RobocodeS-Cert', {
-		env: { account, region: 'us-east-1' },
-		domain
-	});
-	new SiteStack(app, 'RobocodeS-Site', {
-		...site,
-		env: { account, region: 'eu-west-1' },
-		stage,
-		domain,
-		certificate: cert.certificate,
-		githubClientId: required('githubClientId')
-	});
-} else {
-	// No domain, no certificate: CloudFront's own domain. Its origin is only known after the first
-	// deploy: pass it as -c devOrigin=https://dxxxx.cloudfront.net on the second (infra/README.md).
-	new SiteStack(app, 'RobocodeS-Dev-Site', {
-		...site,
-		env: { account, region: 'eu-west-1' },
-		stage,
-		devOrigin: context('devOrigin'),
-		githubClientId: required('githubClientIdDev')
-	});
-}
+// Each stage has its own domain and certificate (us-east-1, for CloudFront): prod
+// rumble.planethofstede.be, dev dev.rumble.planethofstede.be (cdk.json). Their DNS records are
+// added by hand in the management account's zone (ADR 0016, infra/README.md).
+const names =
+	stage === 'prod'
+		? { cert: 'RobocodeS-Cert', site: 'RobocodeS-Site', domain: 'domain', client: 'githubClientId' }
+		: {
+				cert: 'RobocodeS-Dev-Cert',
+				site: 'RobocodeS-Dev-Site',
+				domain: 'devDomain',
+				client: 'githubClientIdDev'
+			};
+const domain: string = app.node.getContext(names.domain);
+const cert = new CertStack(app, names.cert, {
+	env: { account, region: 'us-east-1' },
+	domain
+});
+new SiteStack(app, names.site, {
+	...site,
+	env: { account, region: 'eu-west-1' },
+	stage,
+	domain,
+	certificate: cert.certificate,
+	githubClientId: required(names.client)
+});

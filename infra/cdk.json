@@ -1,6 +1,7 @@
 {
 	"app": "node bin/robocode-s.ts",
 	"context": {
-		"domain": "rumble.planethofstede.be"
+		"domain": "rumble.planethofstede.be",
+		"devDomain": "dev.rumble.planethofstede.be"
 	}
 }
