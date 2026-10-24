@@ -307,7 +307,8 @@ export class Rumble extends Construct {
 			);
 		}
 
-		// UTC. Plan hourly at :05, publish every 6 hours (it plans first), cleanup daily.
+		// UTC. Plan hourly at :12 (the hour that just ended is past its 10 minutes of grace, §10.5),
+		// publish every 6 hours (it plans first), cleanup daily.
 		const schedule = (mode: string, minute: string, hour: string) =>
 			new Schedule(this, `${mode[0].toUpperCase()}${mode.slice(1)}Schedule`, {
 				scheduleName: `rumble${suffix}-${mode}`,
@@ -317,7 +318,7 @@ export class Rumble extends Construct {
 					retryAttempts: 0
 				})
 			});
-		schedule('plan', '5', '*');
+		schedule('plan', '12', '*');
 		schedule('publish', '30', '3,9,15,21');
 		schedule('cleanup', '45', '4');
 

@@ -262,7 +262,7 @@ test('dev distribution has no domain and no certificate', () => {
 test('schedules: plan, publish, cleanup with their inputs', () => {
 	prod.resourceCountIs('AWS::Scheduler::Schedule', 3);
 	const expected = {
-		'rumble-plan': ['cron(5 * * * ? *)', '{"mode":"plan"}'],
+		'rumble-plan': ['cron(12 * * * ? *)', '{"mode":"plan"}'],
 		'rumble-publish': ['cron(30 3,9,15,21 * * ? *)', '{"mode":"publish"}'],
 		'rumble-cleanup': ['cron(45 4 * * ? *)', '{"mode":"cleanup"}']
 	};
