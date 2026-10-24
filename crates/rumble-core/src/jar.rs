@@ -128,19 +128,20 @@ fn validate_inner(
         return Err(problems);
     }
 
-    // 2. Properties, version, teams.
-    if !teams.is_empty() {
-        return Err(vec![format!(
-            "team files ({}) are not accepted: teams are not open yet",
-            teams.join(", ")
-        )]);
-    }
+    // 2. Properties, version, teams. A robot's jar may ship a team of it as well
+    // (davidalves.Phoenix): only a jar with no robot of its own is a team.
     let mut robots: Vec<(String, BTreeMap<String, String>)> = properties
         .into_iter()
         .map(|(name, data)| (name, parse_properties(&decode_latin1(&data))))
         .filter(|(_, props)| props.contains_key("robot.classname"))
         .collect();
     let (properties_name, props) = match robots.len() {
+        0 if !teams.is_empty() => {
+            return Err(vec![format!(
+                "team files ({}) are not accepted: teams are not open yet",
+                teams.join(", ")
+            )]);
+        }
         0 => {
             return Err(vec![
                 "no robot properties file: the jar needs one .properties file with robot.classname"
@@ -711,10 +712,14 @@ mod tests {
 
     #[test]
     fn team_files() {
+        // A team alone is refused...
+        let team = vec![("my/Team.team", b"team.members=a,b".to_vec())];
+        let e = errors(&team);
+        assert!(e[0].contains("teams are not open yet"), "{e:?}");
+        // ...a robot that ships a team of itself is a robot.
         let mut files = good_files();
         files.push(("my/Team.team", b"team.members=a,b".to_vec()));
-        let e = errors(&files);
-        assert!(e[0].contains("teams are not open yet"), "{e:?}");
+        assert!(validate(&build_vec(&files), &Config::default()).is_ok());
     }
 
     #[test]
