@@ -677,6 +677,7 @@ pub fn run(world: &World, data_dir: &Path) {
                     size: 5,
                     claim_until: 0,
                     seed: 1,
+                    order: vec![7, 9],
                 },
             )],
             false,

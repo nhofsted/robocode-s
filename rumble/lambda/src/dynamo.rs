@@ -8,7 +8,7 @@
 //!
 //! Item layouts follow §9.2 with these additions (all documented on the core's types):
 //! `ver` on users (reputation read-modify-write), `bo` (owned bots, a list), `hid`, `tr`,
-//! `ghc`; `vid` on version items; `sd` (seeds) on log items; `i` in slot entries. Lists of
+//! `ghc`; `vid` on version items; `sd` (seeds) on log items; `i` and `v` (the robot order) in slot entries. Lists of
 //! strings that may be empty are `L`, not `SS` (DynamoDB has no empty sets).
 
 use crate::block_on;
@@ -574,6 +574,9 @@ fn slot_value(entry: &SlotEntry) -> AttributeValue {
     map.insert("n".into(), n(entry.size));
     map.insert("x".into(), n(entry.claim_until));
     map.insert("sd".into(), n(entry.seed));
+    if !entry.order.is_empty() {
+        map.insert("v".into(), numbers(&entry.order));
+    }
     AttributeValue::M(map)
 }
 
@@ -588,6 +591,7 @@ fn slot_from(value: &AttributeValue) -> StoreResult<SlotEntry> {
         size: get_n(map, "n")?,
         claim_until: get_n(map, "x")?,
         seed: get_n(map, "sd")?,
+        order: get_numbers(map, "v")?,
     })
 }
 
@@ -1250,6 +1254,47 @@ impl Store for DynamoStore {
             .collect()
     }
 
+    fn remove_slots(
+        &self,
+        engine: u32,
+        division: Division,
+        slot_key: &str,
+        remove: &[(String, SlotEntry)],
+    ) -> StoreResult<()> {
+        if remove.is_empty() {
+            return Ok(());
+        }
+        let pk = slot_pk(engine, division, slot_key);
+        self.full_slots.lock().unwrap().remove(&pk);
+        // The condition names the status and the track hash, which identify the entry
+        // (older entries may lack attributes a full comparison would trip over).
+        let mut request = self
+            .client
+            .update_item()
+            .table_name(&self.table)
+            .set_key(Some(key(&pk, "S")))
+            .expression_attribute_names("#full", "full");
+        let mut removes = Vec::new();
+        let mut conditions = vec!["attribute_exists(m)".to_string()];
+        for (i, (id, entry)) in remove.iter().enumerate() {
+            request = request
+                .expression_attribute_names(format!("#s{i}"), id)
+                .expression_attribute_values(format!(":st{i}"), s(entry.status.as_str()))
+                .expression_attribute_values(format!(":h{i}"), s(&entry.sha256_b64));
+            removes.push(format!("m.#s{i}"));
+            conditions.push(format!("m.#s{i}.st = :st{i} AND m.#s{i}.h = :h{i}"));
+        }
+        block_on(
+            request
+                .expression_attribute_values(":no", AttributeValue::Bool(false))
+                .update_expression(format!("REMOVE {} SET #full = :no", removes.join(", ")))
+                .condition_expression(conditions.join(" AND "))
+                .send(),
+        )
+        .map(|_| ())
+        .map_err(map_err)
+    }
+
     fn delete_slots(&self, engine: u32, division: Division, slot_key: &str) -> StoreResult<()> {
         let pk = slot_pk(engine, division, slot_key);
         self.full_slots.lock().unwrap().remove(&pk);
@@ -1377,7 +1422,14 @@ mod tests {
             size: 10,
             claim_until: 11,
             seed: -5,
+            order: vec![3, 4, 5],
         };
         assert_eq!(slot_from(&slot_value(&entry)).unwrap(), entry);
+        // Entries written before M6 have no `v`.
+        let mut old = slot_value(&entry);
+        if let AttributeValue::M(map) = &mut old {
+            map.remove("v");
+        }
+        assert!(slot_from(&old).unwrap().order.is_empty());
     }
 }

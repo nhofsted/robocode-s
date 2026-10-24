@@ -16,6 +16,7 @@ pub mod archive;
 pub mod cleanup;
 pub mod plan;
 pub mod publish;
+pub mod recordings;
 pub mod slot_pairs;
 
 use crate::cloudfront::Cdn;
