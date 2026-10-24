@@ -7,7 +7,9 @@
 		"build:site": "pnpm -C ../web build && node ../web/tools/sample-data.ts .sample-data",
 		"synth": "cdk synth --quiet",
 		"diff": "cdk diff --profile robocode-s",
-		"deploy": "pnpm build:site && cdk deploy --all --profile robocode-s",
+		"build:lambdas": "../tools/rumble/build-lambdas.sh",
+		"deploy": "pnpm build:site && pnpm build:lambdas && cdk deploy --all --profile robocode-s",
+		"deploy:dev": "pnpm build:site && pnpm build:lambdas && cdk deploy RobocodeS-Dev-Site -c stage=dev --profile robocode-s",
 		"typecheck": "tsc -p tsconfig.json",
 		"test": "node --test 'test/**/*.test.ts'"
 	},
