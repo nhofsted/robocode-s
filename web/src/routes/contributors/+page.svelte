@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import Flag from '#lib/components/Flag.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
+	import UpdateTimes from '#lib/components/UpdateTimes.svelte';
 	import { compareBy, formatCount, formatDate } from '#lib/rumble/format.ts';
 	import type { Contributor } from '#lib/rumble/types.ts';
 	import type { PageProps } from './$types';
@@ -74,7 +75,7 @@
 	<div class="meta">
 		<p class="muted">
 			{formatCount(ranked.length)} volunteers · {formatCount(total)} battles · updated every 6
-			hours, last {formatDate(data.contributors.generatedAt)}
+			hours: <UpdateTimes generatedAt={data.contributors.generatedAt} />
 		</p>
 		<label class="search">
 			<span class="visually-hidden">Filter volunteers</span>

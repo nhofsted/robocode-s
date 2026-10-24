@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
-	import { CLASS_NAMES, DIVISION_NAMES, formatCount, formatDate } from '#lib/rumble/format.ts';
+	import UpdateTimes from '#lib/components/UpdateTimes.svelte';
+	import { CLASS_NAMES, DIVISION_NAMES, formatCount } from '#lib/rumble/format.ts';
 	import type { Division, RumbleSummary } from '#lib/rumble/types.ts';
 	import type { PageProps } from './$types';
 
@@ -32,7 +33,7 @@
 <div class="container">
 	<h1>Rankings</h1>
 	<SampleNotice />
-	<p class="muted">Updated {formatDate(data.index.generatedAt)}.</p>
+	<p class="muted">Updated every 6 hours: <UpdateTimes generatedAt={data.index.generatedAt} />.</p>
 
 	<div class="groups">
 		{#each groups as g (g.division)}
