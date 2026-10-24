@@ -3,13 +3,13 @@
 	import Flag from '#lib/components/Flag.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import Tank from '#lib/components/Tank.svelte';
+	import UpdateTimes from '#lib/components/UpdateTimes.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
 	import {
 		CLASS_NAMES,
 		METRICS,
 		compareBy,
 		formatCount,
-		formatDate,
 		formatNumber,
 		packageName,
 		rumbleName,
@@ -92,7 +92,7 @@
 				{data.summary.rounds} rounds on {data.summary.battlefield.width}×{data.summary.battlefield
 					.height} ·
 			{/if}
-			updated every 6 hours, last {formatDate(data.rankings.generatedAt)}
+			updated every 6 hours: <UpdateTimes generatedAt={data.rankings.generatedAt} />
 		</p>
 		<label class="search">
 			<span class="visually-hidden">Filter bots</span>

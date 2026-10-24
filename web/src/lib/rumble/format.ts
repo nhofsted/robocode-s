@@ -51,6 +51,56 @@ export function formatDate(iso: string): string {
 	});
 }
 
+/** `14:30 UTC`. */
+export function formatTime(date: Date): string {
+	const time = date.toLocaleTimeString('en-GB', {
+		hour: '2-digit',
+		minute: '2-digit',
+		timeZone: 'UTC'
+	});
+	return `${time} UTC`;
+}
+
+/** When the data files are published: these UTC hours at :30 (`schedule('publish', ...)` in infra/lib/rumble.ts). */
+export const PUBLISH_HOURS_UTC = [3, 9, 15, 21];
+const PUBLISH_MINUTE_UTC = 30;
+
+/** The first scheduled publish strictly after `after`. */
+export function nextPublish(after: Date): Date {
+	const day = Date.UTC(after.getUTCFullYear(), after.getUTCMonth(), after.getUTCDate());
+	for (let d = 0; d < 2; d++) {
+		for (const hour of PUBLISH_HOURS_UTC) {
+			const at = new Date(day + d * 86_400_000 + (hour * 60 + PUBLISH_MINUTE_UTC) * 60_000);
+			if (at > after) return at;
+		}
+	}
+	throw new Error('no publish in two days');
+}
+
+/** `in 2 h 5 min`, `in 40 min`, `in under a minute`. */
+export function formatIn(ms: number): string {
+	const minutes = Math.floor(ms / 60_000);
+	if (minutes < 1) return 'in under a minute';
+	const h = Math.floor(minutes / 60);
+	const m = minutes % 60;
+	return h === 0 ? `in ${m} min` : m === 0 ? `in ${h} h` : `in ${h} h ${m} min`;
+}
+
+/**
+ * When the data was published and when the next update is due, e.g. `last 24 Oct 2026, 15:31 UTC;
+ * next at 21:30 UTC (in 2 h 5 min)`. The next update is the first scheduled run after the data's
+ * own time, so a late or failed run reads as due rather than skipping ahead.
+ */
+export function updateTimes(generatedAt: string, now: Date): string {
+	const last = new Date(generatedAt);
+	const next = nextPublish(last);
+	const when =
+		next > now
+			? `next at ${formatTime(next)} (${formatIn(next.getTime() - now.getTime())})`
+			: 'next one due now';
+	return `last ${formatDate(generatedAt)}, ${formatTime(last)}; ${when}`;
+}
+
 /** Sorts nulls last regardless of direction, so unrated bots never top a table. */
 export function compareBy<T>(
 	get: (row: T) => number | string | null,
