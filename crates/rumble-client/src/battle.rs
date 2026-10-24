@@ -174,15 +174,19 @@ pub struct Runner {
     pool: Arc<Pool>,
 }
 
+/// A folder name of its own for each runner in this process (the GUI may have several, tests
+/// do), ending in `-<pid>` as `housekeeping::remove_stale_runs` expects.
+fn run_folder(kind: &str) -> String {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{kind}{n}-{}", std::process::id())
+}
+
 impl Runner {
     /// Checks the sandbox policy ([`check_sandbox`]) and sets up the pool.
     pub fn new(options: Options) -> Result<Self, String> {
         check_sandbox(options.env.sandbox, options.allow_unsandboxed)?;
-        let dir = options
-            .env
-            .data
-            .join("pool")
-            .join(format!("rumble-{}", std::process::id()));
+        let dir = options.env.data.join("pool").join(run_folder("rumble"));
         Ok(Self {
             options,
             pool: Arc::new(Pool::new(dir)),
@@ -208,7 +212,7 @@ impl Runner {
             .env
             .data
             .join("battles")
-            .join(format!("host-info-{}", std::process::id()));
+            .join(run_folder("host-info"));
         host_info(&host, &home).map(|(platform, _)| platform)
     }
 
