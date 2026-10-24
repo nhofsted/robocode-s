@@ -139,8 +139,14 @@
 	.search input {
 		width: min(20rem, 100%);
 	}
-	.table-scroll {
-		max-height: 75vh;
+	/* As the rankings: the table scrolls with the page, its headers stick under the site's. */
+	@media (min-width: 1000px) {
+		.table-scroll {
+			overflow-x: clip;
+		}
+		.table-scroll :global(thead th) {
+			top: 57px;
+		}
 	}
 	.login {
 		white-space: nowrap;

@@ -219,8 +219,16 @@
 	.search input {
 		width: min(20rem, 100%);
 	}
-	.table-scroll {
-		max-height: 75vh;
+	/* The table is the page: it scrolls with the page, not in a box of its own. Where it fits
+	   (wide screens), the wrapper clips instead of scrolling, so the column headers stick under
+	   the site's header (57px) as the page scrolls; narrower, it scrolls sideways. */
+	@media (min-width: 1000px) {
+		.table-scroll {
+			overflow-x: clip;
+		}
+		.table-scroll :global(thead th) {
+			top: 57px;
+		}
 	}
 	/* Long ids and author names are cut with an ellipsis (the full text is the title), so the
 	   table fits without scrolling sideways. The short name gives way last. The bot column takes
