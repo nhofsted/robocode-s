@@ -266,7 +266,8 @@ export class Rumble extends Construct {
 		});
 		// The managed ALL_VIEWER_EXCEPT_HOST_HEADER policy can't be extended, and forwarding Host would
 		// break the function URL, so the policy lists what the API reads (cookies and query strings
-		// all; Authorization never arrives, OAC overwrites it).
+		// all; Authorization never arrives, OAC overwrites it). x-amz-content-sha256 can't be listed
+		// (CloudFront refuses it): OAC uses the viewer's header itself when it signs the request.
 		const apiRequests = new OriginRequestPolicy(this, 'ApiRequests', {
 			comment: 'rumble api: viewer headers the Lambda reads, no Host',
 			cookieBehavior: OriginRequestCookieBehavior.all(),
@@ -276,7 +277,6 @@ export class Rumble extends Construct {
 				'content-type',
 				'origin',
 				'user-agent',
-				'x-amz-content-sha256',
 				'x-rumble-client',
 				'x-rumble-token',
 				'CloudFront-Viewer-Address'

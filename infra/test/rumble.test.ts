@@ -244,7 +244,7 @@ test('behaviors: api through OAC, jars and rec cached and uncompressed', () => {
 		OriginRequestPolicyConfig: Match.objectLike({
 			HeadersConfig: {
 				HeaderBehavior: 'whitelist',
-				Headers: Match.arrayWith(['x-amz-content-sha256', 'x-rumble-token', 'CloudFront-Viewer-Address'])
+				Headers: Match.arrayWith(['x-rumble-token', 'CloudFront-Viewer-Address'])
 			},
 			CookiesConfig: { CookieBehavior: 'all' },
 			QueryStringsConfig: { QueryStringBehavior: 'all' }
