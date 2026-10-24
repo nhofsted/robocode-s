@@ -3,6 +3,7 @@
 	"context": {
 		"domain": "rumble.planethofstede.be",
 		"devDomain": "dev.rumble.planethofstede.be",
+		"sampleData": "false",
 		"githubClientIdDev": "Ov23liSYapXc4MfQJEaa"
 	}
 }
