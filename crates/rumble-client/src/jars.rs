@@ -329,6 +329,7 @@ mod tests {
             sha256: sha256_hex(content),
             size: content.len() as u64,
             url: "/jars/x.jar".into(),
+            data: None,
         }
     }
 
