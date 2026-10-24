@@ -209,6 +209,7 @@ pub fn plan_1v1(engine: u32) -> Plan {
         anchors: vec![],
         partners: BTreeMap::new(),
         top: vec![1],
+        slot_pairs: vec![],
         probation: vec![],
     }
 }

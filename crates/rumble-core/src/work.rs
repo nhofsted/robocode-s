@@ -34,6 +34,7 @@ pub struct DivisionPlan {
 impl DivisionPlan {
     pub fn new(mut plan: Plan) -> DivisionPlan {
         plan.top.sort_unstable();
+        plan.slot_pairs.sort_unstable();
         plan.probation.sort_unstable();
         let bots = plan
             .bots
@@ -60,6 +61,11 @@ impl DivisionPlan {
     /// Whether a version is in the plan's `top` (slot eligibility, §12.5).
     pub fn is_top(&self, vid: u32) -> bool {
         self.plan.top.binary_search(&vid).is_ok()
+    }
+
+    /// Whether the pairing (lower vid, higher vid) is one of the plan's `slotPairs`.
+    pub fn is_slot_pair(&self, lo: u32, hi: u32) -> bool {
+        self.plan.slot_pairs.binary_search(&(lo, hi)).is_ok()
     }
 
     /// A bot of the plan as a work item.
@@ -148,6 +154,13 @@ impl WorkServer {
     /// Whether a version is in the `top` of the division's current plan.
     pub fn is_top(&self, division: Division, vid: u32) -> bool {
         self.plans.get(&division).is_some_and(|p| p.is_top(vid))
+    }
+
+    /// Whether a pairing is in the `slotPairs` of the division's current plan.
+    pub fn is_slot_pair(&self, division: Division, lo: u32, hi: u32) -> bool {
+        self.plans
+            .get(&division)
+            .is_some_and(|p| p.is_slot_pair(lo, hi))
     }
 
     /// Serves `GET work` to `user` (§10.4) at `now_ms` with 32 fresh random bytes. `None`
@@ -413,6 +426,7 @@ mod tests {
             anchors: vec![],
             partners: BTreeMap::new(),
             top: vec![2],
+            slot_pairs: vec![(1, 3)],
             probation: vec![],
         }
     }
@@ -435,6 +449,7 @@ mod tests {
             anchors: vec![(1, 2), (5, 1)],
             partners,
             top: vec![],
+            slot_pairs: vec![],
             probation: vec![],
         }
     }
@@ -529,6 +544,9 @@ mod tests {
         assert!(server.is_top(Division::OneVsOne, 2));
         assert!(!server.is_top(Division::OneVsOne, 1));
         assert!(!server.is_top(Division::Melee, 2));
+        assert!(server.is_slot_pair(Division::OneVsOne, 1, 3));
+        assert!(!server.is_slot_pair(Division::OneVsOne, 1, 4));
+        assert!(!server.is_slot_pair(Division::Melee, 1, 3));
     }
 
     #[test]

@@ -58,6 +58,8 @@ pub struct PlanInput<'a> {
     pub probation: &'a [PlanBot],
     /// Versions ranked in the top `slots.top` of any rumble of the division (§10.5).
     pub top: &'a [u32],
+    /// 1v1: matchups `(lo, hi)` outside `top` that get recording slots (§12.5).
+    pub slot_pairs: &'a [(u32, u32)],
     /// The division's counted battles in the last full hour.
     pub last_hour_battles: u64,
     pub generated_at: &'a str,
@@ -418,6 +420,10 @@ pub struct Plan {
     /// Melee: a bot's best partners `[vid, V]`, best first.
     pub partners: BTreeMap<u32, Vec<(u32, f64)>>,
     pub top: Vec<u32>,
+    /// 1v1: `[vidLo, vidHi]` matchups with recording slots besides those with a `top` bot,
+    /// sorted (§12.5). Absent in older plans.
+    #[serde(default)]
+    pub slot_pairs: Vec<(u32, u32)>,
     pub probation: Vec<u32>,
 }
 
@@ -468,6 +474,14 @@ pub fn plan(state: &State, config: &Config, input: &PlanInput) -> Plan {
     let mut top = input.top.to_vec();
     top.sort_unstable();
     top.dedup();
+    let mut slot_pairs: Vec<(u32, u32)> = input
+        .slot_pairs
+        .iter()
+        .map(|&(a, b)| (a.min(b), a.max(b)))
+        .filter(|(a, b)| a != b)
+        .collect();
+    slot_pairs.sort_unstable();
+    slot_pairs.dedup();
     Plan {
         engine: state.engine,
         division,
@@ -489,6 +503,7 @@ pub fn plan(state: &State, config: &Config, input: &PlanInput) -> Plan {
         anchors,
         partners,
         top,
+        slot_pairs,
         probation,
     }
 }
@@ -929,6 +944,7 @@ mod tests {
                 bots: &bots(4, WeightClass::Mega),
                 probation: &[],
                 top: &[],
+                slot_pairs: &[],
                 last_hour_battles: 0,
                 generated_at: "t",
             },
@@ -1040,6 +1056,7 @@ mod tests {
                     bots: &all,
                     probation: &[bot(99, WeightClass::Mega)],
                     top: &[3, 1, 3],
+                    slot_pairs: &[],
                     last_hour_battles: last,
                     generated_at: "2026-10-24T10:05:00Z",
                 },
@@ -1072,6 +1089,7 @@ mod tests {
                 bots: &bots(12, WeightClass::Mega),
                 probation: &[],
                 top: &[2],
+                slot_pairs: &[(5, 2), (3, 4), (2, 5)],
                 last_hour_battles: 0,
                 generated_at: "2026-10-24T10:05:00Z",
             },
@@ -1092,6 +1110,10 @@ mod tests {
         );
         assert_eq!(json["pairs"][0].as_array().unwrap().len(), 3);
         assert_eq!(json["top"], serde_json::json!([2]));
+        assert_eq!(json["slotPairs"], serde_json::json!([[2, 5], [3, 4]]));
+        let old = br#"{"engine":1,"division":"1v1","generatedAt":"","hourly":0,"bots":[],"pairs":[],"anchors":[],"partners":{},"top":[],"probation":[]}"#;
+        let older: Plan = serde_json::from_slice(old).unwrap();
+        assert!(older.slot_pairs.is_empty());
         assert!(json["partners"].as_object().unwrap().is_empty());
     }
 
@@ -1157,6 +1179,7 @@ mod tests {
                 bots: &bots(10, WeightClass::Mega),
                 probation: &[],
                 top: &[],
+                slot_pairs: &[],
                 last_hour_battles: 0,
                 generated_at: "t",
             },
@@ -1199,6 +1222,7 @@ mod tests {
                 bots: &bots(40, WeightClass::Mega),
                 probation: &[],
                 top: &[],
+                slot_pairs: &[],
                 last_hour_battles: 100,
                 generated_at: "t",
             },
@@ -1238,6 +1262,7 @@ mod tests {
                 bots: &bots(60, WeightClass::Mega),
                 probation: &[],
                 top: &[],
+                slot_pairs: &[],
                 last_hour_battles: 0,
                 generated_at: "t",
             },
@@ -1271,6 +1296,7 @@ mod tests {
                 bots: &bots(12, WeightClass::Mega),
                 probation: &[],
                 top: &[],
+                slot_pairs: &[],
                 last_hour_battles: 0,
                 generated_at: "t",
             },
@@ -1417,6 +1443,7 @@ mod tests {
             bots: &all,
             probation: &[],
             top: &[],
+            slot_pairs: &[],
             last_hour_battles: 13_334,
             generated_at: "t",
         };

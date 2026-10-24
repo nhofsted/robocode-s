@@ -543,6 +543,17 @@ pub fn run(world: &World, data_dir: &Path) {
     )
     .unwrap();
     assert_eq!(plan.top.len(), 50, "50 bots, all in the top 50");
+    // publish wrote the slot pairs of the general 1v1 rumble; the plan carries them.
+    let pairs: serde_json::Value = serde_json::from_slice(
+        &world
+            .get(Bucket::State, "state/e1/1v1/slot-pairs.json")
+            .unwrap(),
+    )
+    .unwrap();
+    let pairs = pairs["pairs"].as_array().unwrap();
+    assert!(!pairs.is_empty() && pairs.len() <= 50 * 15);
+    assert!(pairs.iter().all(|p| p[0].as_u64() < p[1].as_u64()));
+    assert_eq!(plan.slot_pairs.len(), pairs.len());
 
     // ---- a crash after the plan file, before the state: the rerun folds hour 11 once. ----
     world.set(T0 + 3600);

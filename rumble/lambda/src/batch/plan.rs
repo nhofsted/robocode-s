@@ -192,6 +192,10 @@ pub fn run_states(batch: &Batch, config: &Config) -> Result<Planned, String> {
             .filter_map(|r| snapshots.get(r).cloned())
             .collect();
         let top = top_from_snapshots(&division_snapshots, &versions, config.slots.top);
+        let slot_pairs = match division {
+            Division::OneVsOne => super::slot_pairs::read(batch, engine)?,
+            Division::Melee => Vec::new(),
+        };
         let last = u64::try_from(last_hour[division_index(division)]).unwrap_or(0);
         let plan: Plan = plan::plan(
             state,
@@ -200,6 +204,7 @@ pub fn run_states(batch: &Batch, config: &Config) -> Result<Planned, String> {
                 bots: &bots,
                 probation: &probation,
                 top: &top,
+                slot_pairs: &slot_pairs,
                 last_hour_battles: last,
                 generated_at: &generated_at,
             },

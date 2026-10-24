@@ -70,7 +70,7 @@ All tunables are one struct, `rumble_core::Config`, with the defaults below in c
 | `rep.banMismatches` | 3 | Confirmed mismatches within `rep.banWindowDays` (90) that ban. |
 | `probation.battles` | 10 | Battles before a new version is ranked. |
 | `probation.failShare` | 0.8 | Share of failed battles that fails probation (and deactivates an active bot over its last 20). |
-| `slots.top` | 50 | Matchups with a bot ranked this high or better get recording slots. |
+| `slots.top` | 50 | Matchups with a bot ranked this high or better get recording slots (1v1 also each bot's best, worst and problem pairings, §12.5). |
 | `slots.perSide` | 5 | |
 | `slots.maxBytes` | 262144 | Largest track accepted (a 6,000-turn melee round is about 50 KB). |
 | `plan.priorVariance` | 1v1 16, melee 25 | Prior variance of a battle's pairing score (APS points²). |
@@ -355,7 +355,7 @@ Slot `key` (§12.5): 1v1 `<vidLo36>#<vidHi36>`, melee `<vid36>`. Slot ids in the
 | `POST results` (1v1, 20 battles) | TransactWriteItems: Put `B#` (~0.3 KB), Put `R#` (20 × 24 B + keys ≈ 0.6 KB), Update user (~0.3 KB) | 2 × (1 + 1 + 1) = **6** | 0 |
 | ... same, melee, 5 battles (≈ 0.6 KB of records) | | 6 | 0 |
 | ... each battle picked for verification (rate r) | Put `V#` (~0.5 KB) | 1 | - |
-| ... each eligible battle (a top-50 bot, user ≥ `rep.recorderMin`) | GetItem slot (cached when `full`); UpdateItem claim if a side has an open slot | 2 on claim (item ≤ 2 KB) | 0.5 |
+| ... each eligible battle (a top-50 bot or a `slotPairs` matchup, user ≥ `rep.recorderMin`) | GetItem slot (cached when `full`); UpdateItem claim if a side has an open slot | 2 on claim (item ≤ 2 KB) | 0.5 |
 | ... claims recorded on the marker | UpdateItem `B#` `ADD slots` | 1 | - |
 | `recordings/done` | UpdateItem slot per slot (condition: claimed by this batch) | 2 each | - |
 | Verification result | GetItem `V#`, UpdateItem/Delete `V#`, Update 2–3 users | 3–5 | 0.5 |
@@ -451,10 +451,11 @@ V(A,B)    = gain(n) · close · Σ_{r ∈ R(A,B)} ½ (contested_A,r · coverage_
  "pairs": [[vidA, vidB, quota], ...],
  "anchors": [[vid, quota], ...], "partners": {"vid": [[vid, weight], ...]},
  "top": [vid, ...],
+ "slotPairs": [[vidLo, vidHi], ...],
  "probation": [vid, ...]}
 ```
 
-`top` holds the versions ranked in the top `slots.top` of any rumble of the division in the latest `publish` (from its snapshot), for slot eligibility (§12.5). The `api` Lambda reloads the plan when its S3 ETag changes (checked at most every 60 s with a conditional GET).
+`top` holds the versions ranked in the top `slots.top` of any rumble of the division in the latest `publish` (from its snapshot), for slot eligibility (§12.5). `slotPairs` (additive; absent or empty in older plans and in melee) holds the 1v1 matchups that get slots besides those with a `top` bot, lower vid first, sorted: `plan` reads them from `state/e<E>/1v1/slot-pairs.json` (`{"pairs": [[lo, hi], ...]}`), which `publish` writes from the general 1v1 rumble's metrics (`rumble_core::slots::slot_pairs`, §12.5), so they are as old as the last publish. The `api` Lambda reloads the plan when its S3 ETag changes (checked at most every 60 s with a conditional GET).
 
 ### 10.6 A new engine version
 
@@ -525,12 +526,12 @@ A retired version's pairings leave the pairing state at the next plan; its histo
 
 ### 12.5 Recording slots (§12.7)
 
-- **Eligibility** of a counted `ok` battle: the user's `rep ≥ rep.recorderMin` and not quarantined; and in 1v1 one of the two versions is in the plan's `top`; in melee, slots are per version: each contestant in `top`.
+- **Eligibility** of a counted `ok` battle: the user's `rep ≥ rep.recorderMin` and not quarantined; and in 1v1 one of the two versions is in the plan's `top`, or the pair is in the plan's `slotPairs` (owner, 2026-10-24): for every bot X of the general 1v1 rumble, its 5 best pairings (highest score), 5 worst pairings (lowest score) and 5 problem bots (most negative KNN-PBI, only negative ones), pairs counted once whichever side picked them (`publish` computes them, §15). Once a matchup has slots it keeps them while both versions are current: existing slot items persist even when the pair drops out of the set. In melee, slots are per version: each contestant in `top`.
 - **Slots:** 1v1: per pairing (lower vid, higher vid), `slots.perSide` (5) rounds won by the lower vid's bot (`a.0`..`a.4`) and 5 won by the other (`b.0`..`b.4`); melee: per version, 5 rounds it won (`w.*`) and 5 it didn't (`l.*`). A slot is filled by the first qualifying rounds played after the version pair (version) appears, never replaced while the versions are current.
 - **Claiming (results post):** for each eligible battle, GetItem the slot item (cached per instance once `full`). For each open slot (absent, or `st: c` with `x < now`), take the next round of that side from this battle, in round order; claim all of this battle's picks in one UpdateItem with a condition on the slots' previous states. Each claim stores the round's track `sha256`, `size`, the battle's seed and round index, the batch id, and `x = now + 1 h`. The batch marker gets the slot ids (`ADD slots`).
 - **Upload:** the response lists a presigned S3 PUT per claimed slot (1 hour), to `rec/e<E>/<division>/<key path>`, with `Content-Length` and `x-amz-checksum-sha256` (the reported track hash) **signed**: S3 refuses any other size or content. `recordings/done` checks the stored checksum with `HeadObject` and sets `st: f`; `full` when all 10 are filled.
 - **Key paths** (readable by the M6 viewer from the published files: bot ids and the jar hashes in `BotVersion.sha256`): 1v1 `rec/e<E>/1v1/<idA>_<sha16A>/<idB>_<sha16B>/<a|b>-<i>.track` with A the bot whose id sorts first (and `a` = A won), melee `rec/e<E>/melee/<id>_<sha16>/<w|l>-<i>.track`; `sha16` is the first 16 hex digits of the version's jar hash. Objects get `Cache-Control: public, max-age=31536000, immutable` (signed into the PUT as well). The track header holds the engine version (ADR 0017); the seed and round are in the slot item and will be published by M6's index.
-- **Size cap:** `slots.maxBytes` per track; the total stays within design §12.7's 3–5 GB by construction (slots only exist for top-50 matchups).
+- **Size cap:** `slots.maxBytes` per track; the total stays bounded by construction: top-50 matchups as before, plus at most 15 extra matchups per bot (5 best, 5 worst, 5 problem), about 16.5k matchups at 1,100 bots, 10 tracks each, so about 0.6 GB more (about 3.6 KB a track), within design §12.7's budget; the slot items add 16.5k items of at most 2 KB.
 - **Watch requests (M6):** a `W#` item; served like verification work to recorders; the round is uploaded to `rec/watch/<id>.track`, an LRU cache capped at 1 GB by `cleanup`. M4 defines the item only.
 
 ## 13. The client (`rumble-client`)
@@ -664,7 +665,7 @@ Standard tier, the AWS-managed key: free. CDK doesn't create them (CloudFormatio
    - **KNN-PBI** per pairing, as in `types.ts`: `m_XO` minus the mean of `m_YO` over the k = ⌈√members / 2⌉ bots on either side of X in APS order that have a pairing with O.
    - `rank` by APS (ties: more battles first, then bot id); `pairings` = pairings with n > 0; `battles` = Σ n of its pairings (1v1) or the battles it took part in (melee, counted by the planner per version).
    - `rankWeekAgo` from `state/e<E>/snapshots/<rumble>/<date − 7>.json` (null if absent).
-4. Write the files of `rumble-data.md` exactly as `types.ts` (the Rust types in `rumble_core::data` mirror it; a test round-trips `web/src/lib/rumble/fixtures` output through them): `rumbles.json`, `rankings/<rumble>.json`, `bots/<id>.json`. `RumbleSummary.battles` from the state's battle count, `rounds` and `battlefield` from the configuration, `engineVersion` = E.
+4. Write the files of `rumble-data.md` exactly as `types.ts` (the Rust types in `rumble_core::data` mirror it; a test round-trips `web/src/lib/rumble/fixtures` output through them): `rumbles.json`, `rankings/<rumble>.json`, `bots/<id>.json`. `RumbleSummary.battles` from the state's battle count, `rounds` and `battlefield` from the configuration, `engineVersion` = E. Then the slot pairs of §12.5 from the general 1v1 rumble's metrics, written to `state/e<E>/1v1/slot-pairs.json` for `plan`.
 5. **Bot files and history:** for each bot, read its current `bots/<id>.json` (if any) for `history`, append today's point per rumble (`version`, `rank`, `aps`, `glicko`; a later run on the same day replaces that day's point, so history stays one point a day), thin it (keep every point of the last 365 days; before that only days whose day number since 1970-01-01 is divisible by 7), and write it **only if the bytes changed** (compare the MD5 with the object's ETag). Unchanged files are not written. Bots not ranked today keep their file (with versions updated) and get no point.
 6. **Archive** (owner, 2026-10-24): `data/v1/archive.json` (new in v1, additive; `Archive` in `types.ts`, built by `rumble_core::archive` from the `REG` items already read, written by the batch Lambda's `archive` module): `{schema, generatedAt, bots: [{id, author, versions: [{version, sha256, size, state, added}]}]}`, bots sorted by id, versions newest first, `state` one of `active`, `probation`, `retired`, `failed`. Removed versions (§12.3 takedown) and removed bots are omitted, so a takedown disappears from the archive at the next run. About 100 bytes a version: 1,500 bots × a few versions is a few hundred KB, one file. `BotDetails.versions` also gets `size`, so bot pages link every version they show.
 7. **Contributors** (owner, 2026-10-24: public, opt-out): `data/v1/contributors.json` (new in v1, additive; `Contributors` in `types.ts`): `{generatedAt, engineVersion, contributors: [{login, country, battles, battlesWeek, tier, since}]}`, sorted by battles, users with `battles > 0` that haven't hidden themselves (user attribute `hid`, set with `POST me` `{"hidden": true}`) and aren't banned. `battlesWeek` from the user's counter snapshot 7 days ago (`state/e<E>/snapshots/users/<date>.json`). **Listing users without a GSI:** `plan` adds every uid of the log items it folds to `state/users.json`; `publish` GetItems those users (0.5 RCU each, paced at 10 RCU/s), so the cost is one read per contributor per run instead of a table scan. Banned users are found by the `ban` alert the ban writes (`ALERT` partition), which `cleanup` reads.

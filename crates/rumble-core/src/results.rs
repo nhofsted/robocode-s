@@ -51,6 +51,8 @@ pub struct ResultsContext<'a> {
     pub keys: &'a Keys,
     /// Whether a version is in the current plan's `top` of a division (§10.5).
     pub top: &'a dyn Fn(Division, u32) -> bool,
+    /// Whether a 1v1 pairing (lower vid, higher vid) is in the plan's `slotPairs`.
+    pub slot_pair: &'a dyn Fn(Division, u32, u32) -> bool,
     pub presigner: &'a dyn Presigner,
 }
 
@@ -489,6 +491,7 @@ pub fn apply_results<S: Store + ?Sized>(
             let assigned = &payload.b[index as usize];
             let division = assigned.division;
             let top = |vid: u32| (ctx.top)(division, vid);
+            let pair = |lo: u32, hi: u32| (ctx.slot_pair)(division, lo, hi);
             claims.extend(slots::claim_battle(
                 store,
                 config,
@@ -500,6 +503,7 @@ pub fn apply_results<S: Store + ?Sized>(
                 &assigned.vids,
                 by_index[&index],
                 &top,
+                &pair,
                 now,
             )?);
         }
@@ -813,6 +817,7 @@ mod tests {
             config,
             keys: &keys,
             top,
+            slot_pair: &|_, _, _| false,
             presigner: &FakePresigner,
         };
         apply_results(store, &ctx, user, request, now_ms, &[9; 32])

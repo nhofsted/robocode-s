@@ -88,17 +88,17 @@ fn dead_versions_cleanup(
     let keys = batch
         .objects()
         .list(Bucket::Jars, &format!("rec/e{engine}/"))?;
-    let top =
+    let (top, slot_pairs) =
         match batch
             .objects()
             .get(Bucket::State, &plan_key(engine, Division::OneVsOne), None)?
         {
-            Fetched::Found { bytes, .. } => {
-                Plan::from_bytes(&bytes).map(|p| p.top).unwrap_or_default()
-            }
-            _ => Vec::new(),
+            Fetched::Found { bytes, .. } => Plan::from_bytes(&bytes)
+                .map(|p| (p.top, p.slot_pairs))
+                .unwrap_or_default(),
+            _ => Default::default(),
         };
-    let (recordings, slots) = doomed(&keys, engine, &versions, &dead, &top);
+    let (recordings, slots) = doomed(&keys, engine, &versions, &dead, &top, &slot_pairs);
     let removed_dirs: Vec<String> = dead
         .iter()
         .filter(|v| v.state == VersionState::Removed)

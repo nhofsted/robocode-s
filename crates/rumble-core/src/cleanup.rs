@@ -105,13 +105,14 @@ pub fn recording_group(key: &str, engine: u32, dirs: &HashMap<String, u32>) -> O
 
 /// What to delete for the dead versions `dead`: the recording keys among `keys` that
 /// involve one, and the slot items (division, key) of the dead versions: from those
-/// recordings, every pair with a version of `top` (1v1) and the version's own item (melee).
+/// recordings, every pair with a version of `top` or among `slot_pairs` (1v1) and the version's own item (melee).
 pub fn doomed(
     keys: &[String],
     engine: u32,
     versions: &[VersionItem],
     dead: &[&VersionItem],
     top: &[u32],
+    slot_pairs: &[(u32, u32)],
 ) -> (Vec<String>, BTreeSet<(Division, String)>) {
     let dirs: HashMap<String, u32> = versions.iter().map(|v| (version_dir(v), v.vid)).collect();
     let dead_vids: HashSet<u32> = dead.iter().map(|v| v.vid).collect();
@@ -142,6 +143,11 @@ pub fn doomed(
                 };
                 slots.insert((Division::OneVsOne, group.key()));
             }
+        }
+    }
+    for &(lo, hi) in slot_pairs {
+        if dead_vids.contains(&lo) || dead_vids.contains(&hi) {
+            slots.insert((Division::OneVsOne, Group::Pair { lo, hi }.key()));
         }
     }
     (recordings, slots)
@@ -364,7 +370,7 @@ mod tests {
             format!("rec/e2/melee/{}/w-0.track", d(1)),
             "rec/e1/1v1/unknown_00/x/a-0.track".to_string(),
         ];
-        let (recordings, slots) = doomed(&keys, 1, &versions, &dead, &[3]);
+        let (recordings, slots) = doomed(&keys, 1, &versions, &dead, &[3], &[(1, 4)]);
         assert_eq!(recordings, vec![keys[0].clone(), keys[2].clone()]);
         let slots: Vec<(Division, String)> = slots.into_iter().collect();
         assert_eq!(
@@ -372,6 +378,7 @@ mod tests {
             vec![
                 (Division::OneVsOne, "1#2".to_string()),
                 (Division::OneVsOne, "1#3".to_string()),
+                (Division::OneVsOne, "1#4".to_string()),
                 (Division::Melee, "1".to_string()),
             ]
         );

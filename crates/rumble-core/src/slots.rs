@@ -7,11 +7,13 @@
 use crate::api::{BattleResult, RoundResult, SlotFailure};
 use crate::config::Config;
 use crate::ids::{Division, parse_vid36, vid36};
+use crate::metrics::RumbleMetrics;
 use crate::store::{
     SlotEntry, SlotItem, SlotStatus, Store, StoreError, StoreResult, User, UserState,
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// How long a claim waits for its upload (and the presigned PUT's validity), seconds.
@@ -169,15 +171,55 @@ pub fn eligible(user: &User, config: &Config) -> bool {
     user.reputation.state == UserState::New && user.reputation.rep >= config.rep.recorder_min
 }
 
+/// How many pairings of each kind (best, worst, problem bots) of every bot get slots (§12.5).
+pub const PAIRS_PER_KIND: usize = 5;
+
+/// The 1v1 matchups outside the `top` that get slots (§12.5), from the general 1v1 rumble's
+/// metrics: for every bot its [`PAIRS_PER_KIND`] best pairings (highest score), worst
+/// pairings (lowest score) and problem bots (most negative KNN-PBI), as `(lo, hi)` vid pairs,
+/// sorted and without duplicates. At most 15 per bot. Ties go to the lower opponent vid.
+pub fn slot_pairs(metrics: &RumbleMetrics) -> Vec<(u32, u32)> {
+    let mut pairs: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for (bot, row) in metrics.bots.iter().enumerate() {
+        let vid = metrics.members[bot].vid;
+        let mut seen: Vec<(u32, f64, f64)> = row
+            .pairings
+            .iter()
+            .filter(|p| p.battles > 0 && p.opponent != bot)
+            .map(|p| (metrics.members[p.opponent].vid, p.score, p.pbi))
+            .collect();
+        seen.sort_by_key(|&(opponent, ..)| opponent);
+        let mut take = |key: &dyn Fn(&(u32, f64, f64)) -> f64, keep: &dyn Fn(f64) -> bool| {
+            let mut ordered: Vec<&(u32, f64, f64)> = seen.iter().filter(|p| keep(key(p))).collect();
+            ordered.sort_by(|a, b| key(a).total_cmp(&key(b)));
+            for &&(opponent, ..) in ordered.iter().take(PAIRS_PER_KIND) {
+                pairs.insert((vid.min(opponent), vid.max(opponent)));
+            }
+        };
+        take(&|p| -p.1, &|_| true);
+        take(&|p| p.1, &|_| true);
+        take(&|p| p.2, &|pbi| pbi < 0.0);
+    }
+    pairs.into_iter().collect()
+}
+
 /// The slot items a counted `ok` battle may fill (§12.5): in 1v1 its pairing if either
-/// version is in the plan's `top`; in melee each contestant in `top`.
-pub fn groups(division: Division, vids: &[u32], top: &dyn Fn(u32) -> bool) -> Vec<Group> {
+/// version is in the plan's `top` or the pairing is one of the plan's `slotPairs`; in melee
+/// each contestant in `top`.
+pub fn groups(
+    division: Division,
+    vids: &[u32],
+    top: &dyn Fn(u32) -> bool,
+    pair: &dyn Fn(u32, u32) -> bool,
+) -> Vec<Group> {
     match division {
         Division::OneVsOne => match vids {
-            [a, b] if a != b && (top(*a) || top(*b)) => vec![Group::Pair {
-                lo: *a.min(b),
-                hi: *a.max(b),
-            }],
+            [a, b] if a != b && (top(*a) || top(*b) || pair(*a.min(b), *a.max(b))) => {
+                vec![Group::Pair {
+                    lo: *a.min(b),
+                    hi: *a.max(b),
+                }]
+            }
             _ => vec![],
         },
         Division::Melee => {
@@ -251,6 +293,7 @@ pub fn claim_battle<S: Store + ?Sized>(
     vids: &[u32],
     result: &BattleResult,
     top: &dyn Fn(u32) -> bool,
+    pair: &dyn Fn(u32, u32) -> bool,
     now: u64,
 ) -> StoreResult<Vec<Claim>> {
     let Some(rounds) = &result.rounds else {
@@ -258,7 +301,7 @@ pub fn claim_battle<S: Store + ?Sized>(
     };
     let per_side = config.slots.per_side;
     let mut claims = Vec::new();
-    for group in groups(division, vids, top) {
+    for group in groups(division, vids, top, pair) {
         let key = group.key();
         for _ in 0..2 {
             let item = store.get_slots(engine, division, &key)?;
@@ -461,6 +504,10 @@ mod tests {
 
     const NOW: u64 = 1_792_843_200;
 
+    fn no_pair(_: u32, _: u32) -> bool {
+        false
+    }
+
     fn sha(n: u8) -> String {
         format!("{n:02x}").repeat(32)
     }
@@ -543,15 +590,79 @@ mod tests {
 
         let top = |vid: u32| vid == 5;
         assert_eq!(
-            groups(Division::OneVsOne, &[9, 5], &top),
+            groups(Division::OneVsOne, &[9, 5], &top, &no_pair),
             [Group::Pair { lo: 5, hi: 9 }]
         );
-        assert!(groups(Division::OneVsOne, &[9, 6], &top).is_empty());
+        assert!(groups(Division::OneVsOne, &[9, 6], &top, &no_pair).is_empty());
         assert_eq!(
-            groups(Division::Melee, &[1, 5, 2, 3], &top),
+            groups(Division::Melee, &[1, 5, 2, 3], &top, &no_pair),
             [Group::Version(5)]
         );
-        assert!(groups(Division::Melee, &[1, 2], &top).is_empty());
+        assert!(groups(Division::Melee, &[1, 2], &top, &no_pair).is_empty());
+
+        // Slot pairs make a 1v1 pairing eligible in either order, never a melee version.
+        let pairs = |lo: u32, hi: u32| (lo, hi) == (6, 9);
+        for order in [[9, 6], [6, 9]] {
+            assert_eq!(
+                groups(Division::OneVsOne, &order, &top, &pairs),
+                [Group::Pair { lo: 6, hi: 9 }]
+            );
+        }
+        assert!(groups(Division::OneVsOne, &[9, 7], &top, &pairs).is_empty());
+        assert!(groups(Division::Melee, &[6, 9], &top, &pairs).is_empty());
+    }
+
+    #[test]
+    fn pairs_of_best_worst_and_problem_bots() {
+        use crate::metrics::{Member, compute};
+        use crate::record::{Entry, Record};
+        use crate::state::State;
+        // 12 bots; bot 1 scores 50 + j against bot j, everyone else 50:50.
+        let mut state = State::new(1, Division::OneVsOne, 0);
+        let mut fight = |a: u32, b: u32, sa: f32| {
+            let entry = |vid, score| Entry {
+                vid,
+                score,
+                firsts: 5,
+            };
+            let record = Record {
+                division: Division::OneVsOne,
+                weight: 1,
+                uid: "g1".to_string(),
+                contestants: vec![entry(a, sa), entry(b, 100.0 - sa)],
+                failed: None,
+                trusted: false,
+            };
+            state.fold(&record, 1);
+        };
+        for a in 1..=12u32 {
+            for b in a + 1..=12 {
+                fight(a, b, if a == 1 { 50.0 + b as f32 } else { 50.0 });
+            }
+        }
+        let members = (1..=12u32)
+            .map(|vid| Member {
+                vid,
+                id: format!("b.B{vid}"),
+                version: "1".into(),
+                author: "x".into(),
+                country: None,
+                rank_week_ago: None,
+            })
+            .collect();
+        let metrics = compute(members, &state);
+        let pairs = slot_pairs(&metrics);
+        assert!(pairs.windows(2).all(|w| w[0] < w[1]), "sorted, unique");
+        assert!(pairs.iter().all(|&(lo, hi)| lo < hi));
+        // Bot 1's best (12..8) and worst (2..6) opponents.
+        for other in [12, 11, 10, 9, 8, 2, 3, 4, 5, 6] {
+            assert!(pairs.contains(&(1, other)), "(1, {other})");
+        }
+        for vid in 1..=12 {
+            let n = pairs.iter().filter(|p| p.0 == vid || p.1 == vid).count();
+            assert!(n >= 5, "bot {vid} has {n}");
+        }
+        assert!(pairs.len() < 66, "not every pairing: {}", pairs.len());
     }
 
     #[test]
@@ -625,6 +736,7 @@ mod tests {
             &[5, 9],
             &b,
             &top,
+            &no_pair,
             NOW,
         )
         .unwrap();
@@ -651,6 +763,7 @@ mod tests {
             &[5, 9],
             &b,
             &top,
+            &no_pair,
             NOW,
         )
         .unwrap();
@@ -701,6 +814,7 @@ mod tests {
             &[5, 9],
             &b,
             &top,
+            &no_pair,
             later,
         )
         .unwrap();
@@ -747,6 +861,7 @@ mod tests {
             &[5, 9],
             &b,
             &top,
+            &no_pair,
             later + CLAIM_SECONDS,
         )
         .unwrap();
@@ -819,6 +934,7 @@ mod tests {
             &[5, 9],
             &b2,
             &|_| true,
+            &no_pair,
             NOW,
         )
         .unwrap();

@@ -16,6 +16,7 @@ pub mod archive;
 pub mod cleanup;
 pub mod plan;
 pub mod publish;
+pub mod slot_pairs;
 
 use crate::cloudfront::Cdn;
 use crate::routes::{CONFIG_KEY, config_from};

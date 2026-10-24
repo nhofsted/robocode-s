@@ -123,6 +123,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
         &format!("{DATA_PREFIX}/rumbles.json"),
         &json_bytes(&index(summaries, &generated_at)),
     )?;
+    super::slot_pairs::write(batch, engine, &runs)?;
 
     // Bot files: written if changed; a removed bot's file goes.
     for (n, bot) in bots.values().enumerate() {

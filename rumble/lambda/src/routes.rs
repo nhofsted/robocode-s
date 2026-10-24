@@ -407,14 +407,16 @@ impl App {
     fn limited(&self, hash: &str, config: &Config, limit: Limit, now_ms: u64) -> Result<(), u64> {
         let mut inner = self.lock();
         match limit {
-            Limit::Work => inner
-                .limiter
-                .interval(&format!("w:{hash}"), config.rate.work_seconds, now_ms),
-            Limit::Results => inner.limiter.interval(
-                &format!("r:{hash}"),
-                config.rate.results_seconds,
-                now_ms,
-            ),
+            Limit::Work => {
+                inner
+                    .limiter
+                    .interval(&format!("w:{hash}"), config.rate.work_seconds, now_ms)
+            }
+            Limit::Results => {
+                inner
+                    .limiter
+                    .interval(&format!("r:{hash}"), config.rate.results_seconds, now_ms)
+            }
             Limit::Other => inner.limiter.check(&format!("o:{hash}"), 2.0, 10.0, now_ms),
         }
     }
@@ -815,11 +817,14 @@ impl App {
             self.refresh_plans(&mut inner, config.engine_version, &Division::ALL, now_ms);
             let work = &inner.work;
             let top = |division: Division, vid: u32| work.is_top(division, vid);
+            let slot_pair =
+                |division: Division, lo: u32, hi: u32| work.is_slot_pair(division, lo, hi);
             let presigner = RecordingPresigner(self.services.objects.as_ref());
             let ctx = ResultsContext {
                 config,
                 keys: &self.keys,
                 top: &top,
+                slot_pair: &slot_pair,
                 presigner: &presigner,
             };
             results::apply_results(self.store(), &ctx, caller.user(), &body, now_ms, &random)?
