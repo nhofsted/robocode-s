@@ -28,6 +28,11 @@ fi
 read -r -s -p "GitHub OAuth client secret for $stage (empty keeps the current one): " secret
 echo
 if [ -n "$secret" ]; then
+  # A GitHub OAuth app's client secret is 40 hex digits: catch a paste that added to it.
+  if ! [[ "$secret" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "that is ${#secret} characters, not the 40 hex digits of a client secret: not stored" >&2
+    exit 1
+  fi
   "${aws[@]}" ssm put-parameter --name "$prefix/github-client-secret" --type SecureString \
     --value "$secret" --overwrite >/dev/null
   echo "$prefix/github-client-secret stored"
