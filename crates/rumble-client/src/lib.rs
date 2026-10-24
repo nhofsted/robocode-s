@@ -5,6 +5,7 @@
 
 pub mod backoff;
 pub mod http;
+pub mod import;
 pub mod jars;
 pub mod login;
 pub mod tokenfile;

@@ -45,6 +45,25 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Validates a jar in the order of §12.1. Returns the metadata, or the messages for the
 /// author (all messages of the first stage that fails).
 pub fn validate(bytes: &[u8], config: &Config) -> Result<JarInfo, Vec<String>> {
+    validate_inner(bytes, config, None).map(|(info, _)| info)
+}
+
+/// Like [`validate`], for jars from a participants list whose properties may lack
+/// `robot.version` (classic's list is authoritative for the version): when the properties have
+/// none, `fallback` is used. The flag says it was.
+pub fn validate_with_version(
+    bytes: &[u8],
+    config: &Config,
+    fallback: &str,
+) -> Result<(JarInfo, bool), Vec<String>> {
+    validate_inner(bytes, config, Some(fallback))
+}
+
+fn validate_inner(
+    bytes: &[u8],
+    config: &Config,
+    fallback: Option<&str>,
+) -> Result<(JarInfo, bool), Vec<String>> {
     let limits = &config.jar;
 
     // 1. Size, zip structure, names, unpacked size.
@@ -139,7 +158,12 @@ pub fn validate(bytes: &[u8], config: &Config) -> Result<JarInfo, Vec<String>> {
     };
     let get = |key: &str| props.get(key).map(|v| v.trim().to_string());
     let mut problems = Vec::new();
-    let version = get("robot.version").unwrap_or_default();
+    let mut version = get("robot.version").unwrap_or_default();
+    let mut from_fallback = false;
+    if let (true, Some(fallback)) = (version.is_empty(), fallback) {
+        version = fallback.trim().to_string();
+        from_fallback = true;
+    }
     if version.is_empty() {
         problems.push(format!("{properties_name}: robot.version is missing"));
     } else if let Err(why) = validate_version(&version) {
@@ -211,7 +235,7 @@ pub fn validate(bytes: &[u8], config: &Config) -> Result<JarInfo, Vec<String>> {
                 .map(|(first, _)| first.to_string())
         })
         .unwrap_or_default();
-    Ok(JarInfo {
+    let info = JarInfo {
         bot_id: classname.clone(),
         version,
         main_class: classname,
@@ -222,7 +246,8 @@ pub fn validate(bytes: &[u8], config: &Config) -> Result<JarInfo, Vec<String>> {
         weight_class: WeightClass::of(codesize, &config.weight_limits),
         sha256: sha256_hex(bytes),
         size: bytes.len() as u64,
-    })
+    };
+    Ok((info, from_fallback))
 }
 
 /// The codesize of a jar, nothing else checked (the sum of `validate`'s step 4).
@@ -579,6 +604,24 @@ mod tests {
         files.push(("lib/util.JAR", inner));
         let info = validate(&build_vec(&files), &Config::default()).unwrap();
         assert_eq!(info.codesize, 150);
+    }
+
+    #[test]
+    fn version_fallback_for_list_jars() {
+        let mut files = good_files();
+        files[2].1 = b"robot.classname=my.Bot\n".to_vec();
+        let bytes = build_vec(&files);
+        let config = Config::default();
+        assert!(validate(&bytes, &config).is_err());
+        let (info, from_list) = validate_with_version(&bytes, &config, "2.0 beta").unwrap();
+        assert_eq!(info.version, "2.0 beta");
+        assert!(from_list);
+        assert!(validate_with_version(&bytes, &config, "1,0").is_err());
+        // A version in the properties wins and is not flagged.
+        let good = build_vec(&good_files());
+        let (info, from_list) = validate_with_version(&good, &config, "9").unwrap();
+        assert_eq!(info.version, "1.2");
+        assert!(!from_list);
     }
 
     #[test]
