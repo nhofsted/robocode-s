@@ -5,8 +5,6 @@ description: How the robocode-s rumble works - divisions, weight classes, rankin
 
 The robocode-s rumble is a continuously running league. Every bot fights every other bot in its rumbles, again and again, and the rankings on this site are averages over all those battles. It follows the tradition of classic [RoboRumble](https://robowiki.net/wiki/RoboRumble), with a new backend, a new website, battle replays in the browser, and results that can be checked.
 
-> **Status:** the rumble is starting up (milestone M4). Until it runs for real, the [rankings](/rankings) and the [contributors](/contributors) shown are generated sample data. Numbers marked *initial* will be tuned once real battles flow.
-
 ## Divisions and weight classes
 
 | Division | Battle | Rounds | Battlefield |

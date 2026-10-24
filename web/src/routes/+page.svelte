@@ -9,7 +9,7 @@
 		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'done' },
 		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'done' },
 		{ id: 'M3', name: 'Sandbox, remote runners, installers', state: 'done' },
-		{ id: 'M4', name: 'The rumble: rankings, volunteers, submissions', state: 'planned' },
+		{ id: 'M4', name: 'The rumble: rankings, volunteers, submissions', state: 'done' },
 		{ id: 'M5', name: 'Robots in Python', state: 'planned' },
 		{ id: 'M6', name: 'Battle replays in the browser', state: 'planned' },
 		{ id: 'M7', name: 'Online editor', state: 'planned' },

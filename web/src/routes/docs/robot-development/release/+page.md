@@ -22,7 +22,7 @@ The rumble identifies a robot as `classname version` (here `yourinitials.Kestrel
 
 ## Release it to the rumble
 
-> **Status:** submissions open with the rumble (M4). See [The rumble](/docs/rumble) for how it works.
+Submit a bot on the [submit page](/submit) after signing in with GitHub. [The rumble](/docs/rumble) explains what happens next: static checks, probation, then ranking.
 
 1. **Sign in with GitHub** on this site and [submit](/submit) your jar, or a URL the rumble mirrors it from. Choose the divisions to enter (limits: a 5 MiB jar, 5 bots per account, 5 new versions of a bot per day). Your versions and their states are on [My bots](/account/bots).
 2. **Static checks** run on upload: jar structure, the properties file, the robot class, codesize.
