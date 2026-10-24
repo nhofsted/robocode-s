@@ -423,14 +423,14 @@ V(A,B)    = gain(n) · close · Σ_{r ∈ R(A,B)} ½ (contested_A,r · coverage_
 - Fewest battles first falls out of `gain` (it falls with n²), uncertainty out of σ², closeness out of `close` (pairing score near 50, LiteRumble's ×10) and `contested` (bots close in rank). Weight-class pairings count once per rumble they are in, so the small rumbles fill in proportion.
 - Probation versions, failed, retired and removed versions are not in the normal plan.
 - **Hourly target** `H_D = max(plan.minHourly_D, plan.headroom · battles_D in the last full hour)`.
-- **Quotas (1v1):** water-filling: a max-heap of `V` over all pairings; pop the top, give it one battle, recompute its `V` with `n + 1` (σ², m unchanged), push it back; `H_D` times. A pairing popped k times gets quota k. Cost O(P + H log P): about 0.3 s for 605k pairings and H = 20,000.
-- **Melee:** quotas per *bot* instead: water-filling over bots with `V_X = Σ_O V(X,O)` (recomputed for X after each pop by scaling its pairings' n by 1/9 of a battle each, i.e. `n_XO += 1/9` for its top 9 partners), `H_D` battles = `H_D` anchors. For each bot the plan also keeps its 40 partners with the highest `V(X,O)`.
+- **Quotas (1v1):** water-filling: a max-heap of `V` over all pairings; pop the top, give it one battle, recompute its `V` with `n + 1` (σ², m unchanged), push it back; `H_D` times. A pairing popped k times gets quota k. Equal `V`s (every unfought pairing of a class) are broken by a hash of the pairing seeded with the plan's `generatedAt`, not by vid: a lowest-vid tie-break gave one bot all of an hour's battles in prod's first hour. The water-filling then goes on for `3·H_D` more pops, the **overflow**, for volunteers beyond the target. Cost O(P + H log P): about 0.3 s for 605k pairings and H = 20,000.
+- **Melee:** quotas per *bot* instead: water-filling over bots with `V_X = Σ_O V(X,O)` (recomputed for X after each pop by scaling its pairings' n by 1/9 of a battle each, i.e. `n_XO += 1/9` for its top 9 partners), `H_D` battles = `H_D` anchors, then `3·H_D` overflow anchors. For each bot the plan also keeps its 40 partners with the highest `V(X,O)`. Ties (anchors, partners) use the same seeded hash.
 
 ### 10.4 Serving a batch (`api`, `GET work`)
 
 1. Choose divisions: among the client's `divisions`, each with probability ∝ its `share` (1v1 0.7, melee 0.3) among those it offers; a batch is one division.
 2. If the user may verify (rep ≥ `rep.verifierMin`, state `new`): up to `⌈max/2⌉` battles from `V#<E>` (oldest first, `NOT contains(uids, me)`, unclaimed or claim expired), each claimed with a conditional UpdateItem `cl = me, cu = now + deadline`. Probation battles (§12.3) come from the same queue. Watch requests (M6) likewise.
-3. Fill the rest from the plan: **1v1** samples pairings with probability ∝ remaining quota (an alias table rebuilt when the plan changes; the instance decrements its copy). When the instance has used its quotas, it samples ∝ the original quotas, so extra volunteers still get the most useful pairings. **Melee** samples an anchor ∝ remaining anchor quota, then adds 9 partners one at a time, each sampled ∝ `Σ V(chosen, O)` over the anchor's and the chosen bots' partner lists (bots not yet in the battle).
+3. Fill the rest from the plan: **1v1** samples pairings with probability ∝ remaining quota (an alias table rebuilt when the plan changes; the instance decrements its copy). When the instance has used its quotas, it samples the overflow quotas the same way, and after those ∝ all the quotas, so extra volunteers still get the most useful pairings. **Melee** samples an anchor ∝ remaining anchor quota (then overflow anchors, as in 1v1), then adds 9 partners one at a time, each sampled ∝ `Σ V(chosen, O)` over the anchor's and the chosen bots' partner lists (bots not yet in the battle).
 4. Seeds: 64 random bits each (`getrandom`). Robot order: shuffled.
 5. Sign the token; no write.
 
@@ -450,12 +450,13 @@ V(A,B)    = gain(n) · close · Σ_{r ∈ R(A,B)} ½ (contested_A,r · coverage_
  "bots": [[vid, "id", "version", "sha256", size], ...],
  "pairs": [[vidA, vidB, quota], ...],
  "anchors": [[vid, quota], ...], "partners": {"vid": [[vid, weight], ...]},
+ "overflowPairs": [[vidA, vidB, quota], ...], "overflowAnchors": [[vid, quota], ...],
  "top": [vid, ...],
  "slotPairs": [[vidLo, vidHi], ...],
  "probation": [vid, ...]}
 ```
 
-`top` holds the versions ranked in the top `slots.top` of any rumble of the division in the latest `publish` (from its snapshot), for slot eligibility (§12.5). `slotPairs` (additive; absent or empty in older plans and in melee) holds the 1v1 matchups that get slots besides those with a `top` bot, lower vid first, sorted: `plan` reads them from `state/e<E>/1v1/slot-pairs.json` (`{"pairs": [[lo, hi], ...]}`), which `publish` writes from the general 1v1 rumble's metrics (`rumble_core::slots::slot_pairs`, §12.5), so they are as old as the last publish. The `api` Lambda reloads the plan when its S3 ETag changes (checked at most every 60 s with a conditional GET).
+`top` holds the versions ranked in the top `slots.top` of any rumble of the division in the latest `publish` (from its snapshot), for slot eligibility (§12.5). `slotPairs` (additive; absent or empty in older plans and in melee) holds the 1v1 matchups that get slots besides those with a `top` bot, lower vid first, sorted: `plan` reads them from `state/e<E>/1v1/slot-pairs.json` (`{"pairs": [[lo, hi], ...]}`), which `publish` writes from the general 1v1 rumble's metrics (`rumble_core::slots::slot_pairs`, §12.5), so they are as old as the last publish. `overflowPairs` (1v1) and `overflowAnchors` (melee) are additive too: absent in older plans, whose samplers go straight to the original quotas. The `api` Lambda reloads the plan when its S3 ETag changes (checked at most every 60 s with a conditional GET).
 
 ### 10.6 A new engine version
 

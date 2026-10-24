@@ -26,6 +26,25 @@ const WINDOW: u32 = 20;
 const MIN_REPORTERS: u32 = 3;
 /// Weight classes, index = class (Nano .. Mega): rumble `r` has the bots of class `<= r`.
 const CLASSES: usize = 4;
+/// Overflow battles planned per hourly battle, for volunteers beyond `H_D` (§10.3).
+pub const OVERFLOW: u32 = 3;
+
+/// The tie-break seed of a plan: FNV-1a of its `generatedAt`, so plans are deterministic but
+/// equal priorities fall to different pairs every hour.
+fn seed_of(generated_at: &str) -> u64 {
+    generated_at.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// splitmix64 of `seed` and `key`: the tie-break of equal priorities. Without it, ties (every
+/// unfought pairing of a class) go to the lowest vids and an hour's battles pile onto a few bots.
+fn tie(seed: u64, key: u64) -> u64 {
+    let mut z = seed ^ key.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_133e_11eb);
+    z ^ (z >> 31)
+}
 
 fn class_index(class: WeightClass) -> usize {
     match class {
@@ -291,6 +310,7 @@ impl Priorities {
 #[derive(Clone, Copy, PartialEq)]
 struct Item {
     value: f64,
+    tie: u64,
     index: u32,
 }
 
@@ -298,9 +318,10 @@ impl Eq for Item {}
 
 impl Ord for Item {
     fn cmp(&self, other: &Item) -> Ordering {
-        // Max-heap on the value; ties go to the lower index, for deterministic plans.
+        // Max-heap on the value; ties go by the seeded tie-break, then the lower index.
         self.value
             .total_cmp(&other.value)
+            .then(self.tie.cmp(&other.tie))
             .then(other.index.cmp(&self.index))
     }
 }
@@ -311,10 +332,12 @@ impl PartialOrd for Item {
     }
 }
 
-/// Water-filling over all pairs (1v1): `h` times give the best pair one battle. Returns the
-/// battles per pair in `Priorities` order.
-fn pair_quotas(pr: &Priorities, h: u32) -> Vec<u32> {
+/// Water-filling over all pairs (1v1): `h` times give the best pair one battle, then
+/// `extra` more times for the overflow. Returns the battles per pair in `Priorities` order:
+/// the first `h` and the overflow.
+fn pair_quotas(pr: &Priorities, h: u32, extra: u32, seed: u64) -> (Vec<u32>, Vec<u32>) {
     let mut quotas = vec![0u32; pr.base.len()];
+    let mut overflow = vec![0u32; pr.base.len()];
     let items: Vec<Item> = pr
         .base
         .iter()
@@ -322,32 +345,47 @@ fn pair_quotas(pr: &Priorities, h: u32) -> Vec<u32> {
         .enumerate()
         .map(|(index, (&base, &n))| Item {
             value: base * gain_shape(f64::from(n)),
+            tie: tie(seed, index as u64),
             index: index as u32,
         })
         .collect();
     let mut heap = BinaryHeap::from(items);
-    for _ in 0..h {
+    for pop in 0..u64::from(h) + u64::from(extra) {
         let Some(mut top) = heap.peek_mut() else {
             break;
         };
         let at = top.index as usize;
-        quotas[at] += 1;
-        top.value = pr.base[at] * gain_shape(f64::from(pr.n[at] + quotas[at]));
+        if pop < u64::from(h) {
+            quotas[at] += 1;
+        } else {
+            overflow[at] += 1;
+        }
+        let n = pr.n[at] + quotas[at] + overflow[at];
+        top.value = pr.base[at] * gain_shape(f64::from(n));
     }
-    quotas
+    (quotas, overflow)
 }
 
 /// Melee water-filling over bots with `V_X = Σ_O V(X, O)`: each pop gives X an anchor battle
-/// and adds 1/9 battle to its 9 best partners. Returns the anchor quotas and each bot's best
+/// and adds 1/9 battle to its 9 best partners; `h` pops, then `extra` more for the overflow.
+/// Returns the anchor quotas, the overflow anchor quotas and each bot's best
 /// `PARTNERS_PER_BOT` partners `(index, V)` at the state's battle counts.
 #[allow(clippy::type_complexity)]
-fn melee_quotas(pr: &Priorities, h: u32) -> (Vec<u32>, Vec<Vec<(usize, f64)>>) {
+fn melee_quotas(
+    pr: &Priorities,
+    h: u32,
+    extra: u32,
+    seed: u64,
+) -> (Vec<u32>, Vec<u32>, Vec<Vec<(usize, f64)>>) {
     let count = pr.len();
     let mut quotas = vec![0u32; count];
+    let mut overflow = vec![0u32; count];
     let mut partners = vec![Vec::new(); count];
     if count < 2 {
-        return (quotas, partners);
+        return (quotas, overflow, partners);
     }
+    // Ties between partners of a bot (every unfought one) go by the pair's seeded key.
+    let pair_tie = |x: usize, o: usize| tie(seed, pr.slot(x, o) as u64);
     // Each bot's own battle counts against every other bot.
     let mut own = vec![0.0f64; count * count];
     let mut total = vec![0.0f64; count];
@@ -360,35 +398,46 @@ fn melee_quotas(pr: &Priorities, h: u32) -> (Vec<u32>, Vec<Vec<(usize, f64)>>) {
             total[x] += v;
             list.push((o, v));
         }
-        list.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        list.sort_unstable_by(|a, b| {
+            b.1.total_cmp(&a.1)
+                .then(pair_tie(x, b.0).cmp(&pair_tie(x, a.0)))
+                .then(a.0.cmp(&b.0))
+        });
         list.truncate(PARTNERS_PER_BOT);
         partners[x] = list;
     }
     let mut heap: BinaryHeap<Item> = (0..count)
         .map(|x| Item {
             value: total[x],
+            tie: tie(seed, x as u64),
             index: x as u32,
         })
         .collect();
-    let mut scratch: Vec<(f64, usize)> = Vec::with_capacity(count);
-    for _ in 0..h {
+    let mut scratch: Vec<(f64, u64, usize)> = Vec::with_capacity(count);
+    for pop in 0..u64::from(h) + u64::from(extra) {
         let Some(mut top) = heap.peek_mut() else {
             break;
         };
         let x = top.index as usize;
-        quotas[x] += 1;
+        if pop < u64::from(h) {
+            quotas[x] += 1;
+        } else {
+            overflow[x] += 1;
+        }
         scratch.clear();
         scratch.extend(
             (0..count)
                 .filter(|&o| o != x)
-                .map(|o| (pr.priority(x, o, own[x * count + o]), o)),
+                .map(|o| (pr.priority(x, o, own[x * count + o]), pair_tie(x, o), o)),
         );
         let take = BATTLE_PARTNERS.min(scratch.len());
-        let better = |a: &(f64, usize), b: &(f64, usize)| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1));
+        let better = |a: &(f64, u64, usize), b: &(f64, u64, usize)| {
+            b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2))
+        };
         if take < scratch.len() {
             scratch.select_nth_unstable_by(take - 1, better);
         }
-        for &(_, o) in &scratch[..take] {
+        for &(_, _, o) in &scratch[..take] {
             own[x * count + o] += 1.0 / BATTLE_PARTNERS as f64;
         }
         top.value = (0..count)
@@ -396,7 +445,7 @@ fn melee_quotas(pr: &Priorities, h: u32) -> (Vec<u32>, Vec<Vec<(usize, f64)>>) {
             .map(|o| pr.priority(x, o, own[x * count + o]))
             .sum();
     }
-    (quotas, partners)
+    (quotas, overflow, partners)
 }
 
 /// The row of a bot in `plan.json`: `[vid, id, version, sha256, size]`.
@@ -417,6 +466,13 @@ pub struct Plan {
     pub pairs: Vec<(u32, u32, u32)>,
     /// Melee: `[vid, quota]`, quota > 0, sorted.
     pub anchors: Vec<(u32, u32)>,
+    /// 1v1: the overflow `[vidA, vidB, quota]` (`OVERFLOW · hourly` battles past `pairs`, for
+    /// volunteers beyond the target), like `pairs`. Absent in older plans.
+    #[serde(default)]
+    pub overflow_pairs: Vec<(u32, u32, u32)>,
+    /// Melee: the overflow `[vid, quota]`, like `anchors`. Absent in older plans.
+    #[serde(default)]
+    pub overflow_anchors: Vec<(u32, u32)>,
     /// Melee: a bot's best partners `[vid, V]`, best first.
     pub partners: BTreeMap<u32, Vec<(u32, f64)>>,
     pub top: Vec<u32>,
@@ -432,27 +488,37 @@ pub fn plan(state: &State, config: &Config, input: &PlanInput) -> Plan {
     let division = state.division;
     let hourly = hourly_target(config, division, input.last_hour_battles);
     let pr = Priorities::new(state, config, input.bots);
+    let seed = seed_of(input.generated_at);
+    let extra = hourly.saturating_mul(OVERFLOW);
     let mut pairs = Vec::new();
     let mut anchors = Vec::new();
+    let mut overflow_pairs = Vec::new();
+    let mut overflow_anchors = Vec::new();
     let mut partners = BTreeMap::new();
     match division {
         Division::OneVsOne => {
-            let quotas = pair_quotas(&pr, hourly);
+            let (quotas, overflow) = pair_quotas(&pr, hourly, extra, seed);
             let mut at = 0;
             for i in 0..pr.len() {
                 for j in i + 1..pr.len() {
                     if quotas[at] > 0 {
                         pairs.push((pr.vid(i), pr.vid(j), quotas[at]));
                     }
+                    if overflow[at] > 0 {
+                        overflow_pairs.push((pr.vid(i), pr.vid(j), overflow[at]));
+                    }
                     at += 1;
                 }
             }
         }
         Division::Melee => {
-            let (quotas, lists) = melee_quotas(&pr, hourly);
+            let (quotas, overflow, lists) = melee_quotas(&pr, hourly, extra, seed);
             for (x, &quota) in quotas.iter().enumerate() {
                 if quota > 0 {
                     anchors.push((pr.vid(x), quota));
+                }
+                if overflow[x] > 0 {
+                    overflow_anchors.push((pr.vid(x), overflow[x]));
                 }
             }
             for (x, list) in lists.iter().enumerate() {
@@ -501,6 +567,8 @@ pub fn plan(state: &State, config: &Config, input: &PlanInput) -> Plan {
             .collect(),
         pairs,
         anchors,
+        overflow_pairs,
+        overflow_anchors,
         partners,
         top,
         slot_pairs,
@@ -528,9 +596,12 @@ impl Plan {
 
     /// The sampler of 1v1 battles (§10.4 step 3).
     pub fn pair_sampler(&self) -> QuotaSampler<(u32, u32)> {
-        QuotaSampler::new(
-            self.pairs.iter().map(|&(a, b, _)| (a, b)).collect(),
-            self.pairs.iter().map(|&(_, _, q)| q).collect(),
+        QuotaSampler::with_overflow(
+            self.pairs.iter().map(|&(a, b, q)| ((a, b), q)).collect(),
+            self.overflow_pairs
+                .iter()
+                .map(|&(a, b, q)| ((a, b), q))
+                .collect(),
         )
     }
 
@@ -543,9 +614,9 @@ impl Plan {
             .filter(|vid| self.probation.binary_search(vid).is_err())
             .collect();
         MeleeSampler {
-            anchors: QuotaSampler::new(
-                self.anchors.iter().map(|&(v, _)| v).collect(),
-                self.anchors.iter().map(|&(_, q)| q).collect(),
+            anchors: QuotaSampler::with_overflow(
+                self.anchors.clone(),
+                self.overflow_anchors.clone(),
             ),
             partners: self.partners.clone(),
             planned,
@@ -609,20 +680,23 @@ impl Alias {
 }
 
 /// Draws items with probability proportional to their remaining quota; once every quota is
-/// used up, proportional to the original quotas, so extra volunteers still get the most
-/// useful work (§10.4 step 3). The instance's copy of the remaining quotas is decremented.
+/// used up, from the overflow quotas the same way, and once those are used up too,
+/// proportional to all the quotas, so extra volunteers still get the most useful work
+/// (§10.4 step 3). The instance's copy of the remaining quotas is decremented.
 #[derive(Clone, Debug)]
 pub struct QuotaSampler<T> {
     items: Vec<T>,
     remaining: Vec<u32>,
     remaining_total: u64,
+    /// The overflow quotas, taken into `remaining` once it is used up.
+    overflow: Option<Vec<u32>>,
     original: Option<Alias>,
     /// The alias table of `remaining`, rebuilt after draws.
     current: Option<Alias>,
     stale: bool,
 }
 
-impl<T: Copy> QuotaSampler<T> {
+impl<T: Copy + Ord> QuotaSampler<T> {
     pub fn new(items: Vec<T>, quotas: Vec<u32>) -> QuotaSampler<T> {
         assert_eq!(items.len(), quotas.len());
         let weights: Vec<f64> = quotas.iter().map(|&q| f64::from(q)).collect();
@@ -631,20 +705,53 @@ impl<T: Copy> QuotaSampler<T> {
             items,
             remaining_total: quotas.iter().map(|&q| u64::from(q)).sum(),
             remaining: quotas,
+            overflow: None,
             current: original.clone(),
             original,
             stale: false,
         }
     }
 
-    /// Battles left in the quotas.
+    /// A sampler of `quotas`, then of `overflow` (an item may be in both).
+    pub fn with_overflow(quotas: Vec<(T, u32)>, overflow: Vec<(T, u32)>) -> QuotaSampler<T> {
+        let mut merged: BTreeMap<T, (u32, u32)> = BTreeMap::new();
+        for (t, q) in quotas {
+            merged.entry(t).or_default().0 += q;
+        }
+        for (t, q) in overflow {
+            merged.entry(t).or_default().1 += q;
+        }
+        let items: Vec<T> = merged.keys().copied().collect();
+        let first: Vec<u32> = merged.values().map(|q| q.0).collect();
+        let second: Vec<u32> = merged.values().map(|q| q.1).collect();
+        let all: Vec<f64> = merged
+            .values()
+            .map(|q| f64::from(q.0) + f64::from(q.1))
+            .collect();
+        let mut sampler = QuotaSampler::new(items, first);
+        sampler.original = Alias::new(&all);
+        if second.iter().any(|&q| q > 0) {
+            sampler.overflow = Some(second);
+        }
+        sampler
+    }
+
+    /// Battles left in the quotas, overflow included.
     pub fn remaining(&self) -> u64 {
-        self.remaining_total
+        let overflow: u64 = self.overflow.iter().flatten().map(|&q| u64::from(q)).sum();
+        self.remaining_total + overflow
     }
 
     /// Draws an item (`None` if the plan has none), taking one battle off its quota if any is
     /// left.
     pub fn draw(&mut self, u1: f64, u2: f64) -> Option<T> {
+        if self.remaining_total == 0
+            && let Some(overflow) = self.overflow.take()
+        {
+            self.remaining_total = overflow.iter().map(|&q| u64::from(q)).sum();
+            self.remaining = overflow;
+            self.stale = true;
+        }
         if self.remaining_total == 0 {
             let at = self.original.as_ref()?.sample(u1, u2);
             return Some(self.items[at]);
@@ -1185,11 +1292,111 @@ mod tests {
             },
         );
         let mut sampler = p.pair_sampler();
-        assert_eq!(sampler.remaining(), u64::from(p.hourly));
-        for _ in 0..p.hourly {
+        let planned = u64::from(p.hourly) * u64::from(1 + OVERFLOW);
+        assert_eq!(sampler.remaining(), planned);
+        for _ in 0..planned {
             sampler.draw(rng.next(), rng.next());
         }
         assert_eq!(sampler.remaining(), 0);
+    }
+
+    #[test]
+    fn quota_sampler_uses_the_overflow_before_repeating() {
+        let mut s = QuotaSampler::with_overflow(vec![(1u32, 2), (2, 1)], vec![(2, 1), (3, 2)]);
+        assert_eq!(s.remaining(), 6);
+        let mut rng = Rng(3);
+        let mut draws: Vec<u32> = (0..3)
+            .map(|_| s.draw(rng.next(), rng.next()).unwrap())
+            .collect();
+        draws.sort_unstable();
+        assert_eq!(draws, [1, 1, 2]);
+        let mut draws: Vec<u32> = (0..3)
+            .map(|_| s.draw(rng.next(), rng.next()).unwrap())
+            .collect();
+        draws.sort_unstable();
+        assert_eq!(draws, [2, 3, 3]);
+        assert_eq!(s.remaining(), 0);
+        // Then proportional to all the quotas, 2:2:2.
+        let mut counts = [0u32; 3];
+        for _ in 0..30_000 {
+            counts[s.draw(rng.next(), rng.next()).unwrap() as usize - 1] += 1;
+        }
+        assert!(
+            counts
+                .iter()
+                .all(|&c| (f64::from(c) / 30_000.0 - 1.0 / 3.0).abs() < 0.02)
+        );
+        // No overflow (an older plan): straight to the original quotas.
+        let mut s = QuotaSampler::with_overflow(vec![(1u32, 1)], vec![]);
+        assert_eq!(s.draw(0.5, 0.5), Some(1));
+        assert_eq!(s.draw(0.5, 0.5), Some(1));
+    }
+
+    #[test]
+    fn equal_priorities_are_spread_over_the_bots() {
+        // 300 unfought nanos: every pairing has the same priority. An hour's battles must not
+        // all go to the lowest vid (prod, 2026-10-24: one bot got all 200).
+        let config = Config::default();
+        let state = state_1v1();
+        let all = bots(300, WeightClass::Nano);
+        let input = |at| PlanInput {
+            bots: &all,
+            probation: &[],
+            top: &[],
+            slot_pairs: &[],
+            last_hour_battles: 0,
+            generated_at: at,
+        };
+        let p = plan(&state, &config, &input("2026-10-24T15:12:00Z"));
+        assert_eq!(p.hourly, 200);
+        let mut per_bot: HashMap<u32, u32> = HashMap::new();
+        for &(a, b, q) in p.pairs.iter().chain(&p.overflow_pairs) {
+            assert_eq!(q, 1, "unfought pairings first: no pair twice");
+            *per_bot.entry(a).or_default() += 1;
+            *per_bot.entry(b).or_default() += 1;
+        }
+        assert_eq!(p.overflow_pairs.len(), 600);
+        assert!(per_bot.len() > 280, "{} bots", per_bot.len());
+        assert!(per_bot.values().all(|&n| n <= 15), "{per_bot:?}");
+        // Deterministic within an hour, different the next.
+        assert_eq!(plan(&state, &config, &input("2026-10-24T15:12:00Z")), p);
+        let next = plan(&state, &config, &input("2026-10-24T16:12:00Z"));
+        let first: HashSet<(u32, u32)> = p.pairs.iter().map(|x| (x.0, x.1)).collect();
+        assert!(
+            next.pairs
+                .iter()
+                .filter(|x| first.contains(&(x.0, x.1)))
+                .count()
+                < 20
+        );
+    }
+
+    #[test]
+    fn equal_melee_priorities_are_spread_over_the_bots() {
+        // 400 unfought melee bots: anchors and partner lists must not all be the lowest vids.
+        let config = Config::default();
+        let state = State::new(1, Division::Melee, 0);
+        let p = plan(
+            &state,
+            &config,
+            &PlanInput {
+                bots: &bots(400, WeightClass::Mega),
+                probation: &[],
+                top: &[],
+                slot_pairs: &[],
+                last_hour_battles: 0,
+                generated_at: "2026-10-24T15:12:00Z",
+            },
+        );
+        assert_eq!(p.anchors.iter().map(|a| a.1).sum::<u32>(), 20);
+        assert_eq!(p.overflow_anchors.iter().map(|a| a.1).sum::<u32>(), 60);
+        assert!(p.anchors.iter().any(|a| a.0 > 100), "{:?}", p.anchors);
+        let partners: HashSet<u32> = p
+            .anchors
+            .iter()
+            .flat_map(|a| p.partners[&a.0].iter().map(|x| x.0))
+            .collect();
+        assert!(partners.len() > 300, "{} partners", partners.len());
     }
 
     fn melee_state(count: u32) -> State {
@@ -1251,8 +1458,8 @@ mod tests {
             seen.extend(battle);
         }
         assert!(seen.len() > 30);
-        // 150 anchors were available; later battles use the original quotas.
-        assert_eq!(sampler.remaining(), 0);
+        // 150 anchors and 450 overflow anchors were available.
+        assert_eq!(sampler.remaining(), 200);
 
         // Many bots: partner lists are capped at 40.
         let big = plan(
