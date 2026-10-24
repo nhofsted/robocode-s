@@ -417,10 +417,10 @@ contested_X,r = 1 + plan.rankFactor · exp(−z²/2),   z = gap_X,r / √(SE_APS
                 gap = APS distance to the nearer neighbour in rumble r's APS order (nb that neighbour)
                 (a bot with no SE yet, i.e. P_X < 2: contested = 1 + rankFactor)
 coverage_X,r  = 1 + missing_X,r / members_r          bots with incomplete pairings get more
-V(A,B)    = gain(n) · close · Σ_{r ∈ R(A,B)} ½ (contested_A,r · coverage_A,r + contested_B,r · coverage_B,r)
+V(A,B)    = gain(n) · close · mean_{r ∈ R(A,B)} ½ (contested_A,r · coverage_A,r + contested_B,r · coverage_B,r)
 ```
 
-- Fewest battles first falls out of `gain` (it falls with n²), uncertainty out of σ², closeness out of `close` (pairing score near 50, LiteRumble's ×10) and `contested` (bots close in rank). Weight-class pairings count once per rumble they are in, so the small rumbles fill in proportion.
+- Fewest battles first falls out of `gain` (it falls with n²), uncertainty out of σ², closeness out of `close` (pairing score near 50, LiteRumble's ×10) and `contested` (bots close in rank). The rumble terms are averaged over the rumbles holding both bots, not summed: a sum made a nano pairing worth four mega ones, and after launch the unfought mega bots waited hours for the nano pairings.
 - Probation versions, failed, retired and removed versions are not in the normal plan.
 - **Hourly target** `H_D = max(plan.minHourly_D, plan.headroom · battles_D in the last full hour)`.
 - **Quotas (1v1):** water-filling: a max-heap of `V` over all pairings; pop the top, give it one battle, recompute its `V` with `n + 1` (σ², m unchanged), push it back; `H_D` times. A pairing popped k times gets quota k. Equal `V`s (every unfought pairing of a class) are broken by a hash of the pairing seeded with the plan's `generatedAt`, not by vid: a lowest-vid tie-break gave one bot all of an hour's battles in prod's first hour. The water-filling then goes on for `3·H_D` more pops, the **overflow**, for volunteers beyond the target. Cost O(P + H log P): about 0.3 s for 605k pairings and H = 20,000.

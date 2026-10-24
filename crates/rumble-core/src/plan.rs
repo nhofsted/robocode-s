@@ -109,8 +109,8 @@ struct Acc {
 }
 
 /// The priorities of one more battle for every pair of a set of bots (§10.3). The bots are
-/// indexed in vid order; `base` holds `close · σ² · Σ_r ½(contested·coverage)` of each pair
-/// (the part of `V` that doesn't depend on `n`).
+/// indexed in vid order; `base` holds `close · σ² · mean_r ½(contested·coverage)` of each pair
+/// over the rumbles holding both (the part of `V` that doesn't depend on `n`).
 pub struct Priorities {
     vids: Vec<u32>,
     classes: Vec<usize>,
@@ -245,7 +245,11 @@ impl Priorities {
         for i in 0..count {
             for j in i + 1..count {
                 let k = priorities.classes[i].max(priorities.classes[j]);
-                base.push(close[at] * variance[at] * 0.5 * (suffix[i][k] + suffix[j][k]));
+                // The mean over the pair's rumbles, not the sum: a sum made a nano pairing
+                // worth 4 mega ones, and unfought mega bots waited for every nano pairing.
+                let rumbles = (CLASSES - k) as f64;
+                let both = 0.5 * (suffix[i][k] + suffix[j][k]) / rumbles;
+                base.push(close[at] * variance[at] * both);
                 at += 1;
             }
         }
@@ -1369,6 +1373,32 @@ mod tests {
                 .count()
                 < 20
         );
+    }
+
+    #[test]
+    fn weight_classes_are_averaged_not_summed() {
+        // 100 nanos and 100 megas, nothing fought: a nano pairing is in 4 rumbles, a mega one
+        // in 1. Summed, every battle of the hour went to the nanos (prod, 2026-10-24).
+        let config = Config::default();
+        let mut all = bots(100, WeightClass::Nano);
+        all.extend((101..=200).map(|v| bot(v, WeightClass::Mega)));
+        let p = plan(
+            &state_1v1(),
+            &config,
+            &PlanInput {
+                bots: &all,
+                probation: &[],
+                top: &[],
+                slot_pairs: &[],
+                last_hour_battles: 0,
+                generated_at: "2026-10-24T20:12:00Z",
+            },
+        );
+        let megas = p.pairs.iter().filter(|x| x.0 > 100 && x.1 > 100).count();
+        assert!(megas > 20, "{megas} mega pairings of {}", p.pairs.len());
+        let pr = Priorities::new(&state_1v1(), &config, &all);
+        let ratio = pr.current(0, 1) / pr.current(100, 101);
+        assert!((0.8..1.25).contains(&ratio), "nano/mega {ratio}");
     }
 
     #[test]
