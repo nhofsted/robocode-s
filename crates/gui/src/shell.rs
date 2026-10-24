@@ -49,17 +49,15 @@ impl Tab {
         match name {
             "start" => Some(Tab::Start),
             "watch" | "replay" => Some(Tab::Watch),
+            "rumble" => Some(Tab::Rumble),
             "options" => Some(Tab::Options),
             _ => None,
         }
     }
 
-    /// Why a tab can't be opened yet.
+    /// Why a tab can't be opened.
     fn disabled(self) -> Option<&'static str> {
-        match self {
-            Tab::Rumble => Some("Coming with the rumble client (M4)"),
-            _ => None,
-        }
+        None
     }
 }
 
@@ -243,7 +241,8 @@ mod tests {
         assert_eq!(Tab::parse("watch"), Some(Tab::Watch));
         assert_eq!(Tab::parse("replay"), Some(Tab::Watch));
         assert_eq!(Tab::parse("start"), Some(Tab::Start));
-        assert_eq!(Tab::parse("rumble"), None);
+        assert_eq!(Tab::parse("rumble"), Some(Tab::Rumble));
+        assert_eq!(Tab::parse("nonsense"), None);
     }
 
     #[test]

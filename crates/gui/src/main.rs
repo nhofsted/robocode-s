@@ -19,6 +19,7 @@ mod live;
 mod pace;
 mod perf;
 mod replay;
+mod rumble;
 mod screen;
 mod settings;
 mod shell;
@@ -65,7 +66,7 @@ stderr.
                      is reached without TLS, another needs a CA's certificate
   --zoom Z[,X,Y]     battles and replays start zoomed in Z times (1 to 16), centred
                      on battlefield point X,Y (y up; default the field's centre)
-  --tab NAME         open a tab at start: start, watch (or replay) or options
+  --tab NAME         open a tab at start: start, watch (or replay), rumble or options
   --browse FIELD     open the file dialog of a field at start: record, replay,
                      folder (the options' robot folder) or battle (a .battle file
                      to open), on its tab
@@ -79,7 +80,11 @@ stderr.
   --from-ide         open the \"From your IDE...\" panel at start (for screenshots)
   --ide-add          add the robots started by an IDE to the battle as they connect
                      (for screenshots and testing)
-  --kill-at TURN:N   with --battle: kill robot N (from 0, in --battle's order) at
+  --rumble-demo STATE
+                     show the Run Rumble tab in a made-up state, with no network
+                     or sign-in (for screenshots): out, code, signed-in,
+                     contributing, waiting or update
+  --kill-at TURN:N  with --battle: kill robot N (from 0, in --battle's order) at
                      turn TURN of the first round, as its kill button does
   --input-at TURN:EVENT
                      with --battle: send a mouse or keyboard event to interactive
@@ -148,6 +153,7 @@ fn main() -> ExitCode {
     let mut browse = None;
     let mut kill_at = None;
     let (mut ide_panel, mut ide_add) = (false, false);
+    let mut rumble_demo = None;
     let mut input_at = Vec::new();
     let mut camera = view::Camera::default();
     let mut size = [1200.0, 860.0];
@@ -175,6 +181,7 @@ fn main() -> ExitCode {
             "--loading" => loading = true,
             "--from-ide" => ide_panel = true,
             "--ide-add" => ide_add = true,
+            "--rumble-demo" => rumble_demo = Some(value()),
             "--kill-at" => {
                 let text = value();
                 let parsed = text
@@ -209,7 +216,7 @@ fn main() -> ExitCode {
             "--tab" => {
                 let name = value();
                 let Some(t) = Tab::parse(&name) else {
-                    eprint!("--tab wants start, watch or options, not {name:?}\n\n{USAGE}");
+                    eprint!("--tab wants start, watch, rumble or options, not {name:?}\n\n{USAGE}");
                     return ExitCode::from(2);
                 };
                 tab = Some(t);
@@ -285,6 +292,7 @@ fn main() -> ExitCode {
                 min_size: min_size.into(),
                 ide_panel,
                 ide_add,
+                rumble_demo,
             };
             Ok(Box::new(App::new(
                 cc,

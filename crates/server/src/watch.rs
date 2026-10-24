@@ -103,6 +103,7 @@ impl Watcher {
                         results: over.results,
                         rounds: over.rounds,
                         aborted: over.aborted,
+                        connections: Vec::new(),
                     });
                 }
                 server_message::Msg::Error(e) => return Err(e.message),

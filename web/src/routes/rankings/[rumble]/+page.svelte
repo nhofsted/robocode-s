@@ -92,7 +92,7 @@
 				{data.summary.rounds} rounds on {data.summary.battlefield.width}×{data.summary.battlefield
 					.height} ·
 			{/if}
-			updated daily, last {formatDate(data.rankings.generatedAt)}
+			updated every 6 hours, last {formatDate(data.rankings.generatedAt)}
 		</p>
 		<label class="search">
 			<span class="visually-hidden">Filter bots</span>
@@ -149,14 +149,17 @@
 						<td class="num">{r.rank}</td>
 						<td class="num change {c.cls}" title={c.label}>{c.text}</td>
 						<td class="bot">
-							<a href={resolve('/bot/[id]', { id: r.id }) + `?rumble=${data.rankings.rumble}`}>
+							<a
+								href={resolve('/bot/[id]', { id: r.id }) + `?rumble=${data.rankings.rumble}`}
+								title="{r.id} {r.version}"
+							>
 								<Tank colors={tankColors(r.id)} size={28} heading={90} />
 								<span class="name">{shortName(r.id)}</span>
 								<span class="pkg">{packageName(r.id)}</span>
 								<span class="ver mono">{r.version}</span>
 							</a>
 						</td>
-						<td class="author"><Flag code={r.country} /> {r.author}</td>
+						<td class="author"><span class="who" title={r.author}><Flag code={r.country} /> {r.author}</span></td>
 						{#each METRICS as m (m.key)}
 							<td class="num" class:key={m.key === sortKey}>{formatNumber(r[m.key], m.digits)}</td>
 						{/each}
@@ -216,15 +219,50 @@
 	.search input {
 		width: min(20rem, 100%);
 	}
-	.table-scroll {
-		max-height: 75vh;
+	/* The table is the page: it scrolls with the page, not in a box of its own. Where it fits
+	   (wide screens), the wrapper clips instead of scrolling, so the column headers stick under
+	   the site's header (57px) as the page scrolls; narrower, it scrolls sideways. */
+	@media (min-width: 1000px) {
+		.table-scroll {
+			overflow-x: clip;
+		}
+		.table-scroll :global(thead th) {
+			top: 57px;
+		}
+	}
+	/* Long ids and author names are cut with an ellipsis (the full text is the title), so the
+	   table fits without scrolling sideways. The short name gives way last. The bot column takes
+	   the room the others leave (width 100% with max-width 0 lets a cell shrink below its
+	   content); on a phone its 9rem minimum makes the table scroll instead. */
+	td.bot {
+		width: 100%;
+		max-width: 0;
+		min-width: 10rem;
 	}
 	.bot a {
-		display: inline-flex;
+		overflow: hidden;
+		display: flex;
 		align-items: baseline;
 		gap: 0.4rem;
+		min-width: 0;
 		text-decoration: none;
 		white-space: nowrap;
+	}
+	.name,
+	.pkg,
+	.ver {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	/* The package and version give way first; the short name only once they are gone. */
+	.name {
+		flex-shrink: 0;
+		max-width: 100%;
+	}
+	.pkg,
+	.ver {
+		flex-shrink: 1;
 	}
 	.bot :global(canvas) {
 		align-self: center;
@@ -244,7 +282,13 @@
 	}
 	.author {
 		color: var(--text-2);
+	}
+	.who {
+		display: block;
+		max-width: 10rem;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	td.key {
 		color: var(--text);

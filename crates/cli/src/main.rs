@@ -7,6 +7,7 @@ mod battle;
 mod ide;
 mod replay;
 mod results;
+mod rumble;
 
 use std::process::ExitCode;
 
@@ -18,10 +19,11 @@ Commands:
   replay     re-run a recorded battle, verify it and print the results
   agent      run robots for battles on other machines (a runner agent)
   ide-config print the run configuration for debugging a robot from your IDE
+  rumble     contribute battles to the rumble (login, run, status, ...)
   --version  print the version, engine version and protocol version
 
 `robocode-s battle --help` describes the battle options, `robocode-s agent --help`
-the agent's.
+the agent's, `robocode-s rumble --help` the rumble's.
 ";
 
 fn main() -> ExitCode {
@@ -79,6 +81,19 @@ fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("robocode-s ide-config: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("rumble") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", rumble::USAGE);
+                return ExitCode::SUCCESS;
+            }
+            match rumble::main(&args[1..]) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("robocode-s rumble: {e}");
                     ExitCode::FAILURE
                 }
             }

@@ -5,8 +5,6 @@ description: How the robocode-s rumble works - divisions, weight classes, rankin
 
 The robocode-s rumble is a continuously running league. Every bot fights every other bot in its rumbles, again and again, and the rankings on this site are averages over all those battles. It follows the tradition of classic [RoboRumble](https://robowiki.net/wiki/RoboRumble), with a new backend, a new website, battle replays in the browser, and results that can be checked.
 
-> **Status:** the rumble starts with milestone M4. The [rankings](/rankings) shown now are generated sample data, so the website can be built ahead of the backend. Everything below describes the design; numbers marked *initial* will be tuned once real battles flow.
-
 ## Divisions and weight classes
 
 | Division | Battle | Rounds | Battlefield |
@@ -34,14 +32,14 @@ Each pair of bots in a rumble is a **pairing**. A battle's score is the classic 
 | **Vote** | Every bot "votes" for the opponent that scores best against it; Vote is a bot's share of all votes. |
 | **KNN-PBI** | Per pairing: your score against an opponent minus the average score of the bots ranked closest to you against that opponent. Strongly negative values point at your *problem bots*. |
 
-The rankings are recomputed once a day, all metrics together. A bot that hasn't met every opponent yet is marked in the rankings; its numbers are still settling.
+The rankings are recomputed every 6 hours, all metrics together. A bot that hasn't met every opponent yet is marked in the rankings; its numbers are still settling.
 
 ## Who runs the battles
 
 The rumble's servers never run a robot. **Volunteers** do: anyone with a GitHub account can run the rumble client (built into the robocode-s command line and GUI) and contribute battles.
 
 1. The client asks for work and gets a batch of battles: which bots, which rumble, how many rounds, and a **seed**. The rumble picks pairings with the fewest battles first.
-2. It downloads the robot jars (mirrored by the rumble and checked by hash) and runs the battles in [deterministic mode](/docs/robot-development#deterministic-mode).
+2. It downloads the robot jars (mirrored by the rumble and checked by hash) and runs the battles in [deterministic mode](/docs/robot-development/deterministic-mode).
 3. It uploads the results of the whole batch.
 
 Because battles are deterministic, a battle with the same robots and seed gives the same result on any machine. That makes results **checkable**:
@@ -52,14 +50,20 @@ Because battles are deterministic, a battle with the same robots and seed gives 
 
 In deterministic mode no turn is ever skipped for being slow, so a slow bot may behave slightly differently here than in classic RoboRumble.
 
+## Contributing battles
+
+Anyone with a GitHub account can lend their computer: `robocode-s rumble login`, then `robocode-s rumble run`, or switch Contribute on in the GUI. [Contributing battles](/docs/rumble/contributing) has the steps, the sandboxes and what runs on your machine.
+
 ## Entering a bot
 
-1. **Sign in with GitHub** and submit a robot jar, or a URL to mirror it from. Choose divisions.
+1. **Sign in with GitHub** and [submit](/submit) a robot jar, or a URL to mirror it from. Choose divisions (1v1 and melee for now).
 2. **Static checks** run immediately: jar structure, robot properties, the robot class, codesize.
 3. **Probation:** a few battles on trusted clients. Bots that fail to load, crash or get disabled every round are deactivated, with a message to the author.
 4. **Ranked:** the bot enters normal scheduling. A new version starts with fresh pairings; the previous version is retired.
 
-See [Developing a robot](/docs/robot-development#package-it) for how to package a bot.
+See [Developing a robot](/docs/robot-development/release#package-it) for how to package a bot, and [My bots](/account/bots) for the versions you submitted, their states (probation, active, failed, retired) and why a version failed.
+
+**Limits.** A jar of up to 5 MiB; at most 5 bots per account and 5 new versions of a bot per day; every release needs a new `robot.version`. A GitHub account younger than 30 days needs the owner's approval first: [open an issue](https://github.com/nhofsted/robocode-s/issues). A bot can only get new versions from its owner. Team files are not accepted yet.
 
 **Existing bots.** At launch the rumble imports the bots in the current RoboRumble participant lists, attributed to their authors. Authors can claim their bots by signing in with GitHub.
 

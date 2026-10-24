@@ -1,9 +1,11 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# rumble/lambda is its own workspace (docs/rumble-backend.md §2).
+exclude = ["rumble"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "EPL-2.0"
@@ -16,6 +18,8 @@ robocode-s-replay = { path = "crates/replay" }
 robocode-s-geom = { path = "crates/geom" }
 robocode-s-java-random = { path = "crates/java-random" }
 robocode-s-protocol = { path = "crates/protocol" }
+robocode-s-rumble-core = { path = "crates/rumble-core" }
+robocode-s-rumble-client = { path = "crates/rumble-client" }
 robocode-s-runner = { path = "crates/runner" }
 robocode-s-server = { path = "crates/server" }
 

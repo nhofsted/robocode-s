@@ -8,6 +8,7 @@ use crate::icons;
 use crate::ide::{self, Ide};
 use crate::live::Live;
 use crate::replay::{Opening, ReplayView};
+use crate::rumble::Rumble;
 use crate::screen;
 use crate::settings::{Contents, Rules, Settings};
 use crate::shell::{self, Tab};
@@ -370,6 +371,9 @@ pub struct App {
     /// The text [`Browse::Save`] saves, and why the last save failed.
     saving: Option<screen::SaveRequest>,
     save_error: Option<String>,
+    /// The Run Rumble page: the sign-in and the contributing thread, which go on while
+    /// other pages are open.
+    rumble: Rumble,
 }
 
 /// The field a file dialog is open for.
@@ -422,6 +426,8 @@ pub struct Launch {
     /// battle (`--from-ide`, `--ide-add`, for screenshots and testing).
     pub ide_panel: bool,
     pub ide_add: bool,
+    /// Show the Run Rumble page in a made-up state (`--rumble-demo`, for screenshots).
+    pub rumble_demo: Option<String>,
 }
 
 impl App {
@@ -498,6 +504,11 @@ impl App {
             browsing: None,
             saving: None,
             save_error: None,
+            rumble: launch
+                .rumble_demo
+                .as_deref()
+                .and_then(Rumble::demo)
+                .unwrap_or_default(),
         };
         crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
         app.scan_folders();
@@ -1533,13 +1544,16 @@ impl App {
         });
     }
 
-    /// The Run Rumble tab (M4); its tab is disabled until then.
+    /// The Run Rumble tab: signing in and contributing battles to the rumble.
     fn rumble_page(&mut self, root: &mut egui::Ui) {
-        self.page(root, |_, ui| {
-            ui.heading("Run Rumble");
-            ui.add_space(8.0);
-            ui.label(RichText::new("Coming with the rumble client (M4).").weak());
+        let ctx = &root.ctx().clone();
+        let mut changed = false;
+        self.page(root, |app, ui| {
+            changed = app.rumble.ui(ui, &mut app.settings, &app.env);
         });
+        if changed {
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
     }
 
     /// The options, behind the gear: robot folders, how battles are drawn, and the
@@ -2065,7 +2079,7 @@ impl App {
 const LABELS: f32 = 150.0;
 
 /// A two-column grid of options: the labels, then their fields.
-fn options_grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn options_grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id)
         .num_columns(2)
         .min_col_width(LABELS)
@@ -2244,7 +2258,7 @@ fn rules_rows(ui: &mut egui::Ui, rules: &mut Rules) {
     ui.end_row();
 }
 
-fn section(ui: &mut egui::Ui, title: &str) {
+pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     if ui.cursor().top() > ui.max_rect().top() {
         ui.add_space(20.0);
     }
@@ -2277,6 +2291,21 @@ fn expand_home(text: &str) -> PathBuf {
 /// A framed, scrolling list of robots, as wide as the column (so its scrollbar lines up
 /// with the field above it).
 fn list_box(ui: &mut egui::Ui, id: &str, height: f32, content: impl FnOnce(&mut egui::Ui)) {
+    list_frame(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .min_scrolled_height(height)
+            .max_height(height)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                content(ui);
+            });
+    });
+}
+
+/// The frame of a [`list_box`]: dark, with a line, as wide as the column.
+pub(crate) fn list_frame(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::NONE
         .fill(shell::BAR)
         .stroke(egui::Stroke::new(1.0, shell::LINE))
@@ -2284,15 +2313,7 @@ fn list_box(ui: &mut egui::Ui, id: &str, height: f32, content: impl FnOnce(&mut 
         .inner_margin(egui::Margin::same(3))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            egui::ScrollArea::vertical()
-                .id_salt(id)
-                .auto_shrink([false, false])
-                .min_scrolled_height(height)
-                .max_height(height)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    content(ui);
-                });
+            content(ui);
         });
 }
 
@@ -2502,6 +2523,9 @@ impl eframe::App for App {
         self.poll_listing(ctx);
         self.poll_starting(ctx);
         self.poll_ide(ctx);
+        // Contributing goes on, and a closing window waits for it, on any page.
+        self.rumble.poll(ctx);
+        self.rumble.closing(ctx);
         let style = self.style();
         // A battle keeps running in its tab while another tab is open.
         if let Some(live) = &mut self.remote.live {

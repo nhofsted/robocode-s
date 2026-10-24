@@ -1,0 +1,60 @@
+[workspace]
+# Its own workspace (spec §2): the AWS SDK crates stay out of the root's clippy and tests.
+resolver = "3"
+members = ["."]
+
+[package]
+name = "robocode-s-rumble-lambda"
+description = "The rumble backend's AWS Lambdas: api and batch"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "EPL-2.0"
+repository = "https://github.com/nhofsted/robocode-s"
+publish = false
+
+[lib]
+name = "rumble_lambda"
+
+[[bin]]
+name = "api"
+path = "src/bin/api.rs"
+
+[[bin]]
+name = "batch"
+path = "src/bin/batch.rs"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+float_cmp = "allow"
+
+[dependencies]
+robocode-s-rumble-core = { path = "../../crates/rumble-core" }
+robocode-s-engine = { path = "../../crates/engine" }
+aws-config = { version = "=1.13.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-cloudfront = { version = "=1.139.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-dynamodb = { version = "=1.134.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-s3 = { version = "=1.155.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-ssm = { version = "=1.131.0", default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+base64 = "0.23.1"
+getrandom = "0.3.4"
+lambda_runtime = { version = "=1.5.0", default-features = false }
+lambda_http = { version = "=1.3.2", default-features = false, features = ["apigw_http"] }
+md-5 = "0.11.0"
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json", "form", "http2"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
+sha2 = "0.11.0"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+url = "2.5.7"
+
+[dev-dependencies]
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true
+codegen-units = 1

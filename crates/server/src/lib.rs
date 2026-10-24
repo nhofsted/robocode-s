@@ -169,6 +169,20 @@ pub struct BattleOutcome {
     pub rounds: i32,
     /// An observer stopped the battle (`ObserverControl.abort`).
     pub aborted: bool,
+    /// Per robot, by robot index: whether it was connected to the end. Empty where that
+    /// isn't known (a battle watched from elsewhere, [`watch`]).
+    pub connections: Vec<Connection>,
+}
+
+/// What became of a robot's connection in a battle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connection {
+    /// Connected from the start of the battle to its end.
+    Kept,
+    /// It never connected (it couldn't be started, or the connect timeout passed).
+    Never,
+    /// It connected, and the connection ended before the battle did (its process ended).
+    Lost,
 }
 
 /// Something the battle loop must handle.
@@ -249,6 +263,8 @@ pub struct RobotPipe {
 #[derive(Default)]
 struct Link {
     stream: Option<Conn>,
+    /// It connected once ([`Connection`]).
+    connected: bool,
     /// The robot receives results this round: from `RoundStart` until the `Tick` in which
     /// it stops (death, halt or the end of the round).
     active: bool,
@@ -839,6 +855,15 @@ impl<'a> BattleLoop<'a> {
             );
         }
         let results = recording::round_result(self.battle()).results;
+        let connections = self
+            .links
+            .iter()
+            .map(|l| match (l.connected, l.stream.is_some()) {
+                (false, _) => Connection::Never,
+                (true, true) => Connection::Kept,
+                (true, false) => Connection::Lost,
+            })
+            .collect();
         self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
             aborted,
             rounds,
@@ -865,6 +890,7 @@ impl<'a> BattleLoop<'a> {
             results,
             rounds,
             aborted,
+            connections,
         })
     }
 
@@ -1058,6 +1084,7 @@ impl<'a> BattleLoop<'a> {
         match incoming {
             Incoming::RobotConnected { index, stream } => {
                 self.links[index].stream = Some(stream);
+                self.links[index].connected = true;
                 let statics = self.statics[index].clone();
                 self.send(
                     index,

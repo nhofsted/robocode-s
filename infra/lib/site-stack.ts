@@ -1,6 +1,7 @@
-// The static site (web/, ADR 0015) on S3 + CloudFront, at the rumble's domain (design §12.1).
-// Later the rumble's Lambdas join this distribution as /api/* origins, and the rankings Lambda
-// writes data/v1/ into the bucket. Until then the bucket holds the synthetic sample data.
+// The static site (web/, ADR 0015) on S3 + CloudFront, at the rumble's domain (design §12.1), and
+// the rumble's backend (lib/rumble.ts) behind /api/*, /jars/* and /rec/*. The rankings Lambda writes
+// data/v1/ into the bucket; until it runs, the bucket holds the synthetic sample data.
+// Dev (docs/rumble-backend.md §14.1) has no domain and no certificate: CloudFront's own domain.
 
 import { fileURLToPath } from 'node:url';
 import { CfnOutput, Duration, RemovalPolicy, Size, Stack, type StackProps } from 'aws-cdk-lib';
@@ -21,14 +22,25 @@ import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, CacheControl, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import type { Construct } from 'constructs';
+import { Rumble, type RumbleProps, type Stage } from './rumble.ts';
 
 export interface SiteStackProps extends StackProps {
-	domain: string;
-	certificate: ICertificate;
+	stage: Stage;
+	/** Without domain and certificate the site is served from `dxxxx.cloudfront.net` (dev). */
+	domain?: string;
+	certificate?: ICertificate;
 	/** `pnpm build` output of web/. */
 	siteDir: string;
 	/** Files to publish under data/v1/ (web/tools/sample-data.ts), until the rankings Lambda runs. */
 	sampleDataDir?: string;
+	/**
+	 * Dev only, second deploy: `https://dxxxx.cloudfront.net`, the `DistributionDomainName` output
+	 * of the first. The `api` Lambda can't read it from the distribution (a dependency cycle).
+	 */
+	devOrigin?: string;
+	githubClientId: string;
+	alertEmail?: string;
+	code: RumbleProps['code'];
 }
 
 const repoPath = (path: string) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
@@ -64,8 +76,7 @@ export class SiteStack extends Stack {
 		// Caching follows the objects' Cache-Control, set per deployment below.
 		const distribution = new Distribution(this, 'Distribution', {
 			comment: 'robocode-s site',
-			domainNames: [props.domain],
-			certificate: props.certificate,
+			...(props.domain && { domainNames: [props.domain], certificate: props.certificate }),
 			priceClass: PriceClass.PRICE_CLASS_100,
 			httpVersion: HttpVersion.HTTP2_AND_3,
 			defaultBehavior: {
@@ -133,9 +144,24 @@ export class SiteStack extends Stack {
 		pages.node.addDependency(immutable);
 		if (data) pages.node.addDependency(data);
 
+		const siteOrigin = props.domain
+			? `https://${props.domain}`
+			: (props.devOrigin ?? 'https://set-devOrigin-on-the-second-deploy.invalid');
+		new Rumble(this, 'Rumble', {
+			stage: props.stage,
+			distribution,
+			siteBucket: bucket,
+			siteOrigin,
+			// Dev: the distribution's domain would close a cycle through the Lambda's policy.
+			corsOrigin: props.domain || props.devOrigin ? siteOrigin : 'https://*.cloudfront.net',
+			githubClientId: props.githubClientId,
+			alertEmail: props.alertEmail,
+			code: props.code
+		});
+
 		new CfnOutput(this, 'DistributionDomainName', {
 			value: distribution.distributionDomainName,
-			description: `CNAME target for ${props.domain}`
+			description: props.domain ? `CNAME target for ${props.domain}` : 'The dev site and its API'
 		});
 		new CfnOutput(this, 'BucketName', { value: bucket.bucketName });
 		new CfnOutput(this, 'PackagesBucketName', {

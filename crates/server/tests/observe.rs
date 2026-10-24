@@ -7,10 +7,20 @@ use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::watch::Watcher;
-use robocode_s_server::{Observers, RobotEntry, ServerConfig, run_battle_with};
+use robocode_s_server::{
+    BattleOutcome, Connection, Observers, RobotEntry, ServerConfig, run_battle_with,
+};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
+
+/// The outcome as an observer from elsewhere sees it: without the robots' connections.
+fn watched(outcome: BattleOutcome) -> BattleOutcome {
+    BattleOutcome {
+        connections: Vec::new(),
+        ..outcome
+    }
+}
 
 fn entry(name: &str, token: &str) -> RobotEntry {
     RobotEntry {
@@ -139,7 +149,12 @@ fn a_remote_observer_with_the_token_watches_the_battle_to_its_results() {
     assert_eq!(round_results, 2);
 
     let served = server.join().unwrap().unwrap();
-    assert_eq!(outcome, served, "the observer gets the battle's results");
+    assert_eq!(served.connections, [Connection::Kept; 2]);
+    assert_eq!(
+        outcome,
+        watched(served),
+        "the observer gets the battle's results"
+    );
     assert_eq!(outcome.rounds, 2);
     assert!(!outcome.aborted);
     for r in robots {
@@ -196,7 +211,7 @@ fn a_remote_observer_that_pauses_and_leaves_does_not_hold_the_battle_up() {
     });
     let outcome = server.join().unwrap().unwrap();
     assert_eq!(outcome.rounds, 1);
-    assert_eq!(local.join().unwrap().unwrap(), outcome);
+    assert_eq!(local.join().unwrap().unwrap(), watched(outcome));
     robot.join().unwrap();
 }
 
@@ -345,7 +360,7 @@ fn controls_apply_while_no_robot_runs_anymore() {
     let outcome = outcome.unwrap();
     assert!(outcome.aborted, "Stop ends the battle");
     assert_eq!(outcome.rounds, 1, "no round starts after the stop");
-    assert_eq!(server.join().unwrap().unwrap(), outcome);
+    assert_eq!(watched(server.join().unwrap().unwrap()), outcome);
     for r in robots {
         r.join().unwrap();
     }
@@ -568,7 +583,7 @@ fn stopped_by(
             }
         })
         .unwrap();
-    assert_eq!(server.join().unwrap().unwrap(), outcome);
+    assert_eq!(watched(server.join().unwrap().unwrap()), outcome);
     for r in robots {
         r.join().unwrap();
     }
@@ -652,7 +667,7 @@ fn observers_from_elsewhere_watch_over_tls_with_the_pinned_certificate() {
     assert!(plain.contains("if it wants TLS"), "{plain}");
     let watcher = Watcher::connect(&observe_address, "s3cret", Some(pin)).unwrap();
     let outcome = watcher.run(None, |_| {}).unwrap();
-    assert_eq!(outcome, server.join().unwrap().unwrap());
+    assert_eq!(outcome, watched(server.join().unwrap().unwrap()));
     for r in robots {
         r.join().unwrap();
     }

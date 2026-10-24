@@ -1,7 +1,15 @@
 // Loads the rumble data files (types.ts) from /data/v1, or from VITE_RUMBLE_DATA if set.
 
 import { error } from '@sveltejs/kit';
-import type { BotDetails, BotId, Rankings, RumbleId, RumbleIndex } from './types.ts';
+import type {
+	Archive,
+	BotDetails,
+	BotId,
+	Contributors,
+	Rankings,
+	RumbleId,
+	RumbleIndex
+} from './types.ts';
 
 type Fetch = typeof fetch;
 
@@ -21,8 +29,13 @@ async function load<T>(fetch: Fetch, path: string, what: string): Promise<T> {
 
 export const loadIndex = (fetch: Fetch) => load<RumbleIndex>(fetch, 'rumbles.json', 'rumbles');
 
+export const loadContributors = (fetch: Fetch) =>
+	load<Contributors>(fetch, 'contributors.json', 'contributors');
+
 export const loadRankings = (fetch: Fetch, rumble: RumbleId) =>
 	load<Rankings>(fetch, `rankings/${encodeURIComponent(rumble)}.json`, `rumble "${rumble}"`);
 
 export const loadBot = (fetch: Fetch, id: BotId) =>
 	load<BotDetails>(fetch, `bots/${encodeURIComponent(id)}.json`, `bot "${id}"`);
+
+export const loadArchive = (fetch: Fetch) => load<Archive>(fetch, 'archive.json', 'the archive');

@@ -255,6 +255,12 @@ button:disabled {
 	color: var(--text-2);
 	cursor: not-allowed;
 }
+.button.danger,
+button.danger {
+	background: transparent;
+	color: var(--danger);
+	border: 1px solid var(--danger);
+}
 .button.secondary {
 	background: transparent;
 	color: var(--radar);
@@ -262,6 +268,8 @@ button:disabled {
 }
 
 input[type='search'],
+input[type='text'],
+input[type='url'],
 select {
 	font: inherit;
 	font-size: 0.9rem;

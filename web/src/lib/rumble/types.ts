@@ -120,6 +120,8 @@ export interface BotVersion {
 	weightClass: WeightClass;
 	/** SHA-256 of the robot package, hex. */
 	sha256: string;
+	/** Size of the jar in bytes. The jar is `/jars/<sha256>.jar`. */
+	size: number;
 	addedAt: string;
 	/** Set when the version was replaced or retired. */
 	retiredAt: string | null;
@@ -162,4 +164,61 @@ export interface HistoryPoint {
 	rank: number;
 	aps: number;
 	glicko: number;
+}
+
+/**
+ * `/data/v1/contributors.json`: the volunteers who contributed battles, sorted by `battles`,
+ * most first. Users who have not contributed, who hid themselves (opt-out) or are banned are
+ * not listed.
+ */
+export interface Contributors {
+	schema: typeof SCHEMA_VERSION;
+	generatedAt: string;
+	/** The engine version the counters of this file refer to. */
+	engineVersion: number;
+	contributors: Contributor[];
+}
+
+export interface Contributor {
+	/** The volunteer's login. */
+	login: string;
+	/** The volunteer's country (see `Author.country`). */
+	country: string | null;
+	/** Battles contributed in total. */
+	battles: number;
+	/** Battles contributed in the last 7 days. */
+	battlesWeek: number;
+	/** Reputation tier: `new` (below the verifier threshold), `verifier` or `quarantined`. */
+	tier: 'new' | 'verifier' | 'quarantined';
+	/** When the volunteer first signed in. */
+	since: string;
+}
+
+/**
+ * `/data/v1/archive.json`: every downloadable version of every bot that has not been taken
+ * down (removed bots and versions are left out), for the archive page.
+ */
+export interface Archive {
+	schema: number;
+	generatedAt: string;
+	/** Sorted by id. */
+	bots: ArchiveBot[];
+}
+
+export interface ArchiveBot {
+	id: BotId;
+	author: string;
+	/** Newest first. */
+	versions: ArchiveVersion[];
+}
+
+export interface ArchiveVersion {
+	version: string;
+	/** SHA-256 of the jar, hex: the file is `/jars/<sha256>.jar`. */
+	sha256: string;
+	/** Size of the jar in bytes. */
+	size: number;
+	state: 'active' | 'probation' | 'retired' | 'failed';
+	/** `YYYY-MM-DD`. */
+	added: string;
 }

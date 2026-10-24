@@ -8,10 +8,13 @@
 
 import {
 	SCHEMA_VERSION,
+	type Archive,
 	type BotDetails,
 	type BotId,
 	type BotRumble,
 	type BotVersion,
+	type Contributor,
+	type Contributors,
 	type Division,
 	type HistoryPoint,
 	type Metrics,
@@ -38,6 +41,8 @@ export interface Fixtures {
 	index(): RumbleIndex;
 	rankings(rumble: RumbleId): Rankings | undefined;
 	bot(id: BotId): BotDetails | undefined;
+	contributors(): Contributors;
+	archive(): Archive;
 }
 
 interface Bot {
@@ -165,9 +170,32 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		};
 	};
 
+	const contributors = (): Contributors => createContributors(seed, now);
+
+	// Every bot with all its versions; the newest is active, older ones are retired.
+	const archive = (): Archive => ({
+		schema: SCHEMA_VERSION,
+		generatedAt: now.toISOString(),
+		bots: [...bots]
+			.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+			.map((b) => ({
+				id: b.id,
+				author: b.author,
+				versions: b.versions.map((v) => ({
+					version: v.version,
+					sha256: v.sha256,
+					size: v.size,
+					state: v.retiredAt ? ('retired' as const) : ('active' as const),
+					added: v.addedAt.slice(0, 10)
+				}))
+			}))
+	});
+
 	const get = (path: string): unknown | undefined => {
 		const clean = path.replace(/^\/+/, '');
 		if (clean === 'rumbles.json') return index();
+		if (clean === 'contributors.json') return contributors();
+		if (clean === 'archive.json') return archive();
 		let m = /^rankings\/([^/]+)\.json$/.exec(clean);
 		if (m) return rankings(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
@@ -175,7 +203,41 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		return undefined;
 	};
 
-	return { get, index, rankings, bot };
+	return { get, index, rankings, bot, contributors, archive };
+}
+
+const LOGIN_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night', 'cold', 'dusty'];
+const LOGIN_SECOND = ['coder', 'farm', 'node', 'box', 'rig', 'lab', 'pi', 'cluster', 'tower', 'laptop', 'vm'];
+
+/** The volunteers list: heavy-tailed battle counts, sorted by battles, most first. */
+function createContributors(seed: number, now: Date): Contributors {
+	const rand = mulberry32(seed ^ 0x5eed);
+	const logins = new Set<string>();
+	const list: Contributor[] = [];
+	while (list.length < 40) {
+		const login = `${pick(rand, LOGIN_FIRST)}-${pick(rand, LOGIN_SECOND)}${rand() < 0.5 ? Math.floor(rand() * 100) : ''}`;
+		if (logins.has(login)) continue;
+		logins.add(login);
+		const battles = Math.max(1, Math.floor(200_000 * rand() ** 4));
+		const active = rand() < 0.6;
+		const sinceDays = 1 + Math.floor(rand() * 200);
+		const verifier = battles > 5000 && rand() < 0.8;
+		list.push({
+			login,
+			country: COUNTRIES[hash(login) % COUNTRIES.length] || null,
+			battles,
+			battlesWeek: active ? Math.min(battles, Math.floor(battles * (0.02 + rand() * 0.2))) : 0,
+			tier: verifier ? 'verifier' : rand() < 0.03 ? 'quarantined' : 'new',
+			since: new Date(now.getTime() - sinceDays * 86_400_000).toISOString()
+		});
+	}
+	list.sort((a, b) => b.battles - a.battles || (a.login < b.login ? -1 : 1));
+	return {
+		schema: SCHEMA_VERSION,
+		generatedAt: now.toISOString(),
+		engineVersion: ENGINE_VERSION,
+		contributors: list
+	};
 }
 
 function createBots(rand: () => number, size: number, now: Date): Bot[] {
@@ -252,6 +314,7 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 			codesize: Math.max(60, Math.round(codesize * (0.85 + 0.03 * i))),
 			weightClass: classOf(codesize),
 			sha256: sha256Like(`${id}@${major}.${minor}`),
+			size: jarSize(`${id}@${major}.${minor}`),
 			addedAt: added.toISOString(),
 			retiredAt: null
 		});
@@ -502,6 +565,11 @@ function isoDay(now: Date, offset: number): string {
 
 function daysBetween(a: Date, b: Date): number {
 	return (b.getTime() - a.getTime()) / 86_400_000;
+}
+
+/** A plausible jar size: 8 to 200 KB. */
+function jarSize(text: string): number {
+	return 8_000 + (hash(`size:${text}`) % 192_000);
 }
 
 function sha256Like(text: string): string {
