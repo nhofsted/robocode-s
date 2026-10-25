@@ -39,14 +39,15 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-usage: robocode-s-gui [recording] [--run]
+usage: robocode-s-gui [recording] [--full]
        robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
        robocode-s-gui --watch HOST:PORT [--token TOKEN] [--fingerprint F] [--tps N]
 
 Without arguments: the battle setup. With a recording (from --record or
 \"Record to\", or a website viewer track): its replay, in the Watch Battle tab.
-With --run, a track downloaded from the website runs its battle at once, as Run
-this battle does: robots that aren't here yet come from the rumble.
+With --full, a track downloaded from the website becomes a full recording at
+once, as its Full recording button does: robots that aren't here yet come from
+the rumble.
 Robots come from the robot folders set in the options (the gear), saved in
 $XDG_CONFIG_HOME/robocode-s/gui.json (~/.config/... by default; another file
 with ROBOCODES_GUI_CONFIG): their jars, and the folders themselves when they hold
@@ -158,7 +159,7 @@ fn main() -> ExitCode {
         setup.watch_token = token;
     }
     let mut loading = false;
-    let mut run = false;
+    let mut full = false;
     let mut tab = None;
     let mut browse = None;
     let mut kill_at = None;
@@ -189,7 +190,7 @@ fn main() -> ExitCode {
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
             "--loading" => loading = true,
-            "--run" => run = true,
+            "--full" => full = true,
             "--from-ide" => ide_panel = true,
             "--ide-add" => ide_add = true,
             "--rumble-demo" => rumble_demo = Some(value()),
@@ -302,7 +303,7 @@ fn main() -> ExitCode {
                 start,
                 watch,
                 replay,
-                run,
+                full,
                 tab,
                 browse,
                 kill_at,

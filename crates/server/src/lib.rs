@@ -105,10 +105,6 @@ pub struct ServerConfig {
     /// local battle, [`random_token`]); empty: none (tests). Observers from elsewhere
     /// use [`Observers`] and its token instead.
     pub observer_token: String,
-    /// Pause before the first turn of this round (0-based), as an observer's pause does:
-    /// a battle run again to watch one of its rounds (the GUI's "Run this battle") gets
-    /// there at full speed and stops at its start.
-    pub pause_at_round: Option<i32>,
 }
 
 impl Default for ServerConfig {
@@ -123,7 +119,6 @@ impl Default for ServerConfig {
             connect_timeout: Duration::from_secs(30),
             record: None,
             observer_token: String::new(),
-            pause_at_round: None,
         }
     }
 }
@@ -964,10 +959,6 @@ impl<'a> BattleLoop<'a> {
         // with turn 1 (classic's round start snapshot doesn't read out text).
         self.collect_executes();
         self.snapshot_with(false);
-        if self.config.pause_at_round == Some(round) {
-            self.paused = true;
-            self.pace();
-        }
         loop {
             if self.abort && !self.battle().aborted {
                 self.engine.input(Entry::Abort(true));

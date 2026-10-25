@@ -60,9 +60,6 @@ pub struct Live {
     pub paint: Vec<bool>,
     pub paused: bool,
     pub turns_per_second: u32,
-    /// The round the server pauses at by itself (`ServerConfig::pause_at_round`) and the
-    /// speed from there on, until it got there.
-    pub pause_at: Option<(i32, u32)>,
     /// Stop was pressed: the battle ends.
     pub stopping: bool,
     /// The end of the battle with its results, or why it failed.
@@ -177,7 +174,6 @@ impl Live {
             paint: vec![false; n],
             paused: false,
             turns_per_second: 30,
-            pause_at: None,
             stopping: false,
             outcome: None,
             interaction: Interaction::default(),
@@ -203,15 +199,6 @@ impl Live {
             match update {
                 Ok(server_message::Msg::TurnSnapshot(s)) => {
                     crate::perf::turn_taken();
-                    // The server paused at this round's start: it goes on when Play is
-                    // pressed, at the chosen speed.
-                    if let Some((round, speed)) = self.pause_at
-                        && s.round >= round
-                    {
-                        self.pause_at = None;
-                        self.paused = true;
-                        self.set_speed(speed);
-                    }
                     for (out, r) in self.output.iter_mut().zip(&s.robots) {
                         if !r.output.is_empty() {
                             out.push_str(&r.output);

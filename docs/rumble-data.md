@@ -49,14 +49,14 @@ The index contains only filled slots recorded with their robot order (slots fill
 
 ### Downloaded tracks
 
-A replay page's Download button saves the track with its battle appended, so that the desktop app can name the robots and run the battle again (Run this battle; `robocode-s-gui FILE --run`): the track's bytes, 8 zero bytes, the battle as UTF-8 JSON, the JSON's length as a little-endian `u32`, and the 8 bytes `RSBATTLE` (`robocode_s_replay::with_battle` and `split_battle`, `web/src/lib/replay/download.ts`). A decoder reads up to 8 bytes past a track's end and takes them for its trimmed trailing zeros, so decoders that don't know about the battle still decode the track exactly; `robocode_s_replay::decode` strips it.
+A replay page's Download button saves the track with its battle appended, so that the desktop app can name the robots and turn the track into a full recording (Full recording; `robocode-s-gui FILE --full`): the track's bytes, 8 zero bytes, the battle as UTF-8 JSON, the JSON's length as a little-endian `u32`, and the 8 bytes `RSBATTLE` (`robocode_s_replay::with_battle` and `split_battle`, `web/src/lib/replay/download.ts`). A decoder reads up to 8 bytes past a track's end and takes them for its trimmed trailing zeros, so decoders that don't know about the battle still decode the track exactly; `robocode_s_replay::decode` strips it.
 
 ```json
 {"schema": 1, "engine": 1, "seed": "-8383547923782144062", "round": 5, "rounds": 35, "width": 800, "height": 600,
  "robots": [{"bot": "nz.jdc.nano.PatternAdept", "version": "1.0", "sha16": "a7cbe7e480fc338b"}, {"bot": "Krabb.fe4r.Fe4r", "version": "0.4", "sha16": "9f79e5b0fcb27d54"}]}
 ```
 
-`round` is 0-based, `robots` is in battle order (the track's robot `i` is `robots[i]`). Rules it leaves out are the rumble's (`gunCoolingRate`, `inactivityTime`, `sentryBorder`, `hideEnemyNames` may be added; the track has its gun cooling). The app takes each jar from its rumble jar cache, from its robot folders (by hash), or from `/jars/<sha256>.jar` on the rumble it is set to, with the hash and size from `/data/v1/bots/<id>.json`. It runs the battle deterministically with exactly those jars and no data files, at full speed up to `round`, and pauses there.
+`round` is 0-based, `robots` is in battle order (the track's robot `i` is `robots[i]`). Rules it leaves out are the rumble's (`gunCoolingRate`, `inactivityTime`, `sentryBorder`, `hideEnemyNames` may be added; the track has its gun cooling). The app takes each jar from its rumble jar cache, from its robot folders (by hash), or from `/jars/<sha256>.jar` on the rumble it is set to, with the hash and size from `/data/v1/bots/<id>.json`. It runs the battle again deterministically with exactly those jars and no data files, unseen and as fast as it goes, recording it to `<data>/recordings/` (files not saved elsewhere go after a day), and opens the recording at the start of `round`, with a button to save it.
 
 ## Rules
 

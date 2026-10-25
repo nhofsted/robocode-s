@@ -1,6 +1,6 @@
 // A track as the Download button saves it: with the battle it is a round of appended
 // (crates/replay `with_battle`, docs/rumble-data.md "Downloaded tracks"), so that the
-// desktop app can name its robots and run the battle again.
+// desktop app can name its robots and turn the track into a full recording.
 import type { RecordedBot } from '../rumble/types.ts';
 
 /** The battle appended to a downloaded track. */

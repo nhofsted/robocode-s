@@ -10,6 +10,7 @@
 
 use crate::graphs::History;
 use crate::icons;
+use crate::rerun::Stage;
 use crate::screen::{self, DebugProperties};
 use crate::shell;
 use crate::sound;
@@ -18,12 +19,13 @@ use crate::track::{self, TrackBattle};
 use crate::view::{self, Camera, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
+use robocode_s_runner::local::Environment;
 use robocode_s_server::recording::{Frame, Recording, Replay, engine_warning, round_result};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 const KEYFRAME: usize = 200;
@@ -31,6 +33,8 @@ const KEYFRAME: usize = 200;
 const FASTEST: f64 = 10_000.0;
 
 pub struct ReplayView {
+    /// The file it was opened from.
+    path: PathBuf,
     title: String,
     robots: Vec<v1::RobotStatics>,
     width: f64,
@@ -54,6 +58,9 @@ pub struct ReplayView {
     /// A track's rumble battle, when the website appended it, and the track's gun cooling
     /// rate in thousandths: it can run again ([`crate::rerun`]).
     battle: Option<(TrackBattle, i64)>,
+    /// A full recording made from a track ([`Opening::recreate`]), not saved yet: the file
+    /// and the name to suggest for it.
+    unsaved: Option<(PathBuf, String)>,
     /// Recorded in a debug battle (robots from an IDE, not timed).
     debug: bool,
     results: Vec<v1::Results>,
@@ -104,6 +111,8 @@ pub struct Opening {
     pub path: PathBuf,
     /// How far the replay got, in millionths.
     progress: Arc<AtomicU32>,
+    /// What it is doing, when it is more than replaying `path` ([`Opening::recreate`]).
+    status: Arc<Mutex<String>>,
     cancel: Arc<AtomicBool>,
     done: Receiver<Result<ReplayView, String>>,
 }
@@ -128,9 +137,90 @@ impl Opening {
         Self {
             path,
             progress,
+            status: Arc::default(),
             cancel,
             done,
         }
+    }
+
+    /// Turns the track at `path` into a full recording at `out` (see [`crate::rerun`]),
+    /// with robots from the rumble at `server` if they aren't in `env`, and opens that at
+    /// the track's round, offered for saving.
+    pub fn recreate(
+        ctx: &egui::Context,
+        path: PathBuf,
+        (battle, gun_cooling_milli): (TrackBattle, i64),
+        env: Environment,
+        server: String,
+        out: PathBuf,
+    ) -> Self {
+        let progress = Arc::new(AtomicU32::new(0));
+        let status = Arc::new(Mutex::new("Getting the robots…".to_string()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, done) = mpsc::channel();
+        {
+            let (path, progress, status, cancel) = (
+                path.clone(),
+                progress.clone(),
+                status.clone(),
+                cancel.clone(),
+            );
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                // The battle takes most of the time, opening its recording the rest.
+                const BATTLE: f64 = 0.8;
+                let say = |text: String, fraction: f64| {
+                    if let Ok(mut status) = status.lock() {
+                        *status = text;
+                    }
+                    progress.store((fraction * 1e6) as u32, Ordering::Relaxed);
+                    ctx.request_repaint();
+                };
+                let report = |stage: Stage| match stage {
+                    Stage::Robots => say("Getting the robots…".into(), 0.0),
+                    Stage::Battle(round, rounds) => say(
+                        format!("Running the battle: round {} of {rounds}…", round + 1),
+                        BATTLE * f64::from(round) / f64::from(rounds.max(1)),
+                    ),
+                };
+                let recorded = crate::rerun::record(
+                    &env,
+                    &server,
+                    &battle,
+                    gun_cooling_milli,
+                    &out,
+                    &report,
+                    &cancel,
+                );
+                let view = recorded.and_then(|()| {
+                    say("Opening the recording…".into(), BATTLE);
+                    let opened = |f: f64| {
+                        progress.store(
+                            ((BATTLE + (1.0 - BATTLE) * f) * 1e6) as u32,
+                            Ordering::Relaxed,
+                        )
+                    };
+                    ReplayView::open(&out, &opened, &cancel).inspect_err(|_| {
+                        let _ = std::fs::remove_file(&out);
+                    })
+                });
+                let _ = tx.send(view.map(|v| v.recreated(&path, battle.round, out)));
+                ctx.request_repaint();
+            });
+        }
+        Self {
+            path,
+            progress,
+            status,
+            cancel,
+            done,
+        }
+    }
+
+    /// What it is doing, when it is more than replaying [`Opening::path`].
+    pub fn status(&self) -> Option<String> {
+        let status = self.status.lock().ok()?;
+        (!status.is_empty()).then(|| status.clone())
     }
 
     /// How far it got, from 0 to 1.
@@ -205,6 +295,7 @@ impl ReplayView {
         let robots = recording.header.robots.clone();
         let mut view = Self {
             title: title(path),
+            path: path.to_path_buf(),
             paint_visible: vec![true; robots.len()],
             cleared: vec![None; robots.len()],
             robots,
@@ -225,6 +316,7 @@ impl ReplayView {
             unverified,
             engine_warning: recording.engine_warning(),
             battle: None,
+            unsaved: None,
             debug: recording.header.debug,
             results,
             position: 0,
@@ -248,6 +340,7 @@ impl ReplayView {
         }
         let mut view = Self {
             title: title(path),
+            path: path.to_path_buf(),
             paint_visible: vec![true; decoded.robots.len()],
             cleared: vec![None; decoded.robots.len()],
             robots: decoded.robots,
@@ -264,6 +357,7 @@ impl ReplayView {
             unverified: 0,
             engine_warning: engine_warning(decoded.engine_version),
             battle: decoded.battle.map(|b| (b, decoded.gun_cooling_milli)),
+            unsaved: None,
             debug: false,
             results: Vec::new(),
             position: 0,
@@ -284,6 +378,27 @@ impl ReplayView {
     /// [`ReplayView::battle`]).
     pub fn battle(&self) -> Option<&(TrackBattle, i64)> {
         self.battle.as_ref()
+    }
+
+    /// The file it was opened from.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The full recording `out` made from the track `track`: named after the track, not
+    /// saved yet, at the start of the track's round (0-based), paused.
+    fn recreated(mut self, track: &Path, round: i32, out: PathBuf) -> Self {
+        self.title = format!("{} (full recording)", title(track));
+        let stem = track.file_stem().unwrap_or_default().to_string_lossy();
+        self.unsaved = Some((out, format!("{stem}.rec")));
+        if let Some(&start) = usize::try_from(round)
+            .ok()
+            .and_then(|r| self.round_starts.get(r))
+        {
+            self.seek(start);
+        }
+        self.playing = false;
+        self
     }
 
     /// A full recording: with scores, CPU times, debug paint and console output.
@@ -371,8 +486,7 @@ impl ReplayView {
     }
 
     /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
-    /// A robot's output to save goes in `save`; `run` is set when the user wants a track's
-    /// battle run again.
+    /// A robot's output to save goes in `save`, what else the user asks for in `request`.
     pub fn ui(
         &mut self,
         root: &mut egui::Ui,
@@ -380,7 +494,7 @@ impl ReplayView {
         style: Style,
         selected: &mut usize,
         save: &mut Option<screen::SaveRequest>,
-        run: &mut bool,
+        request: &mut Option<Request>,
     ) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
@@ -512,6 +626,7 @@ impl ReplayView {
                     Source::Track(_) => self.battle.as_ref().map(|(b, _)| b.seed.clone()),
                 };
                 let battle = self.battle.as_ref().map(|(b, _)| b);
+                let unsaved = self.unsaved.clone();
                 // A track of a rumble battle is one of its rounds.
                 let first = battle.map_or(0, |b| b.round.max(0) as usize);
                 let rounds = battle.map_or(rounds, |b| b.rounds);
@@ -521,7 +636,14 @@ impl ReplayView {
                     seed.as_deref(),
                     |ui| {
                         if let Some(battle) = battle {
-                            run_button(ui, battle, run);
+                            full_recording_button(ui, battle, request);
+                        } else if let Some((path, name)) = unsaved {
+                            let button = ui.button("Save recording…").on_hover_text(
+                                "Keep this full recording: it is only kept for a day otherwise.",
+                            );
+                            if button.clicked() {
+                                *request = Some(Request::Save(path, name));
+                            }
                         }
                     },
                     |ui| {
@@ -645,24 +767,32 @@ impl ReplayView {
     }
 }
 
-/// "Run this battle", for a track's rumble battle: sets `run` when clicked.
-fn run_button(ui: &mut egui::Ui, battle: &TrackBattle, run: &mut bool) {
+/// What the user asks of a replay besides playing it.
+pub enum Request {
+    /// Turn the track into a full recording ([`Opening::recreate`]).
+    FullRecording,
+    /// Save the full recording made from a track: the file, and the name to suggest.
+    Save(PathBuf, String),
+}
+
+/// "Full recording", for a track's rumble battle.
+fn full_recording_button(ui: &mut egui::Ui, battle: &TrackBattle, request: &mut Option<Request>) {
     let why = crate::rerun::unavailable(battle);
-    let button = ui.add_enabled(why.is_none(), egui::Button::new("Run this battle"));
+    let button = ui.add_enabled(why.is_none(), egui::Button::new("Full recording"));
     let button = match why {
         Some(why) => button.on_disabled_hover_text(why),
         None => button.on_hover_text(format!(
-            "This is round {} of a rumble battle of {}. Run the whole battle here, as the \
-             rumble did, for the scores, console output and debug properties: it plays \
-             fast up to round {} and pauses at its start. Robots that aren't here yet \
-             come from the rumble.",
+            "This is round {} of a rumble battle of {}. Run the whole battle again here, \
+             unseen and as the rumble did, into a full recording: with the scores, console \
+             output and debug properties. It opens at round {}, to watch or save. Robots \
+             that aren't here yet come from the rumble.",
             battle.round + 1,
             battle.rounds,
             battle.round + 1
         )),
     };
     if button.clicked() {
-        *run = true;
+        *request = Some(Request::FullRecording);
     }
 }
 

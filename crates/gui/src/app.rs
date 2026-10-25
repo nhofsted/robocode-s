@@ -7,7 +7,7 @@ use crate::backdrop::Backdrop;
 use crate::icons;
 use crate::ide::{self, Ide};
 use crate::live::Live;
-use crate::replay::{Opening, ReplayView};
+use crate::replay::{Opening, ReplayView, Request};
 use crate::rerun;
 use crate::rumble::Rumble;
 use crate::screen;
@@ -52,11 +52,6 @@ pub struct Setup {
     pub watch: String,
     pub watch_token: String,
     pub watch_fingerprint: String,
-    /// A rumble battle run again ([`rerun`]): its robots' jars instead of the robot
-    /// folders', and no data files.
-    pub rumble: Option<rerun::RumbleRobots>,
-    /// Get to this round (0-based) at full speed and pause at its start.
-    pub pause_at_round: Option<i32>,
 }
 
 impl Setup {
@@ -76,8 +71,6 @@ impl Setup {
             watch: settings.watch.clone(),
             watch_token: String::new(),
             watch_fingerprint: settings.watch_fingerprint.clone(),
-            rumble: None,
-            pause_at_round: None,
         }
     }
 
@@ -188,9 +181,6 @@ struct Starting {
     size: (i32, i32),
     classic: bool,
     turns_per_second: u32,
-    /// The round the server pauses at ([`Setup::pause_at_round`]): until then the battle
-    /// runs at full speed, then at `turns_per_second`.
-    pause_at_round: Option<i32>,
     paint: bool,
     /// Why the battle couldn't start.
     error: Option<String>,
@@ -234,13 +224,7 @@ impl Battle {
                     let mut live = Live::start(ctx, host, battle);
                     live.camera = camera;
                     live.seed = starting.seed;
-                    match starting.pause_at_round {
-                        Some(round) => {
-                            live.pause_at = Some((round, starting.turns_per_second));
-                            live.set_speed(0);
-                        }
-                        None => live.set_speed(starting.turns_per_second),
-                    }
+                    live.set_speed(starting.turns_per_second);
                     if starting.paint {
                         for i in 0..live.robots.len() {
                             live.set_paint(i, true);
@@ -342,8 +326,12 @@ pub struct App {
     screenshot: Option<Screenshot>,
     /// `--kill-at`, until done.
     kill_at: Option<(i64, usize)>,
-    /// `--run`, until the replay is open.
-    run_on_open: bool,
+    /// `--full`, until the replay is open.
+    full_on_open: bool,
+    /// The full recording [`Browse::SaveRecording`] saves: the file, and the name to suggest.
+    recording_to_save: Option<(PathBuf, String)>,
+    /// Why the last full recording couldn't be made, in a window until it is closed.
+    full_recording_error: Option<String>,
     /// `--input-at`, by turn, until sent.
     input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
     /// How battles and replays first show the battlefield (`--zoom`; fitted by default).
@@ -410,6 +398,8 @@ pub enum Browse {
     Save,
     /// A classic `.battle` file to open into the battle setup.
     OpenBattle,
+    /// A file to save [`App::recording_to_save`] to.
+    SaveRecording,
 }
 
 /// What the user wants from the battle screen.
@@ -430,8 +420,9 @@ pub struct Launch {
     /// Watch the battle at the setup's address (`--watch`).
     pub watch: bool,
     pub replay: Option<PathBuf>,
-    /// Run the replay's battle once it is open, as "Run this battle" does (`--run`).
-    pub run: bool,
+    /// Turn the replay into a full recording once it is open, as its "Full recording"
+    /// button does (`--full`).
+    pub full: bool,
     pub tab: Option<Tab>,
     /// The field whose file dialog opens at start (`--browse`).
     pub browse: Option<Browse>,
@@ -499,7 +490,9 @@ impl App {
             opening: None,
             screenshot,
             kill_at: launch.kill_at,
-            run_on_open: launch.run,
+            full_on_open: launch.full,
+            recording_to_save: None,
+            full_recording_error: None,
             input_at: launch.input_at,
             camera: launch.camera,
             sound: Sound::default(),
@@ -897,12 +890,10 @@ impl App {
             seed,
             deterministic: !s.classic,
             record: (!s.record.trim().is_empty()).then(|| PathBuf::from(s.record.trim())),
-            pause_at_round: s.pause_at_round,
             ..Default::default()
         };
         let (tx, rx) = mpsc::channel();
-        let (mut env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
-        let rumble = s.rumble.clone();
+        let (env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
         let ide = self.ide.listener();
         // The robots' JVMs start while they are described, and the next battle's while
         // this one runs.
@@ -916,17 +907,6 @@ impl App {
         let from_ide = robots.iter().filter(|r| parse_marker(r).is_some()).count();
         let warm = (robots.len() - from_ide).min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
-            // A rumble battle: exactly its jars (fetched if need be), as the rumble ran it.
-            if let Some(rumble) = &rumble {
-                match rerun::jars(rumble, &env.data, &env.jars) {
-                    Ok(jars) => (env.jars, env.fresh_data) = (jars, true),
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        repaint.request_repaint();
-                        return;
-                    }
-                }
-            }
             let warm = pool.as_ref().map(|pool| (pool, warm));
             // Cancelled meanwhile: nobody fights the battle, which leaves its folder.
             if let Err(mpsc::SendError(Ok((_, battle)))) =
@@ -944,7 +924,6 @@ impl App {
             size: (s.width, s.height),
             classic: s.classic,
             turns_per_second: s.turns_per_second,
-            pause_at_round: s.pause_at_round,
             paint: s.paint,
             error: None,
             watching: None,
@@ -997,7 +976,6 @@ impl App {
             size: (800, 600),
             classic: false,
             turns_per_second: self.setup.turns_per_second,
-            pause_at_round: None,
             paint: false,
             error: None,
             watching: Some(address),
@@ -1037,11 +1015,17 @@ impl App {
         let Some(result) = self.opening.as_ref().and_then(Opening::poll) else {
             return;
         };
+        let recreating = self.opening.as_ref().is_some_and(|o| o.status().is_some());
         let path = self
             .opening
             .take()
             .map(|o| o.path.clone())
             .unwrap_or_default();
+        // A track that couldn't become a full recording stays.
+        if recreating && let Err(e) = &result {
+            self.full_recording_error = Some(e.clone());
+            return;
+        }
         // The Watch Battle page shows the new replay, or the error: not what was there.
         self.remote.close();
         self.remote_error = None;
@@ -1058,14 +1042,45 @@ impl App {
         }
     }
 
-    /// Runs the battle of the track in the Watch Battle tab again, in the Start Battle tab
-    /// (see [`rerun`]), if the track names its battle.
-    fn run_battle(&mut self, ctx: &egui::Context) {
-        let battle = self.replay.as_ref().and_then(|r| r.battle()).cloned();
-        if let Some((battle, gun_cooling_milli)) = battle {
-            let server = crate::rumble::server_now(&self.settings.rumble, None);
-            let (setup, seed) = rerun::setup(&self.setup, &battle, gun_cooling_milli, server);
-            self.launch(ctx, setup, seed);
+    /// Turns the track in the Watch Battle tab into a full recording, which then replaces
+    /// it there (see [`rerun`]), if the track names its battle.
+    fn full_recording(&mut self, ctx: &egui::Context) {
+        let Some(replay) = &self.replay else {
+            return;
+        };
+        let Some(battle) = replay.battle().cloned() else {
+            return;
+        };
+        let track = replay.path().to_path_buf();
+        let server = crate::rumble::server_now(&self.settings.rumble, None);
+        let out = rerun::recording_path(&self.env.data, &track);
+        self.opening = Some(Opening::recreate(
+            ctx,
+            track,
+            battle,
+            self.env.clone(),
+            server,
+            out,
+        ));
+        self.replay_error = None;
+    }
+
+    /// Why the last full recording couldn't be made, in a window until it is closed.
+    fn full_recording_error_window(&mut self, ctx: &egui::Context) {
+        let Some(error) = &self.full_recording_error else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new("No full recording")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(error.as_str());
+                close = ui.button("OK").clicked();
+            });
+        if close {
+            self.full_recording_error = None;
         }
     }
 
@@ -1290,7 +1305,7 @@ impl App {
             Browse::Record => &self.setup.record,
             Browse::Replay => &self.open_path,
             Browse::Folder => &self.new_folder,
-            Browse::Save | Browse::OpenBattle => "",
+            Browse::Save | Browse::OpenBattle | Browse::SaveRecording => "",
         };
         let path = expand_home(text.trim());
         let dir = match field {
@@ -1310,6 +1325,10 @@ impl App {
             (Browse::Record, Some(name)) => name.to_string_lossy().into_owned(),
             (Browse::Record, None) => "battle.rec".to_string(),
             (Browse::Save, _) => saving.map_or_else(String::new, |s| s.name.clone()),
+            (Browse::SaveRecording, _) => self
+                .recording_to_save
+                .as_ref()
+                .map_or_else(String::new, |(_, name)| name.clone()),
             _ => String::new(),
         };
         config.title = Some(
@@ -1319,6 +1338,7 @@ impl App {
                 Browse::Folder => "Add a robot folder",
                 Browse::Save => saving.map_or("Save", |s| s.title),
                 Browse::OpenBattle => "Open a battle file",
+                Browse::SaveRecording => "Save the recording",
             }
             .to_string(),
         );
@@ -1328,11 +1348,11 @@ impl App {
                 ("Website tracks", &["track"]),
             ],
             Browse::OpenBattle => &[("Battle files", &["battle"])],
-            Browse::Record | Browse::Folder | Browse::Save => &[],
+            Browse::Record | Browse::Folder | Browse::Save | Browse::SaveRecording => &[],
         };
         crate::files::set_filters(config, filters);
         match field {
-            Browse::Record | Browse::Save => self.files.save_file(),
+            Browse::Record | Browse::Save | Browse::SaveRecording => self.files.save_file(),
             Browse::Replay | Browse::OpenBattle => self.files.pick_file(),
             Browse::Folder => self.files.pick_directory(),
         }
@@ -1369,10 +1389,18 @@ impl App {
                         self.save_error = Some(format!("{}: {e}", path.display()));
                     }
                 }
+                Browse::SaveRecording => {
+                    if let Some((from, _)) = self.recording_to_save.take()
+                        && let Err(e) = std::fs::copy(&from, &path)
+                    {
+                        self.save_error = Some(format!("{}: {e}", path.display()));
+                    }
+                }
             }
         } else if *self.files.state() != DialogState::Open {
             self.browsing = None;
             self.saving = None;
+            self.recording_to_save = None;
         }
     }
 
@@ -1438,7 +1466,14 @@ impl App {
             let Some(opening) = &app.opening else {
                 return;
             };
-            section(ui, "Opening the replay");
+            let status = opening.status();
+            section(
+                ui,
+                match status {
+                    Some(_) => "Making a full recording",
+                    None => "Opening the replay",
+                },
+            );
             ui.add_space(20.0);
             ui.vertical_centered(|ui| {
                 ui.add(egui::Spinner::new().size(28.0).color(shell::ACCENT));
@@ -1448,7 +1483,15 @@ impl App {
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy();
-                ui.label(format!("Replaying {name}…"));
+                match status {
+                    Some(status) => {
+                        ui.label(RichText::new(name).weak());
+                        ui.label(status);
+                    }
+                    None => {
+                        ui.label(format!("Replaying {name}…"));
+                    }
+                }
                 ui.add_space(10.0);
                 let (bar, _) = ui.allocate_exact_size(egui::vec2(320.0, 6.0), egui::Sense::hover());
                 let done = opening.progress().clamp(0.0, 1.0);
@@ -2671,9 +2714,9 @@ impl eframe::App for App {
             }
         }
         self.poll_opening();
-        if self.run_on_open && self.opening.is_none() {
-            self.run_on_open = false;
-            self.run_battle(ctx);
+        if self.full_on_open && self.opening.is_none() {
+            self.full_on_open = false;
+            self.full_recording(ctx);
         }
         match self.tab {
             Tab::Start if self.local.starting.is_some() => self.loading_page(root, false),
@@ -2691,10 +2734,6 @@ impl eframe::App for App {
                     // The battle as it was started (the options may have changed the
                     // setup's defaults since).
                     let mut setup = self.launched.clone().unwrap_or_else(|| self.setup.clone());
-                    // A rumble battle's round is in its own seed's battle.
-                    if new_seed {
-                        setup.pause_at_round = None;
-                    }
                     // The battle's recording stays: the new one goes to a new file.
                     let record = setup.record.trim();
                     if !record.is_empty() {
@@ -2714,7 +2753,7 @@ impl eframe::App for App {
             },
             Tab::Watch => match &mut self.replay {
                 Some(replay) => {
-                    let (mut save, mut run) = (None, false);
+                    let (mut save, mut request) = (None, None);
                     let sprites = &mut self.sprites;
                     if replay.ui(
                         root,
@@ -2722,15 +2761,20 @@ impl eframe::App for App {
                         style,
                         &mut self.selected,
                         &mut save,
-                        &mut run,
+                        &mut request,
                     ) {
                         self.replay = None;
                     }
                     if let Some(save) = save {
                         self.save(save);
                     }
-                    if run {
-                        self.run_battle(ctx);
+                    match request {
+                        Some(Request::FullRecording) => self.full_recording(ctx),
+                        Some(Request::Save(path, name)) => {
+                            self.recording_to_save = Some((path, name));
+                            self.browse(Browse::SaveRecording);
+                        }
+                        None => {}
                     }
                 }
                 None => self.watch_page(root),
@@ -2743,6 +2787,7 @@ impl eframe::App for App {
         self.play_sounds(ctx);
         self.file_dialog(ctx);
         self.save_error_window(ctx);
+        self.full_recording_error_window(ctx);
         // A file dropped on the window opens as a replay.
         let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
         if let Some(path) = dropped {
@@ -2919,8 +2964,6 @@ impl App {
                 shot.ended += 1;
                 shot.ended >= 30
             }
-            // A battle run again to a round: once it paused there.
-            Some((None, Some(live))) if live.pause_at.is_some() => false,
             Some((None, Some(live))) => live
                 .latest
                 .as_ref()
