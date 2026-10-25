@@ -5,8 +5,9 @@
 //! the `ROBOCODES_*_LOG` diagnostics would go nowhere. Started from a terminal, it
 //! writes to that terminal's console instead (which doesn't wait for it: its prompt
 //! comes back at once, and the output lands after it).
-#![allow(unsafe_code)] // Win32 calls, with plain values and a null-terminated name
+#![allow(unsafe_code)] // Win32 calls, with plain values, our handles and a null-terminated name
 
+use std::os::windows::io::IntoRawHandle;
 use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -54,5 +55,18 @@ pub fn attach() {
             // SAFETY: a handle just opened, kept open for the process's life.
             unsafe { SetStdHandle(id, handle) };
         }
+    }
+}
+
+/// Points stderr, when it still goes nowhere (no terminal), at the log file, so that what
+/// only std writes there survives: an abort's message (out of memory, a stack overflow)
+/// and the `ROBOCODES_*_LOG` diagnostics. Call it after [`attach`] and the log's `init`.
+pub fn into_log() {
+    if !unset(STD_ERROR_HANDLE) {
+        return;
+    }
+    if let Some(file) = rumble_client::log::stderr_file() {
+        // SAFETY: a handle of our own, kept open for the process's life.
+        unsafe { SetStdHandle(STD_ERROR_HANDLE, file.into_raw_handle()) };
     }
 }

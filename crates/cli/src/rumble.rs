@@ -17,7 +17,7 @@ use rumble_client::tokenfile::{self, Credentials, TokenFile};
 use rumble_core::api::{AlertsResponse, BattleStatus, UserUpdateRequest};
 use rumble_core::ids::Division;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where the rumble is, unless `--server` or `$ROBOCODES_RUMBLE_SERVER` say otherwise.
 pub const DEFAULT_SERVER: &str = "https://rumble.planethofstede.be";
@@ -71,6 +71,8 @@ Options of `run`:
   The upload token is in the settings folder's rumble.json, or in
   $ROBOCODES_RUMBLE_TOKEN. Results that could not be posted wait in <data>/rumble/pending
   and are posted at the next start; <data>/rumble/log.txt keeps the last 1 MiB of log.
+  `run` also notes its start and end, and a crash's message and backtrace, in
+  logs/robocode-s.log in the user data folder (as the GUI does; $ROBOCODES_LOG).
 
 Admin commands (an admin account; they print the server's answer):
   admin import --division 1v1|melee [--list URL|FILE] [--local DIR]
@@ -783,6 +785,18 @@ fn summary_line(s: &Summary) -> String {
 }
 
 fn run(parsed: &Parsed, o: &RunOptions) -> Result<(), String> {
+    // A long unattended run notes its start and end, and a panic, in the log file
+    // (`<data>/rumble/log.txt` keeps the session's lines).
+    let log = rumble_client::log::init("robocode-s");
+    let result = run_logged(parsed, o, log.as_deref());
+    match &result {
+        Ok(()) => rumble_client::log::exit("0"),
+        Err(e) => rumble_client::log::exit(&format!("failed: {e}")),
+    }
+    result
+}
+
+fn run_logged(parsed: &Parsed, o: &RunOptions, log: Option<&Path>) -> Result<(), String> {
     let creds = credentials()?;
     let server = server_for(parsed, creds.server.as_deref())?;
     let slots = o.parallel.unwrap_or_else(default_slots);
@@ -793,6 +807,9 @@ fn run(parsed: &Parsed, o: &RunOptions) -> Result<(), String> {
     let mut config = Config::new(&server, &creds.token, options);
     config.divisions = o.divisions.clone();
     config.max_batches = o.batches;
+    if let Some(log) = log {
+        eprintln!("robocode-s rumble: logging to {}", log.display());
+    }
     eprintln!("robocode-s rumble: checking {server}...");
     let contributor = Contributor::new(config).map_err(|e| e.to_string())?;
     let divisions: Vec<String> = contributor
