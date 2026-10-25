@@ -2660,6 +2660,7 @@ dependencies = [
  "robocode-s-rumble-core",
  "robocode-s-runner",
  "robocode-s-server",
+ "robocode-s-update",
  "serde_json",
 ]
 
@@ -2716,6 +2717,7 @@ dependencies = [
  "robocode-s-rumble-core",
  "robocode-s-runner",
  "robocode-s-server",
+ "robocode-s-update",
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
@@ -2814,6 +2816,20 @@ dependencies = [
  "robocode-s-protocol",
  "rustls",
  "webpki-roots",
+]
+
+[[package]]
+name = "robocode-s-update"
+version = "0.2.1"
+dependencies = [
+ "flate2",
+ "robocode-s-runner",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "ureq",
+ "zip",
 ]
 
 [[package]]

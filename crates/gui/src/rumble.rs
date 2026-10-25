@@ -618,6 +618,8 @@ pub struct Rumble {
     closing: Option<Instant>,
     /// Why something the page started couldn't be done.
     note: Option<String>,
+    /// The user asked to update robocode-s (a problem's button): the app takes it.
+    pub update_asked: bool,
 }
 
 impl Default for Rumble {
@@ -641,6 +643,7 @@ impl Rumble {
             consent: false,
             closing: None,
             note: None,
+            update_asked: false,
         }
     }
 
@@ -1140,9 +1143,14 @@ impl Rumble {
                 if let Problem::Update(_) = problem {
                     ui.add_space(4.0);
                     let page = format!("{server}/download");
-                    if ui.button("Open the download page").clicked() {
-                        self.note = open_url(&page).err();
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Update robocode-s").clicked() {
+                            self.update_asked = true;
+                        }
+                        if ui.button("Open the download page").clicked() {
+                            self.note = open_url(&page).err();
+                        }
+                    });
                     ui.label(RichText::new(page).weak().small());
                 }
             });

@@ -647,6 +647,7 @@ fn status(parsed: &Parsed) -> Result<(), String> {
             println!("         {p}");
         }
         println!("         download: {}", info.downloads);
+        println!("         or run `robocode-s update`");
     }
     match creds {
         None => println!("account  not signed in: run `robocode-s rumble login`"),

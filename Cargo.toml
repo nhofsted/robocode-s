@@ -22,6 +22,7 @@ robocode-s-rumble-core = { path = "crates/rumble-core" }
 robocode-s-rumble-client = { path = "crates/rumble-client" }
 robocode-s-runner = { path = "crates/runner" }
 robocode-s-server = { path = "crates/server" }
+robocode-s-update = { path = "crates/update" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

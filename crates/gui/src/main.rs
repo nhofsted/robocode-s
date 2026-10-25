@@ -27,6 +27,7 @@ mod shell;
 mod sound;
 mod sprites;
 mod track;
+mod update;
 mod view;
 mod window;
 
@@ -148,6 +149,7 @@ fn parse_zoom(text: &str) -> Option<view::Camera> {
 fn main() -> ExitCode {
     #[cfg(windows)]
     console::attach();
+    update::wait_for_old();
     let settings = Settings::load();
     let mut setup = Setup::new(&settings);
     let (mut start, mut replay, mut shot, mut after) = (false, None, None, 120);

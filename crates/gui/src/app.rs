@@ -360,6 +360,8 @@ pub struct App {
     listing: Option<Receiver<Result<Vec<Listed>, String>>>,
     /// List the robots again once the running listing is done.
     relist: bool,
+    /// A newer release: the check, the notice and the update.
+    updater: crate::update::Updater,
     /// The robot whose details show below the robot lists: the last one clicked.
     details: Option<String>,
     filter: String,
@@ -526,6 +528,7 @@ impl App {
             browsing: None,
             saving: None,
             save_error: None,
+            updater: crate::update::Updater::new(),
             rumble: launch
                 .rumble_demo
                 .as_deref()
@@ -533,6 +536,12 @@ impl App {
                 .unwrap_or_default(),
         };
         crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
+        robocode_s_update::cleanup();
+        // Not for the screenshots of tests and docs, unless they show a test release.
+        let test_release = std::env::var_os(robocode_s_update::URL_VAR).is_some();
+        if app.settings.check_updates && (app.screenshot.is_none() || test_release) {
+            app.updater.start_daily(&cc.egui_ctx);
+        }
         app.scan_folders();
         app.list_robots(&cc.egui_ctx);
         // A battle here and one watched (or a replay) have tabs of their own: both start.
@@ -1602,6 +1611,36 @@ impl App {
         if changed {
             self.settings_unsaved = Some(ctx.input(|i| i.time));
         }
+        if std::mem::take(&mut self.rumble.update_asked) {
+            self.updater.look_now(ctx);
+        }
+    }
+
+    /// The notice of a newer release, and installing it when the user agrees: the robot
+    /// JVMs started from the installation stop first, and the app starts again after.
+    fn update_notice(&mut self, ctx: &egui::Context) {
+        let wait = if self.local.live.is_some() || self.local.starting.is_some() {
+            Some("Close the battle first")
+        } else if self.rumble.active() {
+            Some("Stop running the rumble first")
+        } else {
+            None
+        };
+        match self.updater.ui(ctx, wait) {
+            crate::update::Action::None => {}
+            crate::update::Action::Install => {
+                self.pool = None;
+                self.updater.install(ctx);
+            }
+            crate::update::Action::Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            crate::update::Action::Restart(exe) => match crate::update::restart(&exe) {
+                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Err(e) => self.updater.note(format!(
+                    "The new release is installed, but it couldn't be started ({e}): start \
+                     robocode-s again."
+                )),
+            },
+        }
     }
 
     /// The options, behind the gear: robot folders, how battles are drawn, and the
@@ -1839,6 +1878,33 @@ impl App {
                     ui.end_row();
                     rules_rows(ui, &mut s.rules);
                 });
+
+            section(ui, "Updates");
+            ui.checkbox(
+                &mut app.settings.check_updates,
+                "Look for a newer release once a day",
+            );
+            ui.horizontal(|ui| {
+                let busy = app.updater.busy();
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Look now"))
+                    .clicked()
+                {
+                    app.updater.look_now(ui.ctx());
+                }
+                ui.label(
+                    RichText::new(format!("This is robocode-s {}.", env!("CARGO_PKG_VERSION")))
+                        .weak(),
+                );
+            });
+            ui.add(
+                egui::Label::new(
+                    RichText::new(crate::update::describe(app.updater.installation()))
+                        .small()
+                        .weak(),
+                )
+                .wrap(),
+            );
 
             if let Some(e) = &app.settings_error {
                 ui.add_space(12.0);
@@ -2673,6 +2739,7 @@ impl eframe::App for App {
             Tab::Options => self.options_page(root),
         }
         self.ide_windows(ctx);
+        self.update_notice(ctx);
         self.play_sounds(ctx);
         self.file_dialog(ctx);
         self.save_error_window(ctx);
