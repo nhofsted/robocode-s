@@ -22,9 +22,12 @@
 	let all = $state(false);
 
 	const scores = $derived(new Map(pairings.map((p) => [p.opponent, p.score])));
+	// The index covers the whole division; only opponents met in this rumble have a pairing
+	// page here (a nano bot's recorded rounds against a mega bot belong to the mega rumble).
 	const opponents = $derived(
 		rec && 'pairs' in rec
 			? opponentTallies(rec)
+					.filter((t) => scores.has(t.opponent))
 					.map((t) => ({ ...t, score: scores.get(t.opponent) ?? null }))
 					.sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 			: []
@@ -43,7 +46,7 @@
 	const roundCap = 10;
 </script>
 
-{#if !rec}
+{#if !rec || ('pairs' in rec && opponents.length === 0)}
 	<p class="muted">
 		No rounds of {shortName(bot)} are recorded yet. The rumble records the top 50 bots of a
 		division{rumble.startsWith('1v1') ? ', and every bot\'s best, worst and problem pairings' : ''}; the
