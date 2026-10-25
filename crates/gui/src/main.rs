@@ -55,7 +55,11 @@ The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
 frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame, and on Windows). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
+system's frame, and on Windows).
+It notes its start and exit, and a crash's message and backtrace, in
+logs/robocode-s.log in the user data folder (%LOCALAPPDATA%\\robocode-s on
+Windows, where stderr goes there too without a terminal; another file with
+ROBOCODES_LOG). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
 resizes handed to the system to stderr. ROBOCODES_PERF_LOG=1 logs the renderer
 and the frame rate and frame times once a second (=frames: every frame), and a
 battle's controls (speed, pause, stop) as sent and as its server applies them, to
@@ -262,6 +266,13 @@ fn main() -> ExitCode {
             path => replay = Some(PathBuf::from(path)),
         }
     }
+    // The log file (`rumble_client::log`), except for a screenshot's short run. Without a
+    // terminal, the Windows build's stderr goes there too: an abort's last words.
+    if shot.is_none() {
+        rumble_client::log::init("robocode-s-gui");
+        #[cfg(windows)]
+        console::into_log();
+    }
     // A screenshot may go below the minimum, to see where the layout clips.
     let min_size = match shot {
         Some(_) => [size[0].min(MIN_SIZE[0]), size[1].min(MIN_SIZE[1])],
@@ -311,8 +322,12 @@ fn main() -> ExitCode {
         }),
     );
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            rumble_client::log::exit("the window closed");
+            ExitCode::SUCCESS
+        }
         Err(e) => {
+            rumble_client::log::exit(&format!("failed: {e}"));
             eprintln!("robocode-s-gui: {e}");
             ExitCode::FAILURE
         }
