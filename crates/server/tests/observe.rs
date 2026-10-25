@@ -545,8 +545,10 @@ fn the_battle_stops_when_its_own_observer_is_gone() {
 }
 
 /// A battle of two idle robots, three rounds with a short inactivity time, watched by an
-/// observer on the robots' listener that sends `act`'s controls; its outcome.
+/// observer on the robots' listener that sends `act`'s controls; its outcome. With
+/// `pause_at_round`, the server pauses at that round's start.
 fn stopped_by(
+    pause_at_round: Option<i32>,
     mut act: impl FnMut(&server_message::Msg) -> Vec<v1::observer_control::Control>,
 ) -> robocode_s_server::BattleOutcome {
     let robots_listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -558,6 +560,7 @@ fn stopped_by(
             ..Default::default()
         },
         deterministic: true,
+        pause_at_round,
         ..Default::default()
     };
     let server = thread::spawn(move || {
@@ -593,7 +596,7 @@ fn stopped_by(
 #[test]
 fn a_stop_while_paused_ends_the_battle_in_its_round() {
     use v1::observer_control::Control;
-    let outcome = stopped_by(|msg| match msg {
+    let outcome = stopped_by(None, |msg| match msg {
         server_message::Msg::TurnSnapshot(s) if s.round == 0 && s.turn == 5 => {
             vec![Control::Pause(true)]
         }
@@ -611,12 +614,39 @@ fn a_stop_while_paused_ends_the_battle_in_its_round() {
 #[test]
 fn a_stop_at_the_end_of_a_round_starts_no_more_than_the_next() {
     use v1::observer_control::Control;
-    let outcome = stopped_by(|msg| match msg {
+    let outcome = stopped_by(None, |msg| match msg {
         server_message::Msg::RoundResult(_) => vec![Control::Abort(true)],
         _ => Vec::new(),
     });
     assert!(outcome.aborted);
     assert!(outcome.rounds <= 2, "{} rounds", outcome.rounds);
+}
+
+#[test]
+fn a_battle_paused_at_a_round_waits_at_its_start() {
+    use v1::observer_control::Control;
+    let (mut killed, mut died) = (false, None);
+    let outcome = stopped_by(Some(1), |msg| match msg {
+        server_message::Msg::TurnSnapshot(s) if s.round == 1 && !killed => {
+            assert_eq!(s.turn, 0);
+            // At full speed the idle robots' round would be well along by now.
+            thread::sleep(Duration::from_millis(500));
+            killed = true;
+            vec![Control::Kill(0), Control::Pause(false)]
+        }
+        server_message::Msg::TurnSnapshot(s)
+            if s.round == 1
+                && died.is_none()
+                && s.robots[0].state == v1::RobotState::Dead as i32 =>
+        {
+            died = Some(s.turn);
+            Vec::new()
+        }
+        _ => Vec::new(),
+    });
+    assert_eq!(died, Some(1), "killed before the round's first turn");
+    assert!(!outcome.aborted);
+    assert_eq!(outcome.rounds, 3);
 }
 
 #[test]

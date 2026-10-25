@@ -57,7 +57,7 @@ pub fn server_for(env: Option<&str>, option: &str, stored: Option<&str>) -> Stri
         .unwrap_or_else(|| DEFAULT_SERVER.to_string())
 }
 
-fn server_now(settings: &RumbleSettings, stored: Option<&str>) -> String {
+pub fn server_now(settings: &RumbleSettings, stored: Option<&str>) -> String {
     let env = std::env::var(SERVER_VAR).ok();
     server_for(env.as_deref(), &settings.server, stored)
 }
