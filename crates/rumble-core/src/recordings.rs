@@ -13,7 +13,7 @@
 //! not exactly the cached slots' ([`Cache::fresh`]).
 
 use crate::cleanup::recording_group;
-use crate::data::SCHEMA_VERSION;
+use crate::data::{BotColors, SCHEMA_VERSION};
 use crate::ids::{Division, parse_vid36};
 use crate::publish::DATA_PREFIX;
 use crate::slots::{Group, SlotId, recording_key};
@@ -202,6 +202,9 @@ pub struct Pair {
     pub opp: String,
     pub opp_version: String,
     pub opp_sha16: String,
+    /// The opponent's colours (additive; absent where unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opp_colors: Option<BotColors>,
     pub rounds: Vec<Round>,
 }
 
@@ -214,6 +217,9 @@ pub struct OneVsOneFile {
     pub bot: String,
     pub version: String,
     pub sha16: String,
+    /// The bot's colours (additive; absent where unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<BotColors>,
     pub pairs: Vec<Pair>,
 }
 
@@ -222,6 +228,9 @@ pub struct Contestant {
     pub bot: String,
     pub version: String,
     pub sha16: String,
+    /// The version's colours (additive; absent where unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<BotColors>,
 }
 
 /// `data/v1/rec/melee/<bot>.json`.
@@ -277,11 +286,16 @@ pub fn build(
     melee: &Cache,
 ) -> BTreeMap<(Division, String), IndexFile> {
     let names = version_names(versions);
+    let colors: HashMap<u32, &BotColors> = versions
+        .iter()
+        .filter_map(|v| Some((v.vid, v.colors.as_ref()?)))
+        .collect();
+    let color = |vid: &u32| colors.get(vid).map(|&c| c.clone());
     let current = current_vids(versions, bots);
     let mut out: BTreeMap<(Division, String), IndexFile> = BTreeMap::new();
 
     // 1v1: bot → opponent → rounds.
-    type Opponents = BTreeMap<String, (String, String, Vec<Round>)>;
+    type Opponents = BTreeMap<String, (u32, String, String, Vec<Round>)>;
     let mut pairs: BTreeMap<String, (u32, Opponents)> = BTreeMap::new();
     for (key, slots) in &one_vs_one.groups {
         let Some(group @ Group::Pair { lo, hi }) = group_from_key(Division::OneVsOne, key) else {
@@ -307,10 +321,10 @@ pub fn build(
                 let (bot, _, _) = &names[&me];
                 let (opp_bot, opp_version, opp_sha) = &names[&opp];
                 let entry = pairs.entry(bot.clone()).or_insert((me, BTreeMap::new()));
-                let (_, _, rounds) = entry
+                let (_, _, _, rounds) = entry
                     .1
                     .entry(opp_bot.clone())
-                    .or_insert_with(|| (opp_version.clone(), sha16(opp_sha), Vec::new()));
+                    .or_insert_with(|| (opp, opp_version.clone(), sha16(opp_sha), Vec::new()));
                 rounds.push(Round(
                     file.clone(),
                     c.1,
@@ -325,12 +339,13 @@ pub fn build(
         let (_, version, sha) = &names[&vid];
         let pairs = opponents
             .into_iter()
-            .map(|(opp, (opp_version, opp_sha16, mut rounds))| {
+            .map(|(opp, (opp_vid, opp_version, opp_sha16, mut rounds))| {
                 rounds.sort_by(|a, b| a.0.cmp(&b.0));
                 Pair {
                     opp,
                     opp_version,
                     opp_sha16,
+                    opp_colors: color(&opp_vid),
                     rounds,
                 }
             })
@@ -343,6 +358,7 @@ pub fn build(
                 bot,
                 version: version.clone(),
                 sha16: sha16(sha),
+                colors: color(&vid),
                 pairs,
             }),
         );
@@ -400,6 +416,7 @@ pub fn build(
                             bot: bot.clone(),
                             version: version.clone(),
                             sha16: sha16(sha),
+                            colors: color(v),
                         }
                     })
                     .collect(),
@@ -433,6 +450,7 @@ mod tests {
             created: 0,
             retired: None,
             url: None,
+            colors: None,
         }
     }
 
@@ -452,10 +470,20 @@ mod tests {
         }
     }
 
+    fn red() -> BotColors {
+        BotColors {
+            gun: Some("#ff0000".into()),
+            ..Default::default()
+        }
+    }
+
     fn world() -> (Vec<VersionItem>, BTreeMap<String, BotItem>) {
         // Bot ids sort z < b? No: "b.B" < "m.M" < "z.Z"; vid 1 is z.Z, so lo (1) sorts last.
         let versions = vec![
-            version(1, "z.Z", "1", VersionState::Active),
+            VersionItem {
+                colors: Some(red()),
+                ..version(1, "z.Z", "1", VersionState::Active)
+            },
             version(2, "b.B", "2", VersionState::Active),
             version(3, "m.M", "3", VersionState::Active),
             version(4, "m.M", "0", VersionState::Retired),
@@ -511,6 +539,11 @@ mod tests {
         let pair = &z.pairs[0];
         assert_eq!((pair.opp.as_str(), pair.opp_version.as_str()), ("b.B", "2"));
         assert_eq!(pair.opp_sha16, "2ababababababababab"[..16]);
+        // Colours where they are known.
+        assert_eq!(
+            (z.colors.clone(), pair.opp_colors.clone()),
+            (Some(red()), None)
+        );
         assert_eq!(
             pair.rounds,
             vec![
@@ -530,6 +563,16 @@ mod tests {
             ]
         );
         assert_eq!(b.pairs[0].opp, "z.Z");
+        assert_eq!(
+            (b.colors.clone(), b.pairs[0].opp_colors.clone()),
+            (None, Some(red()))
+        );
+        let json = serde_json::to_value(&files[&(Division::OneVsOne, "b.B".to_string())]).unwrap();
+        assert_eq!(
+            json["pairs"][0]["oppColors"],
+            serde_json::json!({"gun": "#ff0000"})
+        );
+        assert!(json.get("colors").is_none());
         assert_eq!(files[&(Division::OneVsOne, "z.Z".to_string())].rounds(), 2);
         // The file names are the recording keys' (a = the first-sorting bot won).
         let slot = SlotId::with_suffix(group, "a.0").unwrap();
@@ -579,6 +622,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("z.Z", "1"), ("m.M", "3"), ("m.M", "0"), ("b.B", "2")]
         );
+        assert_eq!(m.bots[0].colors, Some(red()));
+        assert_eq!(m.bots[1].colors, None);
         assert_eq!(
             m.rounds,
             vec![

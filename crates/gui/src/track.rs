@@ -100,6 +100,13 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, String> {
             statics.short_name = format!("{class} {}", robot.version);
             statics.full_class_name.clone_from(&robot.bot);
         }
+        // Named robots get their website colours (`view::colors` with none set), as the
+        // full recording shows robots that set none, rather than a hue per robot.
+        for snapshot in &mut decoded.snapshots {
+            for robot in &mut snapshot.robots {
+                robot.colors = None;
+            }
+        }
     }
     Ok(decoded)
 }
@@ -112,7 +119,8 @@ fn angle(units: i64, steps: i64) -> Option<f64> {
     Some(units as f64 * (2.0 * PI / steps as f64))
 }
 
-/// A track has no colours: robot `i` gets its own hue, a golden angle from the last.
+/// A track has no colours: without its battle (no bot ids), robot `i` gets its own hue, a
+/// golden angle from the last.
 fn colors(i: usize) -> v1::Colors {
     let hue = (i as f64 * 137.508 + 120.0) % 360.0;
     let argb = |[r, g, b]: [u8; 3]| {
@@ -339,12 +347,16 @@ mod tests {
         assert_eq!((battle.round, battle.seed.as_str()), (3, "-42"));
         assert_eq!(battle.robots[1].name(), "voidious.Diamond 1.8.28");
         assert_eq!(battle.gun_cooling_rate, None);
+        // In their website colours, not a hue each.
+        let (tank, _) = crate::view::colors(&d.robots[0], &d.snapshots[5].robots[0]);
+        assert_eq!(tank, crate::sprites::default_colors("jk.mega.DrussGT"));
         // One robot for a track of two: not this track's battle.
         let one = br#"{"schema":1,"engine":1,"seed":"1","round":0,"rounds":35,"width":800,
             "height":600,"robots":[{"bot":"a.A","version":"1","sha16":"0123456789abcdef"}]}"#;
         let d = decode(&robocode_s_replay::with_battle(&track, one)).unwrap();
         assert!(d.battle.is_none());
         assert_eq!(d.robots[0].name, "Robot 1");
+        assert_eq!(d.snapshots[0].robots[1].colors, Some(colors(1)));
         assert!(decode(&track).unwrap().battle.is_none());
     }
 

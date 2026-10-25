@@ -45,8 +45,8 @@ export function pairRounds(rec: Recordings1v1, a: BotId, b: BotId): PairRounds |
 	if (other === null) return null;
 	const pair = rec.pairs.find((p) => p.opp === other);
 	if (!pair || pair.rounds.length === 0) return null;
-	const self: RecordedBot = { bot: rec.bot, version: rec.version, sha16: rec.sha16 };
-	const opp: RecordedBot = { bot: pair.opp, version: pair.oppVersion, sha16: pair.oppSha16 };
+	const self: RecordedBot = { bot: rec.bot, version: rec.version, sha16: rec.sha16, colors: rec.colors };
+	const opp: RecordedBot = { bot: pair.opp, version: pair.oppVersion, sha16: pair.oppSha16, colors: pair.oppColors };
 	const [pa, pb] = rec.bot === a ? [self, opp] : [opp, self];
 	const [first, second] = pa.bot < pb.bot ? [pa.bot, pb.bot] : [pb.bot, pa.bot];
 	const rounds = pair.rounds.map(
@@ -108,6 +108,6 @@ export function opponentTallies(rec: Recordings1v1) {
 	return rec.pairs.map((p) => {
 		const iAmFirst = rec.bot < p.opp;
 		const won = p.rounds.filter(([file]) => file.startsWith('a') === iAmFirst).length;
-		return { opponent: p.opp, version: p.oppVersion, won, lost: p.rounds.length - won };
+		return { opponent: p.opp, version: p.oppVersion, colors: p.oppColors, won, lost: p.rounds.length - won };
 	});
 }

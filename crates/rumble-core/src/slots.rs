@@ -668,6 +668,7 @@ mod tests {
                 author: "x".into(),
                 country: None,
                 rank_week_ago: None,
+                colors: None,
             })
             .collect();
         let metrics = compute(members, &state);

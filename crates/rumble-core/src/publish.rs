@@ -195,6 +195,7 @@ pub fn compute_rumble(
                 author: bot.author.clone(),
                 country: country(catalog.owner(bot)),
                 rank_week_ago: week_ago.and_then(|s| s.get(&v.bot)).map(|row| row.0),
+                colors: v.colors.clone(),
             })
         })
         .collect();
@@ -280,6 +281,7 @@ pub fn bot_details(
                     .retired
                     .filter(|_| v.state == VersionState::Retired)
                     .map(rfc3339),
+                colors: v.colors.clone(),
             })
             .collect(),
         rumbles,
@@ -371,6 +373,7 @@ mod tests {
             created: NOW - 86_400,
             retired: None,
             url: None,
+            colors: None,
         }
     }
 
@@ -455,9 +458,16 @@ mod tests {
 
     #[test]
     fn rumbles_bot_files_and_history() {
+        let black = crate::data::BotColors {
+            body: Some("#000000".into()),
+            ..Default::default()
+        };
         let versions = vec![
             version(1, "a.A", WeightClass::Nano, VersionState::Retired),
-            version(2, "a.A", WeightClass::Nano, VersionState::Active),
+            VersionItem {
+                colors: Some(black.clone()),
+                ..version(2, "a.A", WeightClass::Nano, VersionState::Active)
+            },
             version(3, "b.B", WeightClass::Mega, VersionState::Active),
             version(4, "c.C", WeightClass::Micro, VersionState::Active),
             version(5, "c.C", WeightClass::Micro, VersionState::Probation),
@@ -502,8 +512,10 @@ mod tests {
         let rankings = mega.metrics.rankings("1v1", "t", 1);
         assert_eq!(rankings.bots[0].id, "a.A");
         assert_eq!(rankings.bots[0].country.as_deref(), Some("be"));
+        assert_eq!(rankings.bots[0].colors.as_ref(), Some(&black));
         let b_row = rankings.bots.iter().find(|r| r.id == "b.B").unwrap();
         assert_eq!(b_row.rank_week_ago, Some(1));
+        assert_eq!(b_row.colors, None);
         let snapshot = mega.snapshot();
         assert_eq!(snapshot["a.A"].0, 1);
         assert_eq!(snapshot["a.A"].3, "1.2");
@@ -517,6 +529,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["1.2", "1.1"]
         );
+        // The current version's colours; the retired one's aren't known.
+        assert_eq!(a.versions[0].colors.as_ref(), Some(&black));
+        assert_eq!(a.versions[1].colors, None);
         assert_eq!(a.author.github.as_deref(), Some("lg9"));
         assert_eq!(a.description, None);
         assert_eq!(a.rumbles.len(), 2);

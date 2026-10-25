@@ -175,6 +175,7 @@ mod tests {
             created: 0,
             retired: None,
             url: None,
+            colors: None,
         }
     }
 

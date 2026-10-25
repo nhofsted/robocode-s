@@ -21,7 +21,7 @@
 //! TTL attributes are carried on the items; [`MemStore`] keeps expired items (DynamoDB's TTL
 //! deletion is lazy too, so callers never rely on it).
 
-use crate::api::{ApiError, ErrorCode, Rejected};
+use crate::api::{ApiError, BotColors, ErrorCode, Rejected};
 use crate::ids::{Division, WeightClass};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -379,6 +379,9 @@ pub struct VersionItem {
     pub created: u64,
     pub retired: Option<u64>,
     pub url: Option<String>,
+    /// `col` (JSON): the colours the robot sets, once two runs of a battle agreed on them
+    /// ([`Store::set_version_colors`]); `None` until then, and for robots that set none.
+    pub colors: Option<BotColors>,
 }
 
 // ---- results ----
@@ -474,6 +477,9 @@ pub struct Run {
     pub record: Vec<u8>,
     /// The record was held (a quarantined user's) and is not counted yet.
     pub held: bool,
+    /// `col` (JSON, absent when empty): the colours each robot set, as the run reported
+    /// them (checked, [`BotColors::checked`]), by robot; empty from clients that don't.
+    pub colors: Vec<Option<BotColors>>,
 }
 
 /// A verification item (`V#<E>`, `<created ms>#<id>`).
@@ -621,6 +627,10 @@ pub trait Store {
     /// Put of the version, condition: the stored version's `st` is `expected` (the planner's
     /// transitions, so that a concurrent retirement or takedown is not overwritten).
     fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()>;
+    /// UpdateItem `SET col`, condition: the version exists and has no colours yet (the first
+    /// confirmed colours stay). A put of the version read before replaces them, which only
+    /// delays them to the next confirmed battle.
+    fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()>;
 
     // -- results --
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>>;
@@ -757,6 +767,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn update_version(&self, version: &VersionItem, expected: VersionState) -> StoreResult<()> {
         (**self).update_version(version, expected)
+    }
+    fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()> {
+        (**self).set_version_colors(vid, colors)
     }
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         (**self).get_marker(batch_id)
@@ -1082,6 +1095,16 @@ impl Store for MemStore {
             }
             t.versions.insert(version.vid, version.clone());
             Ok(())
+        })
+    }
+
+    fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()> {
+        self.with(|t| match t.versions.get_mut(&vid) {
+            Some(version) if version.colors.is_none() => {
+                version.colors = Some(colors.clone());
+                Ok(())
+            }
+            _ => Err(StoreError::ConditionFailed),
         })
     }
 

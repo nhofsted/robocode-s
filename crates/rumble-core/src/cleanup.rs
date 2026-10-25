@@ -341,6 +341,7 @@ mod tests {
             created: NOW,
             retired: None,
             url: None,
+            colors: None,
         }
     }
 

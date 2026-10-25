@@ -7,6 +7,7 @@
 	import { tankColors, tankColorsByIndex } from '../components/tank-colors.ts';
 	import { RADAR_RANGE, SCAN_LINE_BELOW, frameView } from './frame.ts';
 	import type { ReplayTrack } from './track.ts';
+	import type { BotColors } from '../rumble/types.ts';
 
 	const EXPLOSION = Object.values(
 		import.meta.glob<string>('../assets/classic/explosion/*.png', {
@@ -37,16 +38,18 @@
 		names?: readonly string[];
 		/** A bot id per track robot index, to derive the tank colours from; a hue per robot if missing. */
 		colorKeys?: readonly string[];
+		/** The colours the robots set, per track robot index, where known (with `colorKeys`). */
+		colors?: readonly (BotColors | null | undefined)[];
 		/** Starts playing (not with prefers-reduced-motion). */
 		autoplay?: boolean;
 	}
-	let { track, names = [], colorKeys = [], autoplay = true }: Props = $props();
+	let { track, names = [], colorKeys = [], colors = [], autoplay = true }: Props = $props();
 
 	const robots = $derived(
 		Array.from({ length: track.robotCount }, (_, i) => {
 			const name = names[i] || `Robot ${i + 1}`;
-			// Bot ids give a bot the same colours everywhere on the site; without them, one hue each.
-			return { name, colors: colorKeys[i] ? tankColors(colorKeys[i]) : tankColorsByIndex(i) };
+			// A bot's own colours, or from its id, as everywhere on the site; without ids, one hue each.
+			return { name, colors: colorKeys[i] ? tankColors(colorKeys[i], colors[i]) : tankColorsByIndex(i) };
 		})
 	);
 	/** The most energy a robot starts with, for the energy bars. */

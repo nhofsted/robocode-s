@@ -16,9 +16,11 @@ use aws_sdk_dynamodb::types::{
     TimeToLiveSpecification,
 };
 use common::*;
-use rumble_core::api::{BattleKind, RecordingsDoneRequest, ResultsResponse, WorkResponse};
+use rumble_core::api::{
+    BattleKind, BotColors, RecordingsDoneRequest, ResultsResponse, WorkResponse,
+};
 use rumble_core::ids::Division;
-use rumble_core::store::{Run, SlotStatus, Store, VERIFY_TTL, VerifyItem, VerifyKind};
+use rumble_core::store::{Run, SlotStatus, Store, StoreError, VERIFY_TTL, VerifyItem, VerifyKind};
 use rumble_lambda::dynamo::DynamoStore;
 use rumble_lambda::github::FakeGithub;
 use rumble_lambda::http::Request;
@@ -250,6 +252,25 @@ fn scenario(dynamo_config: &aws_config::SdkConfig, s3_config: &aws_config::SdkCo
         assert_eq!(store.next_vid().unwrap(), vid);
         store.put_version(&version(vid)).unwrap();
     }
+    // A version's colours are set once: the first confirmed ones stay.
+    let black = BotColors {
+        body: Some("#000000".into()),
+        ..Default::default()
+    };
+    store.set_version_colors(3, &black).unwrap();
+    let white = BotColors {
+        body: Some("#ffffff".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        store.set_version_colors(3, &white),
+        Err(StoreError::ConditionFailed)
+    );
+    assert_eq!(
+        store.set_version_colors(999, &white),
+        Err(StoreError::ConditionFailed)
+    );
+    assert_eq!(store.get_version(3).unwrap().unwrap().colors, Some(black));
     let app = App::new(
         Services {
             store: Box::new(store.clone()),
@@ -399,6 +420,7 @@ fn scenario(dynamo_config: &aws_config::SdkConfig, s3_config: &aws_config::SdkCo
                 hash: Some(battle_hash),
                 record: vec![],
                 held: false,
+                colors: Vec::new(),
             }],
             uids: vec!["g501".into()],
             stage: 1,

@@ -658,6 +658,7 @@ mod tests {
             created,
             retired: None,
             url: None,
+            colors: None,
         };
         let versions = [
             version("a.B", NOW - 10),

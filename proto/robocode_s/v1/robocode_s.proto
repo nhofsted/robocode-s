@@ -228,6 +228,12 @@ message Colors {
   int32 radar = 3;
   int32 scan = 4;
   int32 bullet = 5;
+  // The parts the robot set itself (setColors, setBodyColor, ...), as bits: 1 body, 2 gun,
+  // 4 radar, 8 scan, 16 bullet. The values of the others are classic's defaults. 0 from
+  // hosts that don't say (older ones): there body, gun and radar all classic's default
+  // (0xFF29298C) mean none set. Not battle state: not part of a recording's snapshot hash,
+  // so hosts that send it and hosts that don't agree on battle hashes.
+  uint32 set_parts = 6;
 }
 
 message BulletCommand {
@@ -848,8 +854,8 @@ message RecordedSnapshot {
   repeated string output = 1;
   // Debug paint, for robots that painted.
   repeated RobotPaint paint = 2;
-  // FNV-1a hash of the snapshot without output, paint, CPU times and debug properties,
-  // to verify a replay.
+  // FNV-1a hash of the snapshot without output, paint, CPU times, debug properties and
+  // Colors.set_parts, to verify a replay.
   fixed64 check = 3;
   // Per robot, by index: CPU time in this snapshot (RobotSnapshot.cpu_nanos). Empty in
   // recordings made before it was recorded.

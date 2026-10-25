@@ -153,7 +153,7 @@
 								href={resolve('/bot/[id]', { id: r.id }) + `?rumble=${data.rankings.rumble}`}
 								title="{r.id} {r.version}"
 							>
-								<Tank colors={tankColors(r.id)} size={28} heading={90} />
+								<Tank colors={tankColors(r.id, r.colors)} size={28} heading={90} />
 								<span class="name">{shortName(r.id)}</span>
 								<span class="pkg">{packageName(r.id)}</span>
 								<span class="ver mono">{r.version}</span>

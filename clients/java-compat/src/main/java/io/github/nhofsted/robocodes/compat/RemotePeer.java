@@ -42,6 +42,8 @@ final class RemotePeer implements IRobotPeer {
     private static final Object ROUND_OVER = new Object();
 
     private final OutputStream out;
+    /** Which colours the robot set, over the whole battle. */
+    final ColorTracker colors = new ColorTracker();
     private final BlockingQueue<Object> inbox = new LinkedBlockingQueue<>();
     private final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
     /**
@@ -101,7 +103,7 @@ final class RemotePeer implements IRobotPeer {
     public ExecResults executeImpl(ExecCommands commands) {
         Execute.Builder execute = finished ? null : Execute.newBuilder()
                 .setTurn(lastTurn)
-                .setCommands(Convert.commands(commands))
+                .setCommands(Convert.commands(commands, colors))
                 .setOutput(nullToEmpty(commands.getOutputText()))
                 .addAllDebugProperties(debugProperties(commands))
                 .addAllPaint(PaintRecorder.ops(commands.getGraphicsCalls()))
@@ -135,7 +137,7 @@ final class RemotePeer implements IRobotPeer {
             winner |= e instanceof robocode.WinEvent;
         }
         stopping = tick.getHalt();
-        ExecResults results = new ExecResults(Convert.commands(tick.getCommands()), status(tick), events,
+        ExecResults results = new ExecResults(Convert.commands(tick.getCommands(), colors), status(tick), events,
                 Convert.teamMessages(tick), Convert.bulletUpdates(tick), tick.getHalt(), tick.getShouldWait(),
                 tick.getPaintEnabled());
         cpuAtReturn = cpu();
@@ -162,7 +164,7 @@ final class RemotePeer implements IRobotPeer {
                 // The same list of debug properties, maybe with more since.
                 finalExecute.clearDebugProperties();
             }
-            finalExecute.setCommands(Convert.commands(commands))
+            finalExecute.setCommands(Convert.commands(commands, colors))
                     .setOutput(finalExecute.getOutput() + nullToEmpty(commands.getOutputText()))
                     .addAllDebugProperties(debugProperties(commands));
             send(finalExecute);
@@ -173,7 +175,7 @@ final class RemotePeer implements IRobotPeer {
             // copies (ExecCommands(origin, fromRobot)), and a robot whose execute threw keeps
             // adding to them: what its handlers fire here still counts (lessonz.robocode.Oz
             // fires in a custom event after winning). The rest is as it was at the execute.
-            RobotCommands late = Convert.commands(finalCommands);
+            RobotCommands late = Convert.commands(finalCommands, colors);
             finalExecute.getCommandsBuilder()
                     .clearBullets().addAllBullets(late.getBulletsList())
                     .clearTeamMessages().addAllTeamMessages(late.getTeamMessagesList());
@@ -185,7 +187,7 @@ final class RemotePeer implements IRobotPeer {
             // died without executing again; then the server awaits this as its final Execute).
             Execute.Builder execute = Execute.newBuilder()
                     .setTurn(lastTurn)
-                    .setCommands(Convert.commands(commands))
+                    .setCommands(Convert.commands(commands, colors))
                     .setOutput(nullToEmpty(commands.getOutputText()))
                     .addAllDebugProperties(debugProperties(commands))
                     .setCpuNanos(cpuSinceReturn())

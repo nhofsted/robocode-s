@@ -90,6 +90,22 @@ describe('fixtures', () => {
 		expect(switches).toBeGreaterThan(0);
 	});
 
+	it("give some bots their robot's colours, the same in the rankings", () => {
+		const rankings = fixtures.get('rankings/1v1.json') as Rankings;
+		let colored = 0;
+		for (const row of rankings.bots) {
+			const bot = fixtures.get(`bots/${row.id}.json`) as BotDetails;
+			expect(row.colors).toEqual(bot.versions[0].colors);
+			for (const v of bot.versions.slice(1)) expect(v.colors).toBeUndefined();
+			if (row.colors) {
+				colored++;
+				expect(row.colors.body).toMatch(/^#[0-9a-f]{6}$/);
+			}
+		}
+		expect(colored).toBeGreaterThan(0);
+		expect(colored).toBeLessThan(rankings.bots.length);
+	});
+
 	it('return undefined for unknown files', () => {
 		expect(fixtures.get('rankings/nope.json')).toBeUndefined();
 		expect(fixtures.get('bots/no.such.Bot.json')).toBeUndefined();
@@ -148,6 +164,7 @@ describe('recordings', () => {
 				expect(back.rounds.map((r) => r.slice(0, 4))).toEqual(pair.rounds.map((r) => r.slice(0, 4)));
 				pair.rounds.forEach((r, i) => expect(back.rounds[i][4]).toBe(1 - r[4]));
 				expect(back.oppSha16).toBe(rec!.sha16);
+				expect(back.oppColors).toEqual(rec!.colors);
 				checked++;
 			}
 		}

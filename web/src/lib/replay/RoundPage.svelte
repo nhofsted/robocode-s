@@ -6,6 +6,7 @@
 	import { downloadTrack, type TrackBattle } from './download.ts';
 	import { TrackError, fetchTrack } from './fetch.ts';
 	import { formatBytes, formatCount } from '../rumble/format.ts';
+	import type { BotColors } from '../rumble/types.ts';
 
 	interface Link {
 		href: string;
@@ -19,6 +20,8 @@
 		/** Per track robot index. */
 		names: string[];
 		colorKeys: string[];
+		/** The colours the robots set, per track robot index, where known. */
+		colors?: (BotColors | null | undefined)[];
 		/** The robots in track order, with versions. */
 		fighters: { id: string; version: string; href: string }[];
 		outcome: string;
@@ -41,6 +44,7 @@
 		url,
 		names,
 		colorKeys,
+		colors = [],
 		fighters,
 		outcome,
 		round,
@@ -79,7 +83,7 @@
 		{#await track}
 			<p class="loading" role="status">Loading the replay&hellip;</p>
 		{:then t}
-			<Replay track={t} {names} {colorKeys} />
+			<Replay track={t} {names} {colorKeys} {colors} />
 		{:catch e}
 			<p class="notice" role="alert"><strong>No replay.</strong> {message(e)}</p>
 		{/await}

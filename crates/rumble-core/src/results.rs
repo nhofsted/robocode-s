@@ -7,8 +7,8 @@
 //! recording slots claimed (§12.5).
 
 use crate::api::{
-    ApiError, BattleKind, BattleResult, BattleStatus, ErrorCode, Rejected, ResultsRequest,
-    ResultsResponse, UploadSlot, UserSummary,
+    ApiError, BattleKind, BattleResult, BattleStatus, BotColors, ErrorCode, Rejected,
+    ResultsRequest, ResultsResponse, UploadSlot, UserSummary,
 };
 use crate::config::Config;
 use crate::ids::Division;
@@ -376,6 +376,7 @@ pub fn apply_results<S: Store + ?Sized>(
                             hash: hash(),
                             record: record.to_bytes(),
                             held: false,
+                            colors: run_colors(battle),
                         },
                     )),
                     _ => given_back.push(sort.clone()),
@@ -413,6 +414,7 @@ pub fn apply_results<S: Store + ?Sized>(
                             hash: hash(),
                             record: record.to_bytes(),
                             held,
+                            colors: run_colors(battle),
                         }],
                         uids: vec![user.uid.clone()],
                         stage: 1,
@@ -530,6 +532,22 @@ pub fn apply_results<S: Store + ?Sized>(
         },
         log,
     })
+}
+
+/// The colours each robot of a battle set, as a verification run keeps them
+/// ([`Run::colors`]): malformed ones dropped, empty where none are left.
+pub fn run_colors(battle: &BattleResult) -> Vec<Option<BotColors>> {
+    let colors: Vec<Option<BotColors>> = battle
+        .robots
+        .iter()
+        .flatten()
+        .map(|r| r.colors.as_ref().and_then(BotColors::checked).cloned())
+        .collect();
+    if colors.iter().all(Option::is_none) {
+        Vec::new()
+    } else {
+        colors
+    }
 }
 
 fn ignore_existing(result: StoreResult<()>) -> StoreResult<()> {
@@ -701,6 +719,7 @@ mod tests {
             seconds: 0,
             thirds: 0,
             rank: 1,
+            colors: None,
         }
     }
 
@@ -798,6 +817,7 @@ mod tests {
                     created: 0,
                     retired: None,
                     url: None,
+                    colors: None,
                 })
                 .unwrap();
         }
@@ -1072,10 +1092,25 @@ mod tests {
     #[test]
     fn picking_battles_for_verification() {
         let battles = vec![assigned(BattleKind::Normal, 1, &[5, 9], None); 3];
+        // Robot 1 of battle 1 reports its colours, robot 0 malformed ones (dropped).
+        let mut colored = ok(1, 2);
+        let robots = colored.robots.as_mut().unwrap();
+        robots[0].colors = Some(BotColors {
+            body: Some("red".into()),
+            ..Default::default()
+        });
+        robots[1].colors = Some(BotColors {
+            gun: Some("#ff0000".into()),
+            ..Default::default()
+        });
         let r = |p: &BatchPayload| {
             request(
                 p,
-                vec![ok(0, 1), ok(1, 2), status(2, BattleStatus::RobotFailed)],
+                vec![
+                    ok(0, 1),
+                    colored.clone(),
+                    status(2, BattleStatus::RobotFailed),
+                ],
             )
         };
         // Rate 1: every ok battle.
@@ -1091,6 +1126,18 @@ mod tests {
         assert_eq!(items[0].runs[0].hash, Some(hex(1)));
         assert!(!items[0].runs[0].held);
         assert_eq!(items[0].kind, VerifyKind::Check);
+        // The run keeps the colours reported, for a second run to confirm.
+        assert!(items[0].runs[0].colors.is_empty());
+        assert_eq!(
+            items[1].runs[0].colors,
+            [
+                None,
+                Some(BotColors {
+                    gun: Some("#ff0000".into()),
+                    ..Default::default()
+                })
+            ]
+        );
         // Rate 0: none.
         let (store, user) = setup(0, UserState::New);
         let mut never = config();
@@ -1149,6 +1196,7 @@ mod tests {
                     hash: Some(hex(7)),
                     record: record.to_bytes(),
                     held: true,
+                    colors: Vec::new(),
                 }],
             ),
             ("0000000000002#p", VerifyKind::Probation, vec![]),
@@ -1160,6 +1208,7 @@ mod tests {
                     hash: Some(hex(8)),
                     record: record.to_bytes(),
                     held: false,
+                    colors: Vec::new(),
                 }],
             ),
         ] {

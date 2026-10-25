@@ -91,7 +91,7 @@
 	<section class="duel panel">
 		{#each [{ bot: data.a, entry: data.ea }, { bot: data.b, entry: data.eb }] as s, i (s.bot.id)}
 			<div class="side" class:right={i === 1}>
-				<Tank colors={tankColors(s.bot.id)} size={72} heading={i === 0 ? 90 : 270} />
+				<Tank colors={tankColors(s.bot.id, s.bot.versions[0]?.colors)} size={72} heading={i === 0 ? 90 : 270} />
 				<div>
 					<a class="name" href={resolve('/bot/[id]', { id: s.bot.id }) + `?rumble=${rumble}`}>{shortName(s.bot.id)}</a>
 					<div class="small muted">

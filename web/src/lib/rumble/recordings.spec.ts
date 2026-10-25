@@ -72,6 +72,19 @@ describe('pairRounds', () => {
 		expect(pairRounds(rec, walls.bot, 'x.Y')).toBeNull();
 	});
 
+	it('carries the colours the file knows', () => {
+		const colored: Recordings1v1 = {
+			...rec,
+			colors: { body: '#000000' },
+			pairs: [{ ...rec.pairs[0], oppColors: { gun: '#ff0000' } }]
+		};
+		const found = pairRounds(colored, crazy.bot, walls.bot)!;
+		expect(found.a.colors).toEqual({ gun: '#ff0000' });
+		expect(found.b.colors).toEqual({ body: '#000000' });
+		expect(opponentTallies(colored)[0].colors).toEqual({ gun: '#ff0000' });
+		expect(pairRounds(rec, crazy.bot, walls.bot)!.a.colors).toBeUndefined();
+	});
+
 	it('tallies wins and losses per opponent', () => {
 		expect(opponentTallies(rec)).toEqual([
 			{ opponent: crazy.bot, version: '1.2', won: 2, lost: 1 }
