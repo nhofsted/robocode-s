@@ -19,7 +19,7 @@ For you this mostly means things work as before, with a few benefits: a crash or
 
 ## The steps
 
-New to this? [Jane Doe's first robot](/docs/robot-development/example) goes through all of it once, with complete files for Maven and Gradle.
+New to this? [Your first robot](/docs/robot-development/example) goes through all of it once, with complete files for Maven and Gradle.
 
 1. **[Project and code](/docs/robot-development/project):** a Gradle or Maven project against the classic API, and what to keep in mind when writing the robot.
 2. **[Running and testing](/docs/robot-development/testing):** run battles from the command line or the GUI, reproduce them with seeds, measure over many battles.

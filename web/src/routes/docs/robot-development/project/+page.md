@@ -21,7 +21,7 @@ dependencies {
 }
 ```
 
-With Maven, use `net.sf.robocode:robocode.api:1.11.1` with `<scope>provided</scope>`. [Jane Doe's first robot](/docs/robot-development/example) has complete build files for both, including one that bundles a library.
+With Maven, use `net.sf.robocode:robocode.api:1.11.1` with `<scope>provided</scope>`. [Your first robot](/docs/robot-development/example) has complete build files for both, including one that bundles a library.
 
 A good layout keeps one package per author, with your bots and their shared code in it:
 

@@ -16,7 +16,7 @@ robot.webpage=https://example.com/myrobot
 robocode.version=1.11.1
 ```
 
-The rumble identifies a robot as `classname version` (here `jd.MyRobot 1.2`), so **every release needs a new version string**. Classic's packager in the Robocode GUI writes this file for you; with Maven or Gradle, write it as a resource and let the build fill in the version, as [Jane Doe's first robot](/docs/robot-development/example) does.
+The rumble identifies a robot as `classname version` (here `jd.MyRobot 1.2`), so **every release needs a new version string**. Classic's packager in the Robocode GUI writes this file for you; with Maven or Gradle, write it as a resource and let the build fill in the version, as [Your first robot](/docs/robot-development/example) shows.
 
 **Codesize** decides your robot's weight class: under 250 bytes is a nano bot, under 750 a micro, under 1500 a mini, anything larger competes only in the general rumbles. Codesize counts the bytecode of your classes, not the jar size.
 

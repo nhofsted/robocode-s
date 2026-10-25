@@ -29,7 +29,7 @@ Robots for robocode-s are classic Robocode robots: everything you write against 
 robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main
 ```
 
-(`jd.MyRobot` is Jane Doe's robot in the [worked example](/docs/robot-development/example), from an empty folder to a release; use your own package and class name.) Recompile and the next battle runs the new code. [Developing a robot](/docs/robot-development) covers the project, testing, debugging and packaging.
+(`jd.MyRobot` is the robot of the [worked example](/docs/robot-development/example), from an empty folder to a release; use your own package and class name.) Recompile and the next battle runs the new code. [Developing a robot](/docs/robot-development) covers the project, testing, debugging and packaging.
 
 ## 4. Next
 

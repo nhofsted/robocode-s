@@ -5,7 +5,7 @@ description: Write a robot in IntelliJ IDEA, Eclipse or VS Code, build it with G
 
 You write a robot in your IDE against classic Robocode's API, and robocode-s runs the folder your IDE compiles into. Recompile, start a battle, and it runs the new code. No packaging step.
 
-The examples on this page use Jane Doe's robot, `jd.MyRobot`: [her whole path](/docs/robot-development/example) from an empty folder to a release is worked out in full. Use your own package and class name.
+The examples on this page use the robot `jd.MyRobot` (author Jane Doe, package `jd`): [the whole path](/docs/robot-development/example) from an empty folder to a release is worked out in full. Use your own package and class name.
 
 Breakpoints and stepping work too: your IDE's own debugger starts the robot, and robocode-s waits for it ([debug it from the IDE](#debug-it-with-your-ides-debugger), below).
 
