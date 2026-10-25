@@ -1495,27 +1495,36 @@ impl Rumble {
             };
             ui.label(RichText::new(text).weak());
         }
-        egui::Grid::new("rumble-battles")
-            .num_columns(3)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                for b in &self.model.battles {
-                    ui.label(RichText::new(b.division.to_string()).weak());
-                    ui.label(battle_title(&b.bots));
-                    let fraction = if b.of == 0 {
-                        0.0
-                    } else {
-                        b.round as f32 / b.of as f32
-                    };
-                    let text = if b.of == 0 {
-                        "starting".to_string()
-                    } else {
-                        format!("round {} of {}", b.round, b.of)
-                    };
+        // Not a grid: its columns follow the robot names, so the bars would jump around as
+        // battles come and go. The bars stay on the right edge and the names truncate instead.
+        ui.spacing_mut().item_spacing.y = 6.0;
+        let division_width = Division::ALL
+            .iter()
+            .map(|d| text_width(ui, &d.to_string()))
+            .fold(0.0, f32::max);
+        for b in &self.model.battles {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                let fraction = if b.of == 0 {
+                    0.0
+                } else {
+                    b.round as f32 / b.of as f32
+                };
+                let text = if b.of == 0 {
+                    "starting".to_string()
+                } else {
+                    format!("round {} of {}", b.round, b.of)
+                };
+                let division = ui.label(RichText::new(b.division.to_string()).weak());
+                ui.add_space((division_width - division.rect.width()).max(0.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     progress(ui, fraction, &text);
-                    ui.end_row();
-                }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(battle_title(&b.bots)).truncate());
+                    });
+                });
             });
+        }
     }
 
     fn totals_ui(&self, ui: &mut egui::Ui) {
@@ -1737,6 +1746,14 @@ impl Rumble {
         }
         Some(page)
     }
+}
+
+/// How wide `text` is in the body font.
+fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, Color32::WHITE))
+        .size()
+        .x
 }
 
 /// A bar `fraction` full (0 to 1) with `text` centred on it.
