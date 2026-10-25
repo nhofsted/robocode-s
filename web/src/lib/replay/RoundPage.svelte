@@ -29,7 +29,7 @@
 		size: number;
 		rules: { rounds: number; width: number; height: number };
 		downloadName: string;
-		/** The battle the download carries, for the desktop app to run it again. */
+		/** The battle the download carries, for the desktop app to make a full recording of it. */
 		battle: TrackBattle;
 		back: Link;
 		prev?: Link;
@@ -126,8 +126,8 @@
 			>
 			<span class="muted">Open it with Watch Battle in the <a href={resolve('/download')}>desktop app</a>, or on the
 			<a href={resolve('/replay/file')}>replay file page</a>. The file names its battle, so the desktop app (from
-			the version after 0.2.1) can run the whole battle again with Run this battle, for the names, scores and console
-			output.</span>
+			the version after 0.2.1) can turn it into a full recording with names, scores and console output (Full
+			recording).</span>
 		</p>
 	</section>
 </div>

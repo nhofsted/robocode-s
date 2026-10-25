@@ -1,29 +1,38 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Running a rumble battle again from a downloaded track ([`TrackBattle`]), for everything
-//! the track leaves out: names, scores, console output, debug properties. Rumble battles
-//! are deterministic (ADR 0017): the same jars, in the same order, with the same seed,
-//! rules and engine version, fight the same battle. So it runs as the rumble ran it, with
-//! exactly those jars and no data files, and fast up to the track's round, where it pauses.
+//! Turning a downloaded track ([`TrackBattle`]) into a full recording, for everything the
+//! track leaves out: names, scores, console output, debug properties. Rumble battles are
+//! deterministic (ADR 0017): the same jars, in the same order, with the same seed, rules
+//! and engine version, fight the same battle. So it runs again as the rumble ran it, with
+//! exactly those jars and no data files, unseen and as fast as it goes, recorded to a file
+//! that then opens as any recording.
 //!
 //! A jar is taken from the rumble's jar cache, else from the robot folders (the same file,
 //! by its hash: an author's own robot), else downloaded from the rumble into its cache.
 
-use crate::app::Setup;
 use crate::track::{TrackBattle, TrackRobot};
-use robocode_s_engine::ENGINE_VERSION;
+use robocode_s_engine::{BattleRules, ENGINE_VERSION};
+use robocode_s_protocol::v1::{self, server_message};
+use robocode_s_runner::local::{Environment, prepare_with, run_local_battle};
+use robocode_s_server::{Connection, ServerConfig};
 use rumble_client::http::{Api, sha256_hex};
 use rumble_client::jars::JarCache;
 use rumble_core::api::WorkBot;
 use rumble_core::config::DivisionConfig;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, SystemTime};
 
 /// The largest bot data file read: a bot's versions and history.
 const BOT_FILE_LIMIT: u64 = 8 << 20;
+/// The robots' heap, as the rumble gives them.
+const MEMORY_MB: u32 = 512;
+/// Full recordings not saved are removed once they are this old.
+const STALE_RECORDING: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// The robots of a battle run again, as [`Setup::rumble`]: their jars are found (and
-/// fetched from `server`) when it starts.
+/// A battle's robots and the rumble their jars come from if they aren't here.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RumbleRobots {
     pub server: String,
@@ -41,38 +50,140 @@ pub fn unavailable(battle: &TrackBattle) -> Option<String> {
     })
 }
 
-/// The setup that runs `battle` again (from the rumble at `server`) and its seed: `base`
-/// with the battle's robots and rules, deterministic, pausing at the track's round. A rule
-/// the battle leaves out is the rumble's, the gun cooling the track's.
-pub fn setup(
-    base: &Setup,
+/// The rules `battle` ran with. A rule the battle leaves out is the rumble's, the gun
+/// cooling the track's.
+pub fn rules(battle: &TrackBattle, gun_cooling_milli: i64) -> BattleRules {
+    let rumble = DivisionConfig::default();
+    BattleRules {
+        width: battle.width,
+        height: battle.height,
+        num_rounds: battle.rounds,
+        gun_cooling_rate: battle
+            .gun_cooling_rate
+            .unwrap_or(gun_cooling_milli as f64 / 1000.0),
+        inactivity_time: battle
+            .inactivity_time
+            .unwrap_or(i64::from(rumble.inactivity_time)),
+        hide_enemy_names: battle.hide_enemy_names.unwrap_or(rumble.hide_enemy_names),
+        sentry_border_size: battle.sentry_border.unwrap_or(rumble.sentry_border as i32),
+    }
+}
+
+/// Where a full recording of the track `track` goes until it is saved: a new file in
+/// `<data>/recordings`, where those older than a day are removed first.
+pub fn recording_path(data: &Path, track: &Path) -> PathBuf {
+    let dir = data.join("recordings");
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let old = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| {
+                SystemTime::now().duration_since(t).unwrap_or_default() > STALE_RECORDING
+            });
+            if old {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let stem = track.file_stem().unwrap_or_default().to_string_lossy();
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    dir.join(format!("{stem}-{stamp}-{}.rec", std::process::id()))
+}
+
+/// What [`record`] is doing.
+pub enum Stage {
+    /// Finding (or downloading) the robots' jars.
+    Robots,
+    /// Starting the robots, then fighting the battle: the round (0-based) and the rounds.
+    Battle(i32, i32),
+}
+
+/// Runs `battle` again, robots from the rumble at `server` if need be, and records it to
+/// `path`. `progress` hears what it is doing; a `cancel` stops it (and removes the file).
+pub fn record(
+    env: &Environment,
+    server: &str,
     battle: &TrackBattle,
     gun_cooling_milli: i64,
-    server: String,
-) -> (Setup, i64) {
-    let rumble = DivisionConfig::default();
-    let mut setup = base.clone();
-    setup.robots = battle.robots.iter().map(TrackRobot::name).collect();
-    setup.seed.clone_from(&battle.seed);
-    setup.rounds = battle.rounds;
-    (setup.width, setup.height) = (battle.width, battle.height);
-    setup.classic = false;
-    setup.record = String::new();
-    setup.paint = false;
-    setup.rules.gun_cooling_rate = battle
-        .gun_cooling_rate
-        .unwrap_or(gun_cooling_milli as f64 / 1000.0);
-    setup.rules.inactivity_time = battle
-        .inactivity_time
-        .unwrap_or(i64::from(rumble.inactivity_time));
-    setup.rules.sentry_border = battle.sentry_border.unwrap_or(rumble.sentry_border as i32);
-    setup.rules.hide_enemy_names = battle.hide_enemy_names.unwrap_or(rumble.hide_enemy_names);
-    setup.rumble = Some(RumbleRobots {
-        server,
+    path: &Path,
+    progress: &dyn Fn(Stage),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    if let Some(why) = unavailable(battle) {
+        return Err(why);
+    }
+    progress(Stage::Robots);
+    let rumble = RumbleRobots {
+        server: server.to_string(),
         robots: battle.robots.clone(),
+    };
+    let jars = jars(&rumble, &env.data, &env.jars)?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let env = Environment {
+        jars,
+        fresh_data: true,
+        ..env.clone()
+    };
+    let config = ServerConfig {
+        rules: rules(battle, gun_cooling_milli),
+        seed: battle.seed.parse().map_err(|_| "the seed isn't a number")?,
+        deterministic: true,
+        record: Some(path.to_path_buf()),
+        ..Default::default()
+    };
+    let names: Vec<String> = battle.robots.iter().map(TrackRobot::name).collect();
+    progress(Stage::Battle(0, battle.rounds));
+    let (host, local) = prepare_with(&env, &names, config, MEMORY_MB, None)?;
+    if local.robots.len() != names.len() {
+        local.remove_dir();
+        return Err(format!(
+            "{} robots found for the battle's {}",
+            local.robots.len(),
+            names.len()
+        ));
+    }
+    let (controls, rx) = mpsc::channel();
+    let mut aborted = false;
+    let ran = run_local_battle(&host, &local, Some(rx), |msg| {
+        if !aborted && cancel.load(Ordering::Relaxed) {
+            aborted = true;
+            let _ = controls.send(v1::ObserverControl {
+                control: Some(v1::observer_control::Control::Abort(true)),
+            });
+        }
+        if let server_message::Msg::TurnSnapshot(s) = msg
+            && s.turn == 0
+        {
+            progress(Stage::Battle(s.round, battle.rounds));
+        }
     });
-    setup.pause_at_round = (battle.round > 0).then_some(battle.round);
-    (setup, battle.seed.parse().unwrap_or_default())
+    let failed = match ran {
+        Err(e) => Some(e),
+        Ok(_) if aborted => Some("cancelled".into()),
+        Ok(ran) => ran
+            .outcome
+            .connections
+            .iter()
+            .zip(&names)
+            .enumerate()
+            .find(|(_, (c, _))| **c != Connection::Kept)
+            .map(|(i, (_, name))| {
+                let detail = ran.stderr.get(i).map_or("", |s| s.trim());
+                format!("{name} didn't run to the end of the battle: {detail}")
+            }),
+    };
+    match failed {
+        Some(e) => {
+            let _ = std::fs::remove_file(path);
+            Err(e)
+        }
+        None => Ok(()),
+    }
 }
 
 /// The jars of `rumble`'s robots, each once, in battle order: from the jar cache under
@@ -251,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn the_setup_is_the_battle_as_the_rumble_ran_it() {
+    fn the_rules_are_the_rumbles() {
         let battle = TrackBattle {
             schema: 1,
             engine: ENGINE_VERSION,
@@ -266,25 +377,24 @@ mod tests {
             hide_enemy_names: None,
             robots: vec![robot("b.B", &"1".repeat(64)), robot("a.A", &"2".repeat(64))],
         };
-        let mut base = Setup::new(&crate::settings::Settings::default());
-        base.classic = true;
-        base.paint = true;
-        base.record = "x.rsr".into();
-        let (setup, seed) = setup(&base, &battle, 100, "https://r.example".into());
-        assert_eq!(seed, -42);
-        assert_eq!(setup.robots, ["b.B 1.0", "a.A 1.0"]);
-        assert_eq!((setup.rounds, setup.width, setup.height), (35, 800, 600));
-        assert!(!setup.classic && !setup.paint && setup.record.is_empty());
-        assert_eq!(setup.rules.gun_cooling_rate, 0.1);
-        assert_eq!(setup.rules.inactivity_time, 450);
-        assert_eq!(setup.rules.sentry_border, 100);
-        assert_eq!(setup.pause_at_round, Some(3));
-        assert_eq!(setup.rumble.unwrap().robots, battle.robots);
+        let r = rules(&battle, 100);
+        assert_eq!((r.width, r.height, r.num_rounds), (800, 600, 35));
+        assert_eq!(r.gun_cooling_rate, 0.1);
+        assert_eq!((r.inactivity_time, r.sentry_border_size), (450, 100));
+        assert!(!r.hide_enemy_names);
         assert!(unavailable(&battle).is_none());
         let other = TrackBattle {
             engine: ENGINE_VERSION + 1,
             ..battle
         };
         assert!(unavailable(&other).is_some());
+        let dir = std::env::temp_dir().join(format!("robocodes-rec-{}", std::process::id()));
+        let path = recording_path(&dir, Path::new("/x/A_vs_B_round4_a-0.track"));
+        assert_eq!(path.parent(), Some(dir.join("recordings").as_path()));
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.starts_with("A_vs_B_round4_a-0-") && name.ends_with(".rec"),
+            "{name}"
+        );
     }
 }
