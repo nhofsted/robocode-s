@@ -552,7 +552,7 @@ A retired version's pairings leave the pairing state at the next plan; its histo
 - **Slots:** `--parallel N`, default `max(1, min(cores/2, RAM GiB/2))`; a 1v1 battle takes 1 slot, a melee battle 5. The client asks for `divisions` it has slots for.
 - Each battle: an `Environment` like the CLI's with `jars` = the battle's cached jars only, **`fresh_data = true`** (robots' data files from earlier battles would make results differ between volunteers), `deterministic`, the batch's rules and seed, no recording file, no paint. `prepare_with` and `run_local_battle_with` as `crates/cli/src/battle.rs` does, on a thread per running battle. Robot names in the description are `"<id> <version>"`.
 - The observer callback receives every `TurnSnapshot` (the embedded observer runs unpaced) and `RoundResult`; from them the client computes hashes (§13.4) and builds one `replay::Track` per round (§13.4), keeping the encoded tracks in memory until the batch's results are acknowledged.
-- A robot that can't be described (`prepare` fails naming it) is `robotFailed` `load`; a robot that disconnects (`RobotDisconnected`, or its process exited) is `robotFailed` `crash`; any other error is `error`.
+- A robot that can't be described (`prepare` fails naming it) is `robotFailed` `load`; a robot that disconnects (`RobotDisconnected`, or its process exited) is `robotFailed` `crash`; any other error is `error`. A `robotFailed` battle that ends while the client is stopping (a stop request or an abort) is `notRun` instead: the stop may be what ended the robot (#124).
 
 ### 13.3 The loop (`Contributor`)
 
@@ -571,7 +571,7 @@ loop:
 ```
 
 - At most two batches in flight (one running, one prefetched).
-- Stop (Ctrl+C, GUI Stop): no new battles; running battles finish (a second Ctrl+C aborts them: their battles are `notRun`); post what is done.
+- Stop (Ctrl+C, GUI Stop): no new battles; running battles finish (a second Ctrl+C aborts them: their battles are `notRun`); post what is done. Robot hosts run in process groups of their own, so a terminal's Ctrl+C reaches only the client; on Linux they get `SIGKILL` when the client dies (`PR_SET_PDEATHSIG`). A service manager that signals the whole cgroup (systemd's default `KillMode=control-group`) still reaches the robots: use `KillMode=mixed` with `KillSignal=SIGINT`.
 - 401 → stop and ask for a login; 403 → stop with the message; 409 `engine_mismatch` → stop, update needed; 409 `expired` → drop the batch.
 - Events for the UI (`Event`): `Batch{division, battles}`, `BattleStarted{bots}`, `Round{n, of}`, `BattleDone{result summary}`, `Posted{accepted, rejected}`, `Uploaded{n}`, `Waiting{until, why}`, `Error{text}`.
 

@@ -313,12 +313,11 @@ impl Sandboxed {
             });
         }
         let null_or_piped = |piped| if piped { Stdio::piped() } else { Stdio::null() };
-        let mut child = self
-            .command
+        self.command
             .stdin(null_or_piped(stdin))
             .stdout(null_or_piped(stdout))
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
+        let mut child = spawn_apart(self.command)?;
         Ok(Child {
             stdin: child.stdin.take().map(|p| Box::new(p) as _),
             stdout: child.stdout.take().map(|p| Box::new(p) as _),
@@ -349,8 +348,30 @@ impl Sandboxed {
                 stderr: stderr.join().unwrap_or_default(),
             });
         }
-        self.command.stdin(Stdio::null()).output()
+        self.command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        spawn_apart(self.command)?.wait_with_output()
     }
+}
+
+/// Starts `command` apart from the runner's process group: a terminal's Ctrl+C goes to the
+/// whole foreground group, and it is for the runner, which then lets its robots finish
+/// their battles (#124). On Linux the program also gets `SIGKILL` when the runner dies,
+/// however it dies (`PR_SET_PDEATHSIG`); elsewhere a robot host ends when its pipes close.
+/// On Windows the programs have a console of their own (`CREATE_NO_WINDOW`) or none
+/// (`DETACHED_PROCESS`), which the runner's console's Ctrl+C doesn't reach.
+fn spawn_apart(mut command: Command) -> io::Result<std::process::Child> {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(target_os = "linux")]
+    {
+        linux::die_with_parent(&mut command);
+        linux::spawn_from_keeper(command)
+    }
+    #[cfg(not(target_os = "linux"))]
+    command.spawn()
 }
 
 /// A started program; its pipes are for the caller to take.
@@ -498,5 +519,114 @@ mod tests {
             [dir.join("etc/java.security")]
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `sleep 60` in `sandbox`, started from a thread that ends at once, as battle threads
+    /// do; its process id.
+    #[cfg(unix)]
+    fn sleeper(sandbox: Sandbox, home: &Path) -> (Child, libc::pid_t) {
+        let sleep = Path::new("/bin/sleep").canonicalize().unwrap();
+        let grants = Grants {
+            runtime: sleep.parent().unwrap().to_path_buf(),
+            read: Vec::new(),
+            home: home.to_path_buf(),
+            memory_mb: 64,
+        };
+        let mut sandboxed = command(sandbox, &sleep, &grants).unwrap();
+        sandboxed.command.arg("60");
+        let child = std::thread::spawn(|| sandboxed.spawn(true, false).unwrap())
+            .join()
+            .unwrap();
+        let Process::Plain(process, _) = &child.process;
+        let pid = process.id() as libc::pid_t;
+        (child, pid)
+    }
+
+    /// A terminal's Ctrl+C goes to its foreground process group: the runner's, which its
+    /// robots are not in (#124).
+    #[cfg(unix)]
+    #[test]
+    #[allow(unsafe_code)] // one system call, on numbers
+    fn programs_start_in_a_process_group_of_their_own() {
+        let home = std::env::temp_dir().join(format!("robocode-s-group-{}", std::process::id()));
+        for sandbox in [Sandbox::None, Sandbox::Os, Sandbox::Bwrap] {
+            if sandbox.unavailable().is_some() {
+                continue;
+            }
+            let (mut child, pid) = sleeper(sandbox, &home);
+            // SAFETY: reads the process groups.
+            let (group, ours) = unsafe { (libc::getpgid(pid), libc::getpgid(0)) };
+            child.kill().unwrap();
+            child.wait().unwrap();
+            assert_eq!(group, pid, "{sandbox}");
+            assert_ne!(group, ours, "{sandbox}");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Set for [`starter`], to the home its program gets.
+    #[cfg(target_os = "linux")]
+    const STARTER: &str = "ROBOCODES_TEST_STARTER";
+
+    /// Not a test of its own: a runner for [`programs_die_with_the_runner`], which starts it
+    /// with [`STARTER`]. Starts a program from a thread that ends, says its process id and
+    /// waits to be killed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn starter() {
+        let Some(home) = std::env::var_os(STARTER) else {
+            return;
+        };
+        let (_child, pid) = sleeper(Sandbox::Os, Path::new(&home));
+        println!("\nstarted {pid}");
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+
+    /// A runner killed hard takes its robots with it, though the thread that started them
+    /// ended long before.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[allow(unsafe_code)] // one system call, on a number
+    fn programs_die_with_the_runner() {
+        use std::io::BufRead;
+        use std::time::{Duration, Instant};
+        if Sandbox::Os.unavailable().is_some() {
+            return;
+        }
+        let home = std::env::temp_dir().join(format!("robocode-s-death-{}", std::process::id()));
+        let mut runner = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "sandbox::tests::starter", "--nocapture"])
+            .env(STARTER, &home)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = std::io::BufReader::new(runner.stdout.take().unwrap());
+        let pid: libc::pid_t = stdout
+            .lines()
+            .map_while(Result::ok)
+            .find_map(|l| l.strip_prefix("started ")?.parse().ok())
+            .expect("the starter didn't say what it started");
+        let alive = |pid: libc::pid_t| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|s| s.rsplit(')').next().is_some_and(|r| !r.starts_with(" Z")))
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            alive(pid),
+            "the program ended with the thread that started it"
+        );
+        runner.kill().unwrap();
+        runner.wait().unwrap();
+        let start = Instant::now();
+        while alive(pid) && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let survived = alive(pid);
+        if survived {
+            // SAFETY: the test's own program.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(!survived, "the program outlived the runner");
     }
 }

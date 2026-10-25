@@ -14,7 +14,7 @@ use crate::screen::{self, DebugProperties};
 use crate::shell;
 use crate::sound;
 use crate::sprites::Sprites;
-use crate::track;
+use crate::track::{self, TrackBattle};
 use crate::view::{self, Camera, Field, Style};
 use eframe::egui::{self, Color32, RichText};
 use robocode_s_protocol::v1;
@@ -51,6 +51,9 @@ pub struct ReplayView {
     unverified: usize,
     /// Set when it was recorded with another engine version than this one.
     engine_warning: Option<String>,
+    /// A track's rumble battle, when the website appended it, and the track's gun cooling
+    /// rate in thousandths: it can run again ([`crate::rerun`]).
+    battle: Option<(TrackBattle, i64)>,
     /// Recorded in a debug battle (robots from an IDE, not timed).
     debug: bool,
     results: Vec<v1::Results>,
@@ -221,6 +224,7 @@ impl ReplayView {
             turns,
             unverified,
             engine_warning: recording.engine_warning(),
+            battle: None,
             debug: recording.header.debug,
             results,
             position: 0,
@@ -259,6 +263,7 @@ impl ReplayView {
             properties: Vec::new(),
             unverified: 0,
             engine_warning: engine_warning(decoded.engine_version),
+            battle: decoded.battle.map(|b| (b, decoded.gun_cooling_milli)),
             debug: false,
             results: Vec::new(),
             position: 0,
@@ -273,6 +278,12 @@ impl ReplayView {
         };
         view.seek(0);
         view
+    }
+
+    /// A track's rumble battle and the track's gun cooling rate in thousandths (see
+    /// [`ReplayView::battle`]).
+    pub fn battle(&self) -> Option<&(TrackBattle, i64)> {
+        self.battle.as_ref()
     }
 
     /// A full recording: with scores, CPU times, debug paint and console output.
@@ -360,7 +371,8 @@ impl ReplayView {
     }
 
     /// Draws the replay on the battle screen (see [`screen`]); true when the user closes it.
-    /// A robot's output to save goes in `save`.
+    /// A robot's output to save goes in `save`; `run` is set when the user wants a track's
+    /// battle run again.
     pub fn ui(
         &mut self,
         root: &mut egui::Ui,
@@ -368,6 +380,7 @@ impl ReplayView {
         style: Style,
         selected: &mut usize,
         save: &mut Option<screen::SaveRequest>,
+        run: &mut bool,
     ) -> bool {
         let ctx = &root.ctx().clone();
         self.play(ctx);
@@ -496,13 +509,21 @@ impl ReplayView {
                 let mut go_to = None;
                 let seed = match &self.source {
                     Source::Recording { seed, .. } => Some(seed.to_string()),
-                    Source::Track(_) => None,
+                    Source::Track(_) => self.battle.as_ref().map(|(b, _)| b.seed.clone()),
                 };
+                let battle = self.battle.as_ref().map(|(b, _)| b);
+                // A track of a rumble battle is one of its rounds.
+                let first = battle.map_or(0, |b| b.round.max(0) as usize);
+                let rounds = battle.map_or(rounds, |b| b.rounds);
                 screen::speed_and_readouts(
                     ui,
                     &mut self.turns_per_second,
                     seed.as_deref(),
-                    |_| {},
+                    |ui| {
+                        if let Some(battle) = battle {
+                            run_button(ui, battle, run);
+                        }
+                    },
                     |ui| {
                         if let Some(turn) = turn {
                             screen::info(ui, "Turn", turn.to_string());
@@ -510,13 +531,17 @@ impl ReplayView {
                         }
                         egui::ComboBox::from_id_salt("round")
                             .selected_text(
-                                RichText::new(format!("{} / {}", round + 1, rounds)).strong(),
+                                RichText::new(format!("{} / {}", first + round + 1, rounds))
+                                    .strong(),
                             )
                             .width(70.0)
                             .show_ui(ui, |ui| {
                                 for (r, &start) in self.round_starts.iter().enumerate() {
                                     if ui
-                                        .selectable_label(r == round, format!("Round {}", r + 1))
+                                        .selectable_label(
+                                            r == round,
+                                            format!("Round {}", first + r + 1),
+                                        )
                                         .clicked()
                                     {
                                         go_to = Some(start);
@@ -617,6 +642,27 @@ impl ReplayView {
             }
         }
         back
+    }
+}
+
+/// "Run this battle", for a track's rumble battle: sets `run` when clicked.
+fn run_button(ui: &mut egui::Ui, battle: &TrackBattle, run: &mut bool) {
+    let why = crate::rerun::unavailable(battle);
+    let button = ui.add_enabled(why.is_none(), egui::Button::new("Run this battle"));
+    let button = match why {
+        Some(why) => button.on_disabled_hover_text(why),
+        None => button.on_hover_text(format!(
+            "This is round {} of a rumble battle of {}. Run the whole battle here, as the \
+             rumble did, for the scores, console output and debug properties: it plays \
+             fast up to round {} and pauses at its start. Robots that aren't here yet \
+             come from the rumble.",
+            battle.round + 1,
+            battle.rounds,
+            battle.round + 1
+        )),
+    };
+    if button.clicked() {
+        *run = true;
     }
 }
 

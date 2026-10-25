@@ -172,7 +172,51 @@ fn stored(track: &Track) -> Track {
     track
 }
 
+/// The last bytes of a track with its battle appended ([`with_battle`]).
+pub const BATTLE_MAGIC: [u8; 8] = *b"RSBATTLE";
+/// Zeros between a track and its battle: as many as a decoder reads past a track's end.
+const BATTLE_PADDING: [u8; 8] = [0; 8];
+
+/// A track with the battle it is a round of appended, as the website's downloads have it:
+/// the track, eight zero bytes, `battle` (UTF-8 JSON, docs/rumble-data.md), its length as
+/// a little-endian `u32`, and [`BATTLE_MAGIC`]. A decoder reads up to eight bytes past a
+/// track's end and takes them for the trimmed trailing zeros, so the zeros keep the track
+/// as it was for decoders that don't know the battle.
+pub fn with_battle(track: &[u8], battle: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(track.len() + battle.len() + 20);
+    out.extend_from_slice(track);
+    out.extend_from_slice(&BATTLE_PADDING);
+    out.extend_from_slice(battle);
+    out.extend_from_slice(&(battle.len() as u32).to_le_bytes());
+    out.extend_from_slice(&BATTLE_MAGIC);
+    out
+}
+
+/// The track and the battle appended to it, if any ([`with_battle`]). The track is as the
+/// rumble stored it (its hash is the one the rumble has).
+pub fn split_battle(bytes: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let Some(rest) = bytes.strip_suffix(&BATTLE_MAGIC) else {
+        return (bytes, None);
+    };
+    let Some((rest, len)) = rest.split_last_chunk::<4>() else {
+        return (bytes, None);
+    };
+    let Some(start) = rest.len().checked_sub(u32::from_le_bytes(*len) as usize) else {
+        return (bytes, None);
+    };
+    let (track, battle) = rest.split_at(start);
+    (
+        track.strip_suffix(&BATTLE_PADDING).unwrap_or(track),
+        Some(battle),
+    )
+}
+
+/// Decodes a track, with or without its battle appended ([`with_battle`]).
 pub fn decode(bytes: &[u8]) -> Result<Track, DecodeError> {
+    decode_track(split_battle(bytes).0)
+}
+
+fn decode_track(bytes: &[u8]) -> Result<Track, DecodeError> {
     let (engine_version, rest) = match bytes.split_first() {
         Some((&VERSION, rest)) => read_leb128(rest)?,
         Some((&VERSION_1, rest)) => (0, rest),
@@ -911,6 +955,23 @@ mod tests {
         let track = synthetic();
         let bytes = encode(&track);
         assert_eq!(decode(&bytes).unwrap(), track);
+    }
+
+    #[test]
+    fn a_battle_appended_leaves_the_track_as_it_was() {
+        for seed in 1..40 {
+            let track = random_track(seed);
+            let bytes = encode(&track);
+            let battle = br#"{"seed":"42"}"#;
+            let both = with_battle(&bytes, battle);
+            assert_eq!(split_battle(&both), (&bytes[..], Some(&battle[..])));
+            assert_eq!(decode(&both).unwrap(), track);
+            // A decoder that doesn't know the battle reads the zeros as the trimmed ones.
+            assert_eq!(decode_track(&both).unwrap(), track, "seed {seed}");
+        }
+        assert_eq!(split_battle(b"RSBATTLE"), (&b"RSBATTLE"[..], None));
+        let short = [&[1, 0, 0, 0][..], &BATTLE_MAGIC].concat();
+        assert_eq!(split_battle(&short).1, None);
     }
 
     #[test]

@@ -45,6 +45,15 @@
 	size={round.size}
 	rules={{ rounds: data.summary.rounds, ...data.summary.battlefield }}
 	downloadName="{shortName(found.a.bot)}_vs_{shortName(found.b.bot)}_round{round.round + 1}_{round.file}.track"
+	battle={{
+		schema: 1,
+		engine: found.engine,
+		seed: round.seed,
+		round: round.round,
+		rounds: data.summary.rounds,
+		...data.summary.battlefield,
+		robots
+	}}
 	back={{ href: pairingHref, label: `All rounds of ${nameA} vs ${nameB}` }}
 	prev={link(data.at - 1)}
 	next={link(data.at + 1)}

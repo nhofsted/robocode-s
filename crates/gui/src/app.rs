@@ -8,6 +8,7 @@ use crate::icons;
 use crate::ide::{self, Ide};
 use crate::live::Live;
 use crate::replay::{Opening, ReplayView};
+use crate::rerun;
 use crate::rumble::Rumble;
 use crate::screen;
 use crate::settings::{Contents, Rules, Settings};
@@ -51,6 +52,11 @@ pub struct Setup {
     pub watch: String,
     pub watch_token: String,
     pub watch_fingerprint: String,
+    /// A rumble battle run again ([`rerun`]): its robots' jars instead of the robot
+    /// folders', and no data files.
+    pub rumble: Option<rerun::RumbleRobots>,
+    /// Get to this round (0-based) at full speed and pause at its start.
+    pub pause_at_round: Option<i32>,
 }
 
 impl Setup {
@@ -70,6 +76,8 @@ impl Setup {
             watch: settings.watch.clone(),
             watch_token: String::new(),
             watch_fingerprint: settings.watch_fingerprint.clone(),
+            rumble: None,
+            pause_at_round: None,
         }
     }
 
@@ -180,6 +188,9 @@ struct Starting {
     size: (i32, i32),
     classic: bool,
     turns_per_second: u32,
+    /// The round the server pauses at ([`Setup::pause_at_round`]): until then the battle
+    /// runs at full speed, then at `turns_per_second`.
+    pause_at_round: Option<i32>,
     paint: bool,
     /// Why the battle couldn't start.
     error: Option<String>,
@@ -223,7 +234,13 @@ impl Battle {
                     let mut live = Live::start(ctx, host, battle);
                     live.camera = camera;
                     live.seed = starting.seed;
-                    live.set_speed(starting.turns_per_second);
+                    match starting.pause_at_round {
+                        Some(round) => {
+                            live.pause_at = Some((round, starting.turns_per_second));
+                            live.set_speed(0);
+                        }
+                        None => live.set_speed(starting.turns_per_second),
+                    }
                     if starting.paint {
                         for i in 0..live.robots.len() {
                             live.set_paint(i, true);
@@ -325,6 +342,8 @@ pub struct App {
     screenshot: Option<Screenshot>,
     /// `--kill-at`, until done.
     kill_at: Option<(i64, usize)>,
+    /// `--run`, until the replay is open.
+    run_on_open: bool,
     /// `--input-at`, by turn, until sent.
     input_at: Vec<(i64, Vec<robocode_s_protocol::v1::InputEvent>)>,
     /// How battles and replays first show the battlefield (`--zoom`; fitted by default).
@@ -411,6 +430,8 @@ pub struct Launch {
     /// Watch the battle at the setup's address (`--watch`).
     pub watch: bool,
     pub replay: Option<PathBuf>,
+    /// Run the replay's battle once it is open, as "Run this battle" does (`--run`).
+    pub run: bool,
     pub tab: Option<Tab>,
     /// The field whose file dialog opens at start (`--browse`).
     pub browse: Option<Browse>,
@@ -478,6 +499,7 @@ impl App {
             opening: None,
             screenshot,
             kill_at: launch.kill_at,
+            run_on_open: launch.run,
             input_at: launch.input_at,
             camera: launch.camera,
             sound: Sound::default(),
@@ -875,10 +897,12 @@ impl App {
             seed,
             deterministic: !s.classic,
             record: (!s.record.trim().is_empty()).then(|| PathBuf::from(s.record.trim())),
+            pause_at_round: s.pause_at_round,
             ..Default::default()
         };
         let (tx, rx) = mpsc::channel();
-        let (env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
+        let (mut env, robots, repaint) = (self.env.clone(), s.robots.clone(), ctx.clone());
+        let rumble = s.rumble.clone();
         let ide = self.ide.listener();
         // The robots' JVMs start while they are described, and the next battle's while
         // this one runs.
@@ -892,6 +916,17 @@ impl App {
         let from_ide = robots.iter().filter(|r| parse_marker(r).is_some()).count();
         let warm = (robots.len() - from_ide).min(MAX_WARM_HOSTS);
         std::thread::spawn(move || {
+            // A rumble battle: exactly its jars (fetched if need be), as the rumble ran it.
+            if let Some(rumble) = &rumble {
+                match rerun::jars(rumble, &env.data, &env.jars) {
+                    Ok(jars) => (env.jars, env.fresh_data) = (jars, true),
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        repaint.request_repaint();
+                        return;
+                    }
+                }
+            }
             let warm = pool.as_ref().map(|pool| (pool, warm));
             // Cancelled meanwhile: nobody fights the battle, which leaves its folder.
             if let Err(mpsc::SendError(Ok((_, battle)))) =
@@ -909,6 +944,7 @@ impl App {
             size: (s.width, s.height),
             classic: s.classic,
             turns_per_second: s.turns_per_second,
+            pause_at_round: s.pause_at_round,
             paint: s.paint,
             error: None,
             watching: None,
@@ -961,6 +997,7 @@ impl App {
             size: (800, 600),
             classic: false,
             turns_per_second: self.setup.turns_per_second,
+            pause_at_round: None,
             paint: false,
             error: None,
             watching: Some(address),
@@ -1018,6 +1055,17 @@ impl App {
                 self.replay = None;
                 self.replay_error = Some(format!("{}: {e}", path.display()));
             }
+        }
+    }
+
+    /// Runs the battle of the track in the Watch Battle tab again, in the Start Battle tab
+    /// (see [`rerun`]), if the track names its battle.
+    fn run_battle(&mut self, ctx: &egui::Context) {
+        let battle = self.replay.as_ref().and_then(|r| r.battle()).cloned();
+        if let Some((battle, gun_cooling_milli)) = battle {
+            let server = crate::rumble::server_now(&self.settings.rumble, None);
+            let (setup, seed) = rerun::setup(&self.setup, &battle, gun_cooling_milli, server);
+            self.launch(ctx, setup, seed);
         }
     }
 
@@ -2623,6 +2671,10 @@ impl eframe::App for App {
             }
         }
         self.poll_opening();
+        if self.run_on_open && self.opening.is_none() {
+            self.run_on_open = false;
+            self.run_battle(ctx);
+        }
         match self.tab {
             Tab::Start if self.local.starting.is_some() => self.loading_page(root, false),
             Tab::Start if self.local.live.is_some() => match self.live_ui(root, false) {
@@ -2639,6 +2691,10 @@ impl eframe::App for App {
                     // The battle as it was started (the options may have changed the
                     // setup's defaults since).
                     let mut setup = self.launched.clone().unwrap_or_else(|| self.setup.clone());
+                    // A rumble battle's round is in its own seed's battle.
+                    if new_seed {
+                        setup.pause_at_round = None;
+                    }
                     // The battle's recording stays: the new one goes to a new file.
                     let record = setup.record.trim();
                     if !record.is_empty() {
@@ -2658,13 +2714,23 @@ impl eframe::App for App {
             },
             Tab::Watch => match &mut self.replay {
                 Some(replay) => {
-                    let mut save = None;
+                    let (mut save, mut run) = (None, false);
                     let sprites = &mut self.sprites;
-                    if replay.ui(root, sprites, style, &mut self.selected, &mut save) {
+                    if replay.ui(
+                        root,
+                        sprites,
+                        style,
+                        &mut self.selected,
+                        &mut save,
+                        &mut run,
+                    ) {
                         self.replay = None;
                     }
                     if let Some(save) = save {
                         self.save(save);
+                    }
+                    if run {
+                        self.run_battle(ctx);
                     }
                 }
                 None => self.watch_page(root),
@@ -2853,6 +2919,8 @@ impl App {
                 shot.ended += 1;
                 shot.ended >= 30
             }
+            // A battle run again to a round: once it paused there.
+            Some((None, Some(live))) if live.pause_at.is_some() => false,
             Some((None, Some(live))) => live
                 .latest
                 .as_ref()

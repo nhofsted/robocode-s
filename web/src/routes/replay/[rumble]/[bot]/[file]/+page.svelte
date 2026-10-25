@@ -40,6 +40,15 @@
 	size={round.size}
 	rules={{ rounds: data.summary.rounds, ...data.summary.battlefield }}
 	downloadName="{name}_melee_round{round.round + 1}_{round.file}.track"
+	battle={{
+		schema: 1,
+		engine: data.rec.engine,
+		seed: round.seed,
+		round: round.round,
+		rounds: data.summary.rounds,
+		...data.summary.battlefield,
+		robots: round.robots
+	}}
 	back={{ href: botHref + '#replays', label: `All recorded rounds of ${name}` }}
 	prev={link(data.at - 1)}
 	next={link(data.at + 1)}
