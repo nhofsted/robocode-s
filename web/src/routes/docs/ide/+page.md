@@ -23,9 +23,9 @@ Your robot compiles against `robocode.api` 1.11.1, the classic API. You need it 
 
   On Windows, `AppData` is a hidden folder: paste `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host` into Explorer's address bar (or the IDE's file dialog) to get there. `%LOCALAPPDATA%` is `C:\Users\<you>\AppData\Local`. In a macOS file dialog, Cmd+Shift+G takes a path; Finder shows the app's contents with right-click, Show Package Contents.
 
-**Java level:** compile with `--release 8`. Classic Robocode 1.11.1 runs on Java 8, so a robot built for 8 also runs in classic and in classic RoboRumble clients, and robocode-s runs robots on a Temurin 21 JRE, which runs it unchanged. If you only target robocode-s, any level up to 21 works. Don't go above 21: the runtime can't load newer class files.
+**Java level:** compile with `--release 21`. robocode-s runs robots on a Temurin 21 JRE, so 21 is what your robot runs on: you get every language feature and library method (records, `var`, text blocks, `Math.clamp`), and a JDK 21 gives no warnings. Don't go above 21: the runtime can't load newer class files.
 
-If your code needs a newer level, the compiler tells you: `records are not supported in -source 8` (records need 16), `cannot find symbol` on a newer method such as `Math.clamp` (21). Raise the level in the build file (`<maven.compiler.release>21</maven.compiler.release>` in Maven, `options.release = 21` in Gradle) and know that the robot then no longer runs in classic Robocode.
+The one reason for a lower level is a robot that must also run in classic Robocode or in classic RoboRumble clients: classic 1.11.1 runs on Java 8, so compile such a robot with `--release 8` (`<maven.compiler.release>8</maven.compiler.release>` in Maven, `options.release = 8` in Gradle). The compiler then holds you to Java 8: `records are not supported in -source 8` (records need 16), `cannot find symbol` on a newer method such as `Math.clamp` (21). A JDK 21 also warns that 8 is obsolete; it works. Libraries count too: a library built for a newer level raises your robot's.
 
 ## 2. Build setup
 
@@ -41,14 +41,14 @@ dependencies {
     compileOnly("net.sf.robocode:robocode.api:1.11.1")
 }
 
-tasks.withType<JavaCompile> { options.release = 8 }   // classes go to build/classes/java/main
+tasks.withType<JavaCompile> { options.release = 21 }   // classes go to build/classes/java/main
 ```
 
 Maven (`pom.xml`):
 
 ```xml
 <properties>
-  <maven.compiler.release>8</maven.compiler.release>
+  <maven.compiler.release>21</maven.compiler.release>
 </properties>
 <dependencies>
   <dependency>
@@ -61,7 +61,7 @@ Maven (`pom.xml`):
 <!-- classes go to target/classes -->
 ```
 
-JDK 21 compiles `--release 8` with a warning that the level is deprecated; it works. Put robot metadata in `src/main/resources/<package>/<Robot>.properties` ([Packaging](/docs/robot-development/release#package-it)); the build copies it next to the class.
+Put robot metadata in `src/main/resources/<package>/<Robot>.properties` ([Packaging](/docs/robot-development/release#package-it)); the build copies it next to the class.
 
 ## 3. Point robocode-s at the output
 
@@ -77,7 +77,7 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 ## IntelliJ IDEA
 
-1. New Project, Java, build system Gradle or Maven. Use the snippets above (IDEA reads the build file; pick a JDK 21 and keep `release` at 8, unless your code needs more).
+1. New Project, Java, build system Gradle or Maven. Use the snippets above (IDEA reads the build file; pick a JDK 21 and keep `release` at 21).
 
    **Added the build file afterwards?** IDEA only reads `pom.xml` or `build.gradle.kts` in a project it created with that build system. In a plain Java project, `src/main/java` is just a folder, and nothing compiles against `robocode.api`. Right-click `pom.xml`, *Add as Maven Project* (Gradle: right-click `build.gradle.kts`, *Link Gradle Project*). You know it worked when `src/main/java` turns blue, `src/main/resources` purple, and *External Libraries* lists `robocode.api`.
 2. Write `src/main/java/yourinitials/Kestrel.java` extending `AdvancedRobot`.
@@ -86,7 +86,7 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 ## Eclipse
 
-1. File, New, Java Project (or Gradle/Maven project with the snippets above). Set the compiler compliance to 8: Project, Properties, Java Compiler.
+1. File, New, Java Project (or Gradle/Maven project with the snippets above). Set the compiler compliance to 21: Project, Properties, Java Compiler.
 2. Project, Properties, Java Build Path, Libraries, Add External JARs: `robocode.api-1.11.1.jar` (skip this with Gradle or Maven).
 3. Eclipse builds on save into `bin` (plain projects) or `build/classes/java/main` / `target/classes` (Gradle, Maven). Point robocode-s at that folder.
 4. Optional: Run, External Tools Configurations, a Program running `robocode-s` with `battle yourinitials.Kestrel*,sample.Walls --jar ${project_loc}/bin`.
@@ -153,7 +153,7 @@ The robot proves it's yours with a token that robocode-s keeps in its data folde
 | You see | Check |
 |---|---|
 | Your source folder is a plain folder; `robocode.api` can't be found | The build file isn't imported ([IntelliJ IDEA](#intellij-idea), step 1). |
-| `records are not supported in -source 8`, `cannot find symbol` on a newer method | The compiler level in the build file is lower than your code needs ([Java level](#1-get-the-api)). |
+| `records are not supported in -source 8`, `cannot find symbol` on a newer method | The compiler level in the build file is lower than your code needs: set it to 21 ([Java level](#1-get-the-api)). |
 | `ClassNotFoundException` or `NoClassDefFoundError` for `io.github.nhofsted…` or `net.sf.robocode…` when the run configuration starts | The robot host's jars aren't on the configuration's classpath: not all of them, or the library isn't a dependency of your module (it must show under *External Libraries*). |
 | `No class folders on the classpath` | The configuration doesn't have your module's classpath (IntelliJ's `-cp` box), so there is no build output to look in. |
 | `No robots found in …: build your project first` | Nothing is compiled yet, or the `.class` files are elsewhere. Build, and check the output folder. |

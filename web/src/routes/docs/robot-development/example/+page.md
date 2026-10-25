@@ -120,7 +120,7 @@ The version comes from the build file, so there is one place to change it for a 
   <version>1.0</version>
 
   <properties>
-    <maven.compiler.release>8</maven.compiler.release>
+    <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
@@ -178,7 +178,7 @@ dependencies {
     compileOnly("net.sf.robocode:robocode.api:1.11.1")
 }
 
-tasks.withType<JavaCompile> { options.release = 8 }
+tasks.withType<JavaCompile> { options.release = 21 }
 
 // Fills ${version} into MyRobot.properties.
 tasks.processResources {
@@ -189,9 +189,7 @@ tasks.processResources {
 
 `gradle jar` (or `./gradlew jar` with a wrapper) makes `build/libs/myrobot-1.0.jar`.
 
-Both compile for Java 8, so the robot also runs in classic Robocode and in classic RoboRumble clients. A JDK 21 warns that 8 is obsolete; that is fine.
-
-If her code later uses something newer (a `record`, `Math.clamp`, ...), the compiler says so (`records are not supported in -source 8`). She then raises the level, `<maven.compiler.release>21</maven.compiler.release>` or `options.release = 21`, and the robot runs in robocode-s but no longer in classic. Up to 21 works; above, the runtime can't load it.
+Both compile for Java 21, the Java that robocode-s runs robots on, so Jane can use everything in it (records, `var`, text blocks, `Math.clamp`). Above 21 the runtime can't load the class files. If she wanted `MyRobot` to run in classic Robocode and in classic RoboRumble clients too, she would set the level to 8 (`<maven.compiler.release>8</maven.compiler.release>` or `options.release = 8`) and then the compiler holds her to Java 8 (`records are not supported in -source 8`).
 
 In an IDE she opens the folder as a Maven or Gradle project, so that the IDE reads the build file: otherwise `src/main/java` is just a folder, and nothing finds `robocode.api`. In IntelliJ IDEA, if she added the build file to an existing project, right-click it and choose *Add as Maven Project* (or *Link Gradle Project*); `src/main/java` turns blue when it worked ([details](/docs/ide#intellij-idea)).
 
@@ -314,7 +312,7 @@ and `gradle assemble` builds the jar. Keep the rest of the file as in step 5.
 What to know about libraries:
 
 - **Only what she uses.** `minimizeJar` and `minimize()` keep the library classes her robot reaches (here 140 of commons-lang3's several hundred) and drop the rest. That matters: [codesize](/docs/robot-development/release) counts every class in the jar, the library's too, so a library can move a robot out of the nano, micro and mini classes. A library that loads its classes by reflection can lose some this way; test the jar.
-- **The library's Java level counts.** commons-lang3 3.17 runs on Java 8; a library built for Java 17 would make her robot need 17, and classic clients couldn't run it.
+- **The library's Java level counts.** The robot runs on Java 21, so a library built for any level up to 21 works. commons-lang3 3.17 runs on Java 8, so it would also keep `MyRobot` usable in classic; a library built for Java 17 would not.
 - **The library's license stays in the jar** (`META-INF/LICENSE.txt` and `NOTICE.txt`); the Apache license asks for that when you hand the library on.
 - **The sandbox applies to the library too:** no network, no files outside her robot's data folder.
 - **Classes named `java.*`, `javax.*`, `kotlin.*` or `robocode*` are never loaded from her jar**, so she doesn't bundle those (Kotlin's standard library is provided).

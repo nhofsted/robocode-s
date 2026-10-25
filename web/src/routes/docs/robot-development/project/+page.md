@@ -35,7 +35,7 @@ src/main/resources/yourinitials/
 └── Kestrel.properties    robot metadata (see Packaging and release)
 ```
 
-> **Tip:** compile for the oldest Java version you need. The rumble runs robots on a current Temurin JRE, but if you also want your robot to run in classic RoboRumble clients, target what they run.
+> **Tip:** compile for Java 21 (`--release 21`), the Java robocode-s runs robots on. Only if your robot must also run in classic Robocode or in classic RoboRumble clients, compile for 8, which they run: the compiler then keeps you to Java 8 ([details](/docs/ide#1-get-the-api)).
 
 [Using an IDE](/docs/ide) goes through IntelliJ IDEA, Eclipse and VS Code.
 
