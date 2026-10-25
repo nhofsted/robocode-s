@@ -13,6 +13,6 @@ robocode-s is a reimplementation of [Robocode](https://robocode.sourceforge.io/)
 - **[About robocode-s](/docs/about)**: what it is, how it relates to classic Robocode and Tank Royale, and where the project stands.
 - **[Community and links](/docs/community)**: the RoboWiki, LiteRumble, the Google Group, Facebook and Reddit: where the Robocode community learns, competes and talks.
 
-> **Status:** robocode-s is in development. Version 0.2.1 is out for Windows, Linux and macOS ([download](/download)), with the rumble client. Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
+> **Status:** robocode-s is in development. Version 0.2.2 is out for Windows, Linux and macOS ([download](/download)), with the rumble client. Pages mark what already works and what is planned. If something here is unclear or wrong, [open an issue](https://github.com/nhofsted/robocode-s/issues).
 
 Building robocode-s itself is on the [download page](/download/source). The engine internals are documented in the repository: the [engine specification](https://github.com/nhofsted/robocode-s/blob/main/docs/engine-spec.md) and the [architecture decision records](https://github.com/nhofsted/robocode-s/blob/main/docs/adr/README.md).
