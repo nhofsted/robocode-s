@@ -58,7 +58,7 @@ impl Setup {
     /// A new battle with the defaults from the options.
     pub fn new(settings: &Settings) -> Self {
         Self {
-            robots: parse_robots("sample.Fire, sample.Walls, sample.Crazy, sample.SpinBot"),
+            robots: settings.robots.clone(),
             rounds: settings.rounds,
             seed: String::new(),
             width: settings.width,
@@ -165,6 +165,15 @@ pub fn parse_robots(text: &str) -> Vec<String> {
         .map(str::trim)
         .filter(|r| !r.is_empty())
         .map(String::from)
+        .collect()
+}
+
+/// The robots of the battle as the options keep them: without those from an IDE.
+fn saved_robots(robots: &[String]) -> Vec<String> {
+    robots
+        .iter()
+        .filter(|r| parse_marker(r).is_none())
+        .cloned()
         .collect()
 }
 
@@ -371,6 +380,8 @@ pub struct App {
     /// The options changed and aren't saved yet: since when (the UI's time). They are
     /// saved once they have been still for a moment, not on every frame of a drag.
     settings_unsaved: Option<f64>,
+    /// The robots in the battle when [`App::save_settings`] last looked.
+    robots_seen: Vec<String>,
     /// The battles started, so each one's results window opens centred.
     battles: u64,
     /// The file dialog behind the fields' folder buttons (drawn by egui: WSLg has no
@@ -471,6 +482,7 @@ impl App {
         if perf.is_some() {
             crate::perf::Perf::renderer(cc);
         }
+        let robots_seen = launch.setup.robots.clone();
         let mut app = Self {
             perf,
             sprites: Sprites::new(&cc.egui_ctx),
@@ -514,6 +526,7 @@ impl App {
             new_folder: String::new(),
             settings_error: None,
             settings_unsaved: None,
+            robots_seen,
             battles: 0,
             files: FileDialog::with_file_system(std::sync::Arc::new(crate::files::Files))
                 .id("file-dialog")
@@ -2851,12 +2864,22 @@ impl App {
     }
 
     /// Saves the options once they have been still for a moment and nothing is being
-    /// dragged; takes the graphs' Round/Battle choice into them first.
+    /// dragged; takes the graphs' Round/Battle choice and the robots in the battle into
+    /// them first.
     fn save_settings(&mut self, ctx: &egui::Context) {
         let battle = crate::graphs::whole_battle(ctx);
         if battle != self.settings.graphs_battle {
             self.settings.graphs_battle = battle;
             self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
+        // Only once the list changes, so that `--battle`'s robots don't replace the saved.
+        if self.setup.robots != self.robots_seen {
+            self.robots_seen = self.setup.robots.clone();
+            let robots = saved_robots(&self.setup.robots);
+            if robots != self.settings.robots {
+                self.settings.robots = robots;
+                self.settings_unsaved = Some(ctx.input(|i| i.time));
+            }
         }
         let Some(since) = self.settings_unsaved else {
             return;
@@ -3033,7 +3056,9 @@ fn parse_seed(text: &str) -> Result<Option<i64>, String> {
 mod tests {
     use super::{
         GAME_TYPES, Listed, Setup, battle_file, next_free, parse_robots, parse_seed, robot_facts,
+        saved_robots,
     };
+    use robocode_s_runner::ide::marker;
 
     #[test]
     fn a_restart_records_to_a_new_file() {
@@ -3113,5 +3138,16 @@ mod tests {
             ["sample.Fire", "sample.Walls", "sample.Fire"]
         );
         assert!(parse_robots(" , ").is_empty());
+    }
+
+    #[test]
+    fn the_battles_robots_are_kept_without_those_from_an_ide() {
+        let settings = Settings {
+            robots: vec!["sample.Fire".into(), "sample.Walls".into()],
+            ..Settings::default()
+        };
+        assert_eq!(Setup::new(&settings).robots, settings.robots);
+        let robots = ["sample.Fire".into(), marker(3), "sample.Fire".into()];
+        assert_eq!(saved_robots(&robots), ["sample.Fire", "sample.Fire"]);
     }
 }

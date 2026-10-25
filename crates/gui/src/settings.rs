@@ -48,6 +48,10 @@ pub struct Settings {
     pub width: i32,
     pub height: i32,
     pub rules: Rules,
+    /// The robots in the battle when the app last had them ("In the battle"), so the
+    /// next start begins with them. Robots from an IDE are left out: their connections
+    /// end with the app.
+    pub robots: Vec<String>,
     /// The last battle watched (Watch Battle, Remote Server): its address. Its token is
     /// not saved.
     pub watch: String,
@@ -163,6 +167,14 @@ impl Default for Settings {
             width: 800,
             height: 600,
             rules: Rules::default(),
+            robots: [
+                "sample.Fire",
+                "sample.Walls",
+                "sample.Crazy",
+                "sample.SpinBot",
+            ]
+            .map(String::from)
+            .into(),
             watch: "localhost:7654".into(),
             watch_fingerprint: String::new(),
             graphs_battle: false,
@@ -439,6 +451,7 @@ mod tests {
                 hide_enemy_names: true,
                 sentry_border: 150,
             },
+            robots: vec!["sample.Fire".into(), "sample.Fire".into()],
             watch: "server:7654".into(),
             watch_fingerprint: format!("sha256:{}", ["0F"; 32].join(":")),
             graphs_battle: true,
