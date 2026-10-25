@@ -12,6 +12,7 @@ use eframe::egui::{self, Color32, RichText};
 use robocode_s_engine::ENGINE_VERSION;
 use robocode_s_runner::Sandbox;
 use robocode_s_runner::local::Environment;
+use rumble_client::backoff::{self, Backoff};
 use rumble_client::battle::Options as BattleOptions;
 use rumble_client::contributor::{
     Config, Contributor, Event, Fatal, MELEE_SLOTS, Stop, Summary, default_slots, offered_divisions,
@@ -519,6 +520,8 @@ enum Account {
 /// What the threads say to the page.
 enum Msg {
     Me(Result<Me, http::Error>),
+    /// Asking who the user is failed in a way worth retrying; the thread asks again after `wait`.
+    MeAgain(http::Error, Duration),
     Code(u64, DeviceCode),
     LoggedIn(u64, Result<Me, String>),
     SignedOut(Option<String>),
@@ -607,6 +610,8 @@ pub struct Rumble {
     stop: Option<Stop>,
     next_login: u64,
     looked: bool,
+    /// Stops the thread that keeps asking the rumble who the user is.
+    asking: Arc<AtomicBool>,
     /// Asking the user to agree to running robots without a sandbox.
     consent: bool,
     /// The window was asked to close while contributing: since when.
@@ -632,6 +637,7 @@ impl Rumble {
             stop: None,
             next_login: 0,
             looked: false,
+            asking: Arc::new(AtomicBool::new(false)),
             consent: false,
             closing: None,
             note: None,
@@ -681,6 +687,14 @@ impl Rumble {
             Msg::Me(Err(e)) => {
                 if let Account::SignedIn { warning, .. } = &mut self.account {
                     *warning = Some(format!("Could not ask the rumble who you are: {e}"));
+                }
+            }
+            Msg::MeAgain(e, wait) => {
+                if let Account::SignedIn { warning, .. } = &mut self.account {
+                    *warning = Some(format!(
+                        "Could not ask the rumble who you are: {e}. Trying again in {} s.",
+                        wait.as_secs().max(1)
+                    ));
                 }
             }
             Msg::Code(id, code) => {
@@ -757,15 +771,45 @@ impl Rumble {
                 };
                 let server = server_now(settings, creds.server.as_deref());
                 let (tx, ctx) = (self.tx.clone(), ctx.clone());
+                let cancel = Arc::new(AtomicBool::new(false));
+                self.asking = cancel.clone();
                 std::thread::spawn(move || {
-                    let me = api_for(&server, Some(creds.token)).me();
-                    Self::send(&tx, &ctx, Msg::Me(me));
+                    // Network trouble (a name lookup that fails while Windows wakes up, say)
+                    // passes: keep asking, backing off, until there is an answer.
+                    let api = api_for(&server, Some(creds.token));
+                    let mut backoff = Backoff::network();
+                    loop {
+                        let me = api.me();
+                        if cancel.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        match me {
+                            Err(e) if e.is_retryable() => {
+                                let wait = match e.retry_after() {
+                                    Some(after) => {
+                                        backoff::retry_after(after, backoff::random_unit())
+                                    }
+                                    None => backoff.next(backoff::random_unit()),
+                                };
+                                Self::send(&tx, &ctx, Msg::MeAgain(e, wait));
+                                sleep_unless(&cancel, wait);
+                                if cancel.load(Ordering::SeqCst) {
+                                    return;
+                                }
+                            }
+                            me => {
+                                Self::send(&tx, &ctx, Msg::Me(me));
+                                return;
+                            }
+                        }
+                    }
                 });
             }
         }
     }
 
     fn sign_in(&mut self, ctx: &egui::Context, settings: &RumbleSettings) {
+        self.asking.store(true, Ordering::SeqCst);
         let Some(path) = tokenfile::path() else {
             self.account = Account::SignedOut {
                 note: Some(
@@ -823,6 +867,7 @@ impl Rumble {
 
     /// Revokes the token on the server and removes the file.
     fn sign_out(&mut self, ctx: &egui::Context, settings: &RumbleSettings) {
+        self.asking.store(true, Ordering::SeqCst);
         self.account = Account::SigningOut;
         let path = tokenfile::path();
         let file = path
@@ -2091,6 +2136,40 @@ mod tests {
         };
         page.handle(Msg::Me(Err(http::Error::Unauthorized("no".into()))), now);
         assert!(matches!(page.account, Account::SignedOut { .. }));
+    }
+
+    #[test]
+    fn a_network_error_asking_who_you_are_says_it_tries_again_and_clears() {
+        let mut page = Rumble::new();
+        let now = t0();
+        page.account = Account::SignedIn {
+            login: "x".into(),
+            me: None,
+            from_env: false,
+            warning: None,
+        };
+        let e = http::Error::Network("No such host is known.".into());
+        page.handle(Msg::MeAgain(e, Duration::from_secs(5)), now);
+        assert!(
+            matches!(&page.account, Account::SignedIn { warning: Some(w), .. }
+            if w.contains("No such host") && w.contains("Trying again in 5 s"))
+        );
+        let Some(Rumble {
+            account: Account::SignedIn { me: Some(me), .. },
+            ..
+        }) = Rumble::demo("signed-in")
+        else {
+            panic!("the signed-in demo has a me");
+        };
+        page.handle(Msg::Me(Ok(me)), now);
+        assert!(matches!(
+            &page.account,
+            Account::SignedIn {
+                warning: None,
+                me: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
