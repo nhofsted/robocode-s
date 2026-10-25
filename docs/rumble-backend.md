@@ -74,7 +74,8 @@ All tunables are one struct, `rumble_core::Config`, with the defaults below in c
 | `slots.perSide` | 5 | |
 | `slots.maxBytes` | 262144 | Largest track accepted (a 6,000-turn melee round is about 50 KB). |
 | `plan.priorVariance` | 1v1 16, melee 25 | Prior variance of a battle's pairing score (APS points²). |
-| `plan.priorWeight` | 3 | Pseudo-battles of the prior. |
+| `plan.priorWeight` | 3 | Pseudo-battles of the prior (and pseudo-opponents of `opponentVariance`). |
+| `plan.opponentVariance` | 1v1 625, melee 121 | Prior variance of a bot's pairing means over its opponents (APS points²; 25 and 11 points, the median spreads in prod on 2026-10-25), for the uncertainty of an APS from few opponents (§10.2). |
 | `plan.closeFactor` | 10 | Weight of a pairing whose score is within its 95% CI of 50. |
 | `plan.rankFactor` | 2 | Extra weight for bots whose rank is contested (§10.3). |
 | `plan.minHourly` | 1v1 200, melee 20 | Lower bound of the battles planned per hour. |
@@ -405,7 +406,7 @@ Pairing state per (engine, division, A, B) with A < B by vid, in `pairings.bin` 
 - shrunk variance `σ² = (k₀·σ₀² + (n−1)·v̂) / (k₀ + n − 1)` with `σ₀² = plan.priorVariance` (1v1 16, i.e. 4 APS points per battle, LiteRumble's prior) and `k₀ = plan.priorWeight` (3); `σ² = σ₀²` for n < 2;
 - standard error `SE = σ/√max(n,1)`; pairing 95% CI `1.96·SE`. Unlike LiteRumble, `n` is not capped at 5,000 (no cap; at 5,000 battles the SE is 0.06 points anyway).
 
-Per bot X in a rumble (members only): `APS_X` = mean of m over its pairings with n > 0, `SE_APS_X = √(Σ σ²_XO/n_XO) / P_X` (P_X pairings with n > 0), `missing_X` = members it has no battle against.
+Per bot X in a rumble (members only): `APS_X` = mean of m over its pairings with n > 0, `SE_APS_X = √(Σ σ²_XO/n_XO / P_X² + τ²_X/P_X · (1 − P_X/(members − 1)))` (P_X pairings with n > 0), `missing_X` = members it has no battle against. The second term is the uncertainty of which opponents X met: `τ²_X = (k₀·τ₀² + (P_X−1)·t̂²) / (k₀ + P_X − 1)`, the sample variance `t̂²` of its pairing means shrunk toward `τ₀² = plan.opponentVariance` (`τ₀²` for P_X < 2), with the finite-population correction. Without it, a bot that crushed two weak opponents had an APS of 98 with a tiny SE, counted as far from everyone (not contested) and got no planned battles while 700k unfought pairings were ahead of it (saguaro, 2026-10-25); a bot that met all members has only the battles' noise.
 
 ### 10.3 Priority of one more battle
 

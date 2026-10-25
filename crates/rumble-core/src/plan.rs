@@ -104,8 +104,36 @@ fn gain_shape(n: f64) -> f64 {
 struct Acc {
     pairings: u32,
     sum_mean: f64,
+    sum_mean_sq: f64,
     /// Sum of `σ² / n` over the pairings.
     sum_var: f64,
+}
+
+impl Acc {
+    fn add(&mut self, mean: f64, var_over_n: f64) {
+        self.pairings += 1;
+        self.sum_mean += mean;
+        self.sum_mean_sq += mean * mean;
+        self.sum_var += var_over_n;
+    }
+
+    /// The standard error of the APS: the pairings' own noise, plus the uncertainty of which
+    /// opponents were met, from the spread of the pairing means (shrunk toward
+    /// `opponent_prior` with weight `weight`) with the finite-population correction for
+    /// `opponents` possible ones. A bot that met a few opponents has an uncertain APS, however
+    /// many battles those pairings have; one that met them all has only the noise.
+    fn se(&self, opponents: usize, opponent_prior: f64, weight: f64) -> f64 {
+        let p = f64::from(self.pairings);
+        let mean = self.sum_mean / p;
+        let spread = if self.pairings >= 2 {
+            let sample = ((self.sum_mean_sq - p * mean * mean) / (p - 1.0)).max(0.0);
+            (weight * opponent_prior + (p - 1.0) * sample) / (weight + p - 1.0)
+        } else {
+            opponent_prior
+        };
+        let unmet = (1.0 - p / opponents.max(1) as f64).max(0.0);
+        (self.sum_var / (p * p) + spread / p * unmet).sqrt()
+    }
 }
 
 /// The priorities of one more battle for every pair of a set of bots (§10.3). The bots are
@@ -130,6 +158,7 @@ impl Priorities {
         let division = state.division;
         let prior = *config.plan.prior_variance.get(division);
         let weight = config.plan.prior_weight;
+        let opponent_prior = *config.plan.opponent_variance.get(division);
         let close_factor = config.plan.close_factor;
         let rank_factor = config.plan.rank_factor;
 
@@ -168,14 +197,10 @@ impl Priorities {
                     // The state keeps the lower vid's side, i < j in vid order.
                     let from = classes[i].max(classes[j]);
                     for a in &mut acc[i][from..] {
-                        a.pairings += 1;
-                        a.sum_mean += st.mean;
-                        a.sum_var += var_over_n;
+                        a.add(st.mean, var_over_n);
                     }
                     for b in &mut acc[j][from..] {
-                        b.pairings += 1;
-                        b.sum_mean += 100.0 - st.mean;
-                        b.sum_var += var_over_n;
+                        b.add(100.0 - st.mean, var_over_n);
                     }
                 }
                 at += 1;
@@ -190,8 +215,8 @@ impl Priorities {
                 .filter(|&x| classes[x] <= r && acc[x][r].pairings > 0)
                 .map(|x| {
                     let a = &acc[x][r];
-                    let p = f64::from(a.pairings);
-                    (a.sum_mean / p, a.sum_var.sqrt() / p, x)
+                    let se = a.se(members[r] - 1, opponent_prior, weight);
+                    (a.sum_mean / f64::from(a.pairings), se, x)
                 })
                 .collect();
             ranked.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
@@ -1122,6 +1147,29 @@ mod tests {
         let pr = Priorities::new(&thin, &Config::default(), &bots(3, mega));
         assert_eq!(pr.contested(0, mega), 3.0);
         assert!((pr.coverage(0, mega) - (1.0 + 1.0 / 3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_aps_from_few_opponents_stays_contested() {
+        // Bots 2-30 met each other; bot 1 beat two weak bots only. Its APS of 70 is above
+        // everyone's, but says little: it met 2 of 29 opponents.
+        let mut state = state_1v1();
+        for a in 2..=30u32 {
+            for b in a + 1..=30 {
+                fight(&mut state, a, b, (50.0 + (b - a) as f32).min(99.0), 10);
+            }
+        }
+        fight(&mut state, 1, 29, 70.0, 10);
+        fight(&mut state, 1, 30, 70.0, 10);
+        let mega = WeightClass::Mega;
+        let pr = Priorities::new(&state, &Config::default(), &bots(30, mega));
+        assert!(pr.contested(0, mega) > 2.0, "{}", pr.contested(0, mega));
+        // Once it met them all, only the battles' noise is left: far from everyone, not contested.
+        for b in 2..=28 {
+            fight(&mut state, 1, b, 70.0, 10);
+        }
+        let pr = Priorities::new(&state, &Config::default(), &bots(30, mega));
+        assert!(pr.contested(0, mega) < 1.01, "{}", pr.contested(0, mega));
     }
 
     #[test]
