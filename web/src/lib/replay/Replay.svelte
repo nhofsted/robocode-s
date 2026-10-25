@@ -256,6 +256,10 @@
 	}
 </script>
 
+{#snippet icon(d: string)}
+	<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path {d} fill="currentColor" /></svg>
+{/snippet}
+
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <section
 	class="replay"
@@ -274,12 +278,29 @@
 		></canvas>
 		<div class="controls">
 			<div class="buttons">
-				<button type="button" onclick={toggle} aria-label={playing ? 'Pause' : frame >= last ? 'Play again' : 'Play'}>
-					{playing ? 'Pause' : frame >= last ? 'Replay' : 'Play'}
+				<button
+					type="button"
+					onclick={toggle}
+					aria-label={playing ? 'Pause' : frame >= last ? 'Play again' : 'Play'}
+					title={playing ? 'Pause' : frame >= last ? 'Play again' : 'Play'}
+				>
+					{#if playing}
+						{@render icon('M7 5h3.5v14H7zM13.5 5H17v14h-3.5z')}
+					{:else if frame >= last}
+						{@render icon('M12 5a7 7 0 1 1-6.6 4.7l1.9.6A5 5 0 1 0 12 7v3L7.5 6 12 2z')}
+					{:else}
+						{@render icon('M8 5l11 7-11 7z')}
+					{/if}
 				</button>
-				<button type="button" class="secondary" onclick={restart} aria-label="Restart from the first turn">Restart</button>
-				<button type="button" class="secondary" onclick={() => step(-1)} disabled={frame <= 0} aria-label="Back one turn">&minus;1</button>
-				<button type="button" class="secondary" onclick={() => step(1)} disabled={frame >= last} aria-label="Forward one turn">+1</button>
+				<button type="button" class="secondary" onclick={restart} aria-label="Restart from the first turn" title="Restart">
+					{@render icon('M6 5h2.5v14H6zM19 5v14L9.5 12z')}
+				</button>
+				<button type="button" class="secondary" onclick={() => step(-1)} disabled={frame <= 0} aria-label="Back one turn" title="Back one turn">
+					{@render icon('M15.5 5h2.5v14h-2.5zM14 5v14L5 12z')}
+				</button>
+				<button type="button" class="secondary" onclick={() => step(1)} disabled={frame >= last} aria-label="Forward one turn" title="Forward one turn">
+					{@render icon('M6 5h2.5v14H6zM10 5v14l9-7z')}
+				</button>
 				<label class="speed">
 					<span>Speed</span>
 					<select bind:value={speed} aria-label="Playback speed">
@@ -378,6 +399,12 @@
 	}
 	.buttons button {
 		min-width: 3rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.buttons svg {
+		display: block;
 	}
 	.speed {
 		margin-left: auto;
