@@ -23,3 +23,4 @@
 | [0019](0019-built-in-robot-sandbox.md) | Robots run in a built-in OS sandbox; Docker is an alternative |
 | [0020](0020-remote-runner-agents-and-tls.md) | Remote runner agents and TLS |
 | [0021](0021-rumble-backend.md) | Rumble backend: a result log folded into S3, signed batches, no work cap |
+| [0022](0022-client-updates.md) | The programs look for a newer release and install it when the user agrees |

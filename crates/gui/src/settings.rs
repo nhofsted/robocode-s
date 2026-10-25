@@ -60,6 +60,8 @@ pub struct Settings {
     pub frame_rate: u32,
     /// The Run Rumble page's choices (`rumble` in the file).
     pub rumble: RumbleSettings,
+    /// Look for a newer release once a day (crate::update).
+    pub check_updates: bool,
 }
 
 /// The Run Rumble page's choices (docs/rumble-backend.md §13.7).
@@ -166,6 +168,7 @@ impl Default for Settings {
             graphs_battle: false,
             frame_rate: 0,
             rumble: RumbleSettings::default(),
+            check_updates: true,
         }
     }
 }
@@ -446,6 +449,7 @@ mod tests {
                 divisions: vec!["melee".into()],
                 unsandboxed_consent: true,
             },
+            check_updates: false,
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);

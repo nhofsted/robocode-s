@@ -19,6 +19,7 @@ robocode-s-engine.workspace = true
 robocode-s-protocol.workspace = true
 robocode-s-server.workspace = true
 robocode-s-runner.workspace = true
+robocode-s-update.workspace = true
 robocode-s-replay.workspace = true
 robocode-s-rumble-client.workspace = true
 robocode-s-rumble-core.workspace = true

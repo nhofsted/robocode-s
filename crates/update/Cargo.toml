@@ -1,0 +1,25 @@
+[package]
+name = "robocode-s-update"
+description = "Updates of an installed release: the check, and installing a newer one when the user agrees (ADR 0022)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "robocode_s_update"
+
+[lints]
+workspace = true
+
+[dependencies]
+robocode-s-runner.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "0.11.0"
+ureq = "3.4.2"
+flate2 = "1.1.10"
+tar = "0.4.46"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }

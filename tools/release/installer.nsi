@@ -18,6 +18,9 @@
 ; Command line: /S installs silently with the default components (the Start menu
 ; shortcut, PATH and the file types, no desktop shortcut); /NOPATH, /NOASSOC,
 ; /NOSTARTMENU and /DESKTOP change them; /D=DIR (last, no quotes) names the folder.
+; /UPDATE is the programs' own update (crates/update, ADR 0022): over an installation it
+; keeps the components that installation has, and waits up to two minutes for its programs
+; to exit (giving up without changing anything); /RELAUNCH starts the window when done.
 
 Unicode true
 SetCompressor /SOLID lzma
@@ -67,6 +70,7 @@ ${UnStrRep}
 !insertmacro MUI_LANGUAGE "English"
 
 Var Upgrade
+Var Relaunch
 
 Section "robocode-s" SecMain
   SectionIn RO
@@ -158,6 +162,35 @@ Function .onInit
   ${AndIf} ${FileExists} "$0\uninstall.exe"
     StrCpy $Upgrade 1
   ${EndIf}
+  ; The programs' own update: the installation's components, once its programs exited.
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  ${IfNot} ${Errors}
+  ${AndIf} $Upgrade == 1
+    ReadRegStr $2 HKCU "${APP_KEY}" "InstallDir"
+    Call WaitForPrograms
+    ${IfNot} ${FileExists} "$SMPROGRAMS\robocode-s.lnk"
+      SectionSetFlags ${SecStart} 0
+    ${EndIf}
+    ${If} ${FileExists} "$DESKTOP\robocode-s.lnk"
+      SectionSetFlags ${SecDesktop} ${SF_SELECTED}
+    ${EndIf}
+    ReadRegDWORD $3 HKCU "${APP_KEY}" "PathAdded"
+    ${If} $3 != 1
+      SectionSetFlags ${SecPath} 0
+    ${EndIf}
+    ReadRegDWORD $3 HKCU "${APP_KEY}" "Associated"
+    ${If} $3 != 1
+      SectionSetFlags ${SecAssoc} 0
+    ${EndIf}
+  ${EndIf}
+  StrCpy $Relaunch 0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH" $1
+  ${IfNot} ${Errors}
+    StrCpy $Relaunch 1
+  ${EndIf}
   ; Command-line choices of components.
   ${GetParameters} $0
   ClearErrors
@@ -179,6 +212,46 @@ Function .onInit
   ${GetOptions} $0 "/NOSTARTMENU" $1
   ${IfNot} ${Errors}
     SectionSetFlags ${SecStart} 0
+  ${EndIf}
+FunctionEnd
+
+; Waits until the programs in folder $2 have exited (a running program can't be opened
+; for writing), at most two minutes; then quits, having changed nothing.
+Function WaitForPrograms
+  StrCpy $4 0
+  ${Do}
+    StrCpy $5 0
+    ${ForEach} $6 0 1 + 1
+      ${If} $6 == 0
+        StrCpy $7 "$2\robocode-s-gui.exe"
+      ${Else}
+        StrCpy $7 "$2\robocode-s.exe"
+      ${EndIf}
+      ${If} ${FileExists} $7
+        ClearErrors
+        FileOpen $8 $7 a
+        ${If} ${Errors}
+          StrCpy $5 1
+        ${Else}
+          FileClose $8
+        ${EndIf}
+      ${EndIf}
+    ${Next}
+    ${If} $5 == 0
+      ${Break}
+    ${EndIf}
+    IntOp $4 $4 + 1
+    ${If} $4 > 240
+      Abort
+    ${EndIf}
+    Sleep 500
+  ${Loop}
+FunctionEnd
+
+Function .onInstSuccess
+  ${If} $Relaunch == 1
+    SetOutPath "$INSTDIR"
+    Exec '"$INSTDIR\robocode-s-gui.exe"'
   ${EndIf}
 FunctionEnd
 

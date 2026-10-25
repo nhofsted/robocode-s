@@ -21,6 +21,7 @@ robocode-s-server.workspace = true
 robocode-s-runner.workspace = true
 robocode-s-rumble-client.workspace = true
 robocode-s-rumble-core.workspace = true
+robocode-s-update.workspace = true
 ctrlc = "3.5.2"
 serde_json = "=1.0.151"
 

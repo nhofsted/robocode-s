@@ -49,3 +49,16 @@ export const SHA256SUMS_URL = `${DOWNLOAD_BASE}/SHA256SUMS`;
 
 export const url = (a: Asset) => `${DOWNLOAD_BASE}/${a.name}`;
 export const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
+/** `/release.json`: what the programs check for updates (crates/update, ADR 0022). It is
+ * made from this file, so it names a new release when the download page does. */
+export const releaseJson = () => ({
+	version: VERSION,
+	notes: RELEASE_URL,
+	download: DOWNLOAD_BASE,
+	files: [
+		...Object.values(WINDOWS),
+		...Object.values(LINUX).flat(),
+		...Object.values(MACOS).flat()
+	].map((a) => a.name)
+});
