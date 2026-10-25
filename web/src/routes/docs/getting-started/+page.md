@@ -26,10 +26,10 @@ Every robot runs in its own JVM, in a sandbox. Battles are deterministic by defa
 Robots for robocode-s are classic Robocode robots: everything you write against the `robocode.*` API (`Robot`, `AdvancedRobot`, `TeamRobot`, `RateControlRobot`) runs unmodified. Set up a project in your IDE ([Using an IDE](/docs/ide)), compile it, and point robocode-s at the folder your IDE compiles into:
 
 ```sh
-robocode-s battle my.Robot*,sample.Walls --jar build/classes/java/main
+robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main
 ```
 
-Recompile and the next battle runs the new code. [Developing a robot](/docs/robot-development) covers the project, testing, debugging and packaging.
+(`jd.MyRobot` is the robot of the [worked example](/docs/robot-development/example), from an empty folder to a release; use your own package and class name.) Recompile and the next battle runs the new code. [Developing a robot](/docs/robot-development) covers the project, testing, debugging and packaging.
 
 ## 4. Next
 

@@ -21,21 +21,21 @@ dependencies {
 }
 ```
 
-With Maven, use `net.sf.robocode:robocode.api:1.11.1` with `<scope>provided</scope>`.
+With Maven, use `net.sf.robocode:robocode.api:1.11.1` with `<scope>provided</scope>`. [Your first robot](/docs/robot-development/example) has complete build files for both, including one that bundles a library.
 
 A good layout keeps one package per author, with your bots and their shared code in it:
 
 ```
-src/main/java/yourinitials/
-├── Kestrel.java          the robot (extends AdvancedRobot)
+src/main/java/jd/
+├── MyRobot.java          the robot (extends AdvancedRobot)
 ├── movement/             wave surfing, wall smoothing, ...
 ├── targeting/            guns
 └── util/
-src/main/resources/yourinitials/
-└── Kestrel.properties    robot metadata (see Packaging and release)
+src/main/resources/jd/
+└── MyRobot.properties    robot metadata (see Packaging and release)
 ```
 
-> **Tip:** compile for the oldest Java version you need. The rumble runs robots on a current Temurin JRE, but if you also want your robot to run in classic RoboRumble clients, target what they run.
+> **Tip:** compile for Java 21 (`--release 21`), the Java robocode-s runs robots on. Only if your robot must also run in classic Robocode or in classic RoboRumble clients, compile for 8, which they run: the compiler then keeps you to Java 8 ([details](/docs/ide#1-get-the-api)).
 
 [Using an IDE](/docs/ide) goes through IntelliJ IDEA, Eclipse and VS Code.
 

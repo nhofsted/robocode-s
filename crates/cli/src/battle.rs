@@ -51,7 +51,7 @@ Robots and runtime:
   --ide-port N           port robots from your IDE connect to (default 7878)
   --jar PATH             robot jar, or a class folder (an IDE's output, read in
                          place: robots there are named with classic's `*`, e.g.
-                         `my.Robot*`); repeatable (default: $ROBOCODES_ROBOT_JARS,
+                         `jd.MyRobot*`); repeatable (default: $ROBOCODES_ROBOT_JARS,
                          else the archive's robots, or the sample robots of a
                          built source tree)
   --memory MB            heap per robot JVM (default 512)

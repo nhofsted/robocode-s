@@ -5,18 +5,18 @@ description: Package a robot as a jar with its properties file, learn how codesi
 
 ## Package it
 
-A robot jar is the same as in classic: your classes plus a `.properties` file next to the robot class, for example `yourinitials/Kestrel.properties`:
+A robot jar is the same as in classic: your classes plus a `.properties` file next to the robot class, for example `jd/MyRobot.properties`:
 
 ```properties
-robot.classname=yourinitials.Kestrel
+robot.classname=jd.MyRobot
 robot.version=1.2
-robot.author.name=Your Name
-robot.description=A surfer with a GuessFactor gun
-robot.webpage=https://robowiki.net/wiki/Kestrel
+robot.author.name=Jane Doe
+robot.description=Seesaws back and forth, spins its gun and fires at what it sees
+robot.webpage=https://example.com/myrobot
 robocode.version=1.11.1
 ```
 
-The rumble identifies a robot as `classname version` (here `yourinitials.Kestrel 1.2`), so **every release needs a new version string**. Classic's packager in the Robocode GUI writes this file for you; with Gradle, add it as a resource and build the jar as usual.
+The rumble identifies a robot as `classname version` (here `jd.MyRobot 1.2`), so **every release needs a new version string**. Classic's packager in the Robocode GUI writes this file for you; with Maven or Gradle, write it as a resource and let the build fill in the version, as [Your first robot](/docs/robot-development/example) shows.
 
 **Codesize** decides your robot's weight class: under 250 bytes is a nano bot, under 750 a micro, under 1500 a mini, anything larger competes only in the general rumbles. Codesize counts the bytecode of your classes, not the jar size.
 

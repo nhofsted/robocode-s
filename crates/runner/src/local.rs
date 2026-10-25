@@ -124,7 +124,7 @@ pub struct Listed {
 
 /// Every robot and team in `jars` (jars and class folders), as classic's repository
 /// finds them. A robot in a class folder is named with classic's `*` for a development
-/// version (`mypackage.MyRobot*`), except classic's `sample.*` and `tested.*`.
+/// version (`jd.MyRobot*`), except classic's `sample.*` and `tested.*`.
 ///
 /// Jars listed before come from a cache beside `dir` ([`listing`]), so only new and
 /// changed jars and the class folders start classic's repository. A robot that is in two

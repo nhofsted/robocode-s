@@ -7,7 +7,7 @@ description: Run battles of your robot from the command line or the GUI, reprodu
 
 Run headless battles with [`robocode-s battle`](/docs/cli/battle): choose robots, number of rounds, battlefield size and a **seed**, and get per-round results and, with `--record`, a recording. The desktop GUI does the same with a live view, speed control, pausing and single-stepping, and your robot's debug painting.
 
-Your robot can be a jar or a **class folder**: `--jar path/to/classes` (or a folder added in the GUI's options) reads your IDE's output in place, as classic's development folders do. Recompile, and the next battle runs the new code, with no packaging step in the loop. Name it with classic's `*`: `my.Robot*`, or `my.Robot 1.0*` when its `.properties` has a version.
+Your robot can be a jar or a **class folder**: `--jar path/to/classes` (or a folder added in the GUI's options) reads your IDE's output in place, as classic's development folders do. Recompile, and the next battle runs the new code, with no packaging step in the loop. Name it with classic's `*`: `jd.MyRobot*`, or `jd.MyRobot 1.0*` when its `.properties` has a version.
 
 A battle can also be watched from another machine (`--observe`), or run its robots on other machines ([`robocode-s agent`](/docs/cli/agent)).
 
