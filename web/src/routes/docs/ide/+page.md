@@ -110,23 +110,27 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 The IDE starts the robot itself (its Debug button), so breakpoints, stepping and watches work as in any Java program; there is no remote debug port to attach to. The robot waits for a battle, and robocode-s makes the battle from it.
 
-**Set it up once.** `robocode-s ide-config` prints the run configuration, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows the same with Copy buttons). It has:
+**Set it up once.** A run configuration of type *Application* with two things in it:
 
-- the main class, `io.github.nhofsted.robocodes.compat.RobotHost`;
-- the classpath: every jar in your installation's `lib/robot-host` folder (the folder of the jar in [the table above](#1-get-the-api)), besides your project's own;
-- the program arguments `--ide --server 127.0.0.1:7878 --robot your.Robot --jar <output-folder> --home <folder>`: your robot's class name, and the folder your IDE compiles to;
-- the token, in the environment variable `ROBOCODES_IDE_TOKEN`. It is made once and kept in robocode-s's data folder, readable by you only, so the configuration never changes and no other user on the machine can take the slot. The port is fixed too (7878 on 127.0.0.1; `--ide-port` and the options change it).
+- the main class `io.github.nhofsted.robocodes.compat.RobotHost`, with every jar of your installation's `lib/robot-host` folder (the folder of the jar in [the table above](#1-get-the-api)) added to your project as a library;
+- the program argument `--ide`.
+
+That's all. The robot host finds your robots itself in your project's output (the class folders on its classpath), so there is nothing to change when you add or rename a robot. `robocode-s ide-config` prints the same, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows it with Copy buttons). It adds `--server` or `--data` only if you changed the port (7878 on 127.0.0.1; `--ide-port` and the options change it) or the data folder.
+
+The robot proves it's yours with a token that robocode-s keeps in its data folder, readable by you only, so no other user on the machine can take the slot. The robot host reads it there; you never copy it.
 
 **Then, each time:**
 
-1. Start the battle. On the command line, `robocode-s battle yourinitials.Kestrel,sample.Walls,@ide` (one `@ide` for each robot you start from the IDE; they come after the others in the battle) prints the configuration and waits: *waiting for 1 robot from your IDE on 127.0.0.1:7878*. In the GUI, leave robocode-s open: it listens while it runs. Start your robot with the IDE's Debug button; it shows in *From your IDE* at the top of the available robots, with a notice. *Add to battle*, then Start Battle.
-2. Hit a breakpoint. The whole battle pauses with the robot: the others wait for it, however long you look. When you let it go, the battle goes on.
-3. When the battle ends the robot's JVM ends with it. Start it again from the IDE for the next battle.
+1. Start the battle. In the GUI, leave robocode-s open: it listens while it runs. On the command line, `robocode-s battle sample.Walls,@ide` (one `@ide` for each robot from the IDE; they come after the others in the battle) waits: *waiting for 1 robot from your IDE on 127.0.0.1:7878*.
+2. Start the configuration with the IDE's Debug button. Your robots show in *From your IDE* at the top of the available robots, with a notice (up to 16; `--robot your.Kestrel` in the program arguments offers only that one). *Add to battle*, then Start Battle. On the command line the first one is taken.
+3. Hit a breakpoint. The whole battle pauses with the robot: the others wait for it, however long you look. When you let it go, the battle goes on.
+4. When the battle ends the robot's JVM ends with it. Start it again from the IDE for the next battle.
 
 **What differs from a normal battle.** A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`your.Kestrel*`), and a second copy gets `(2)`. A few details:
 
-- A robot from the IDE runs in the IDE's JVM, outside the sandbox, with your IDE's `--home` folder: its data files are kept there, not with the other robots'.
-- Teams need several JVMs, so they can't start from the IDE yet.
+- A robot from the IDE runs in the IDE's JVM, outside the sandbox, with its own home in robocode-s's data folder (`ide-home`; `--home` changes it): its data files are kept there, not with the other robots'.
+- Teams need several JVMs, so they can't start from the IDE yet; the robot host leaves team robots out.
+- Your robots come from class folders. A robot in a jar works with `--jar robot.jar`, but then the VM options also need `--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED` (the robot host says so).
 - For seeded random numbers (the same battle again with `--seed N`), add `-javaagent:<the determinism agent>` to the VM options and `--seed N` to the program arguments; `ide-config` prints the path. Without it the robot's `Math.random()` isn't seeded.
 - A deterministic battle (the default) needs the robot host of the same robocode-s version: use the jars `ide-config` names. `--classic` has no such limit.
 

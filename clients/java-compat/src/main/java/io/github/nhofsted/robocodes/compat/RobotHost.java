@@ -66,12 +66,19 @@ import java.util.regex.Pattern;
  * agent loaded, the robot's random streams are derived from the seed and its unique name
  * (ADR 0009).
  *
- * <p>{@code robot-host --ide --server host:port --robot my.Robot --jar bin --home dir}, with
- * the IDE token in {@code ROBOCODES_IDE_TOKEN}, is how an IDE's debugger starts a robot (#17,
- * design §5.2): classic's repository looks the robot up before the {@code Hello}, which
- * describes it, and the host then waits for a battle to be made from it, as long as it
- * takes. Waiting for the robot's thread at a round's end has no limit either, so a robot held
- * at a breakpoint is not stopped by force. Otherwise it is the TCP path.
+ * <p>{@code robot-host --ide} is how an IDE's debugger starts a robot (#17, design §5.2). The
+ * robots are those in the class folders of this JVM's classpath (the IDE's output; jars on
+ * it are libraries), each offered on a connection of its own: classic's repository looks
+ * them up before the {@code Hello}, which describes the robot, and the host then waits for a
+ * battle to be made from them, as long as it takes, and ends when the robots taken for one
+ * are done. Waiting for a robot's thread at a round's end has no limit either, so a robot
+ * held at a breakpoint is not stopped by force. Everything else has a default: {@code
+ * --server} is {@code 127.0.0.1:7878}, {@code --data} robocode-s's data folder (as the
+ * program finds it), whose {@code ide-token} is the token (made here if robocode-s never
+ * listened yet; {@code ROBOCODES_IDE_TOKEN} or {@code --token} override it), and {@code
+ * --home} is {@code data/ide-home}. {@code --robot} and {@code --jar} choose robots and
+ * folders instead. No module openings are needed for class folders: classic only needs
+ * them for jars.
  *
  * <p>{@code robot-host --stdio --warm --home dir} starts without a robot, for a runner's
  * warm pool (design §6.2): the JVM and classic's container are started while the host
@@ -117,8 +124,12 @@ public final class RobotHost {
         String token = System.getenv().getOrDefault(ide ? "ROBOCODES_IDE_TOKEN" : "ROBOCODES_ROBOT_TOKEN", "");
         List<String> robots = new ArrayList<>();
         Path home = null;
+        Path data = null;
         long seed = 0;
         List<Path> jars = new ArrayList<>();
+        if (args.length % 2 != 0) {
+            throw new IllegalArgumentException("argument " + args[args.length - 1] + " needs a value");
+        }
         for (int i = 0; i + 1 < args.length; i += 2) {
             switch (args[i]) {
                 case "--server" -> server = args[i + 1];
@@ -126,9 +137,18 @@ public final class RobotHost {
                 case "--robot" -> robots.add(args[i + 1]);
                 case "--jar" -> jars.add(Path.of(args[i + 1]));
                 case "--home" -> home = Path.of(args[i + 1]);
+                case "--data" -> data = Path.of(args[i + 1]);
                 case "--seed" -> seed = Long.parseLong(args[i + 1]);
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
+        }
+        if (ide) {
+            if (stdio || describe || warm) {
+                throw new IllegalArgumentException("usage: robot-host --ide [--server host:port] "
+                        + "[--data dir] [--robot name ...] [--jar folder ...] [--home dir] [--seed N]");
+            }
+            System.exit(runIde(server == null ? IDE_SERVER : server, token, robots, jars, home,
+                    data == null ? dataFolder() : data, seed));
         }
         if (describe) {
             if (home == null) {
@@ -152,13 +172,6 @@ public final class RobotHost {
             throw new IllegalArgumentException("usage: robot-host (--server host:port | --stdio) "
                     + "--robot name --jar robot.jar --home dir [--seed N]");
         }
-        if (ide) {
-            if (server == null || stdio) {
-                throw new IllegalArgumentException("usage: robot-host --ide --server host:port "
-                        + "--robot name --jar robot.jar-or-folder --home dir [--seed N]");
-            }
-            System.exit(runIde(server, token, robot, jars, home, seed));
-        }
         if (stdio) {
             // Before anything else can print: the protocol owns the real stdin and stdout.
             InputStream in = new BufferedInputStream(new FileInputStream(FileDescriptor.in));
@@ -180,22 +193,195 @@ public final class RobotHost {
         }
     }
 
+    /** Where robots from an IDE connect unless told otherwise (the server's default port). */
+    static final String IDE_SERVER = "127.0.0.1:7878";
+
+    /** At most this many robots are offered at once: as many as the server keeps waiting. */
+    static final int MAX_IDE_ROBOTS = 16;
+
     /**
-     * A robot started by an IDE (design §5.2): looks the robot up in classic's repository
-     * first, tells the server who it is in its {@code Hello} and waits for the battle, as
-     * long as it takes. Otherwise as {@link #run(String, String, String, List, Path, long)}.
+     * robocode-s's data folder, as the program finds it: {@code ROBOCODES_DATA}, else the
+     * user's data folder of the platform.
      */
-    static int runIde(String server, String token, String robot, List<Path> jars, Path home, long seed)
-            throws Exception {
+    static Path dataFolder() {
+        String set = System.getenv("ROBOCODES_DATA");
+        if (set != null && !set.isEmpty()) {
+            return Path.of(set);
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String home = System.getProperty("user.home");
+        Path base;
+        if (os.startsWith("windows")) {
+            String local = System.getenv("LOCALAPPDATA");
+            base = local != null && !local.isEmpty() ? Path.of(local) : Path.of(home, "AppData", "Local");
+        } else if (os.startsWith("mac")) {
+            base = Path.of(home, "Library", "Application Support");
+        } else {
+            String xdg = System.getenv("XDG_DATA_HOME");
+            base = xdg != null && !xdg.isEmpty() && Path.of(xdg).isAbsolute()
+                    ? Path.of(xdg) : Path.of(home, ".local", "share");
+        }
+        return base.resolve("robocode-s");
+    }
+
+    /**
+     * The IDE token in the data folder (the server's {@code ide::token}): made here, readable
+     * by the user only, if robocode-s hasn't listened for an IDE yet.
+     */
+    static String ideToken(Path data) throws IOException {
+        Path file = data.resolve("ide-token");
+        for (int attempt = 0; ; attempt++) {
+            if (Files.isRegularFile(file)) {
+                String token = Files.readString(file).trim();
+                if (!token.isEmpty() || attempt > 0) {
+                    return token;
+                }
+            }
+            Files.createDirectories(data);
+            byte[] bits = new byte[16];
+            new java.security.SecureRandom().nextBytes(bits);
+            StringBuilder token = new StringBuilder();
+            for (byte b : bits) {
+                token.append(String.format("%02x", b));
+            }
+            try {
+                if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                    Files.createFile(file, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                            java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));
+                } else {
+                    Files.createFile(file);
+                }
+                Files.writeString(file, token);
+                return token.toString();
+            } catch (java.nio.file.FileAlreadyExistsException e) {
+                // robocode-s made it meanwhile: read it.
+            }
+        }
+    }
+
+    /** The class folders of this JVM's classpath: the IDE's output. */
+    static List<Path> classFolders() {
+        List<Path> folders = new ArrayList<>();
+        for (String entry : System.getProperty("java.class.path", "").split(java.io.File.pathSeparator)) {
+            if (!entry.isEmpty() && Files.isDirectory(Path.of(entry))) {
+                folders.add(Path.of(entry).toAbsolutePath().normalize());
+            }
+        }
+        return folders;
+    }
+
+    /**
+     * Robots started by an IDE (design §5.2): looks them up in classic's repository first,
+     * then connects once for each, tells the server who it is in its {@code Hello} and
+     * waits for the battle, as long as it takes. Ends when the robots taken for battles are
+     * done, or when none can wait anymore.
+     */
+    static int runIde(String server, String token, List<String> names, List<Path> jars, Path home,
+            Path data, long seed) throws Exception {
+        if (token.isEmpty()) {
+            token = ideToken(data);
+        }
+        if (home == null) {
+            home = data.resolve("ide-home");
+        }
+        if (jars.isEmpty()) {
+            jars = classFolders();
+            if (jars.isEmpty()) {
+                System.err.println("No class folders on the classpath, so no robots to offer: run "
+                        + "this from your project, with its output folder on the classpath.");
+                return 1;
+            }
+        }
+        for (Path jar : jars) {
+            // Classic's jar handling reaches into the JDK; a class folder doesn't need that.
+            if (!Files.isDirectory(jar) && !Object.class.getModule().isOpen("sun.net.www.protocol.jar",
+                    RobotHost.class.getModule())) {
+                System.err.println(jar + " is a jar: robots in jars need the VM options "
+                        + "--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED "
+                        + "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED (or give the class folder)");
+                return 1;
+            }
+        }
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
-        RobotSpecification[] found = engine.getLocalRepository(robot);
-        if (found.length == 0) {
-            System.err.println("robot " + robot + " not found in " + jars);
-            return 1;
+        List<RobotSpecification> specs = new ArrayList<>();
+        if (names.isEmpty()) {
+            // Teams and their robots need several JVMs: the server doesn't take them.
+            for (RobotSpecification spec : engine.getLocalRepository()) {
+                IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
+                if (!item.isTeam() && !((IRobotItem) item).isTeamRobot()) {
+                    specs.add(spec);
+                }
+            }
+            if (specs.isEmpty()) {
+                System.err.println("No robots found in " + jars + ": build your project first.");
+                return 1;
+            }
+        } else {
+            for (String name : names) {
+                RobotSpecification[] found = engine.getLocalRepository(name);
+                if (found.length == 0) {
+                    System.err.println("robot " + name + " not found in " + jars);
+                    return 1;
+                }
+                specs.add(found[0]);
+            }
         }
-        IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(found[0]);
+        if (specs.size() > MAX_IDE_ROBOTS) {
+            System.err.println("Found " + specs.size() + " robots; offering the first " + MAX_IDE_ROBOTS
+                    + " (--robot name chooses).");
+            specs = specs.subList(0, MAX_IDE_ROBOTS);
+        }
+
+        int colon = server.lastIndexOf(':');
+        String host = server.substring(0, colon);
+        int port = Integer.parseInt(server.substring(colon + 1));
+        IdeRobots state = new IdeRobots();
+        List<Thread> threads = new ArrayList<>();
+        for (RobotSpecification spec : specs) {
+            IRobotSpecItem item = (IRobotSpecItem) HiddenAccess.getFileSpecification(spec);
+            RobotDescription description = describe(item);
+            Socket socket;
+            try {
+                socket = new Socket(host, port);
+            } catch (java.net.ConnectException e) {
+                System.err.println("robocode-s isn't listening on " + server + ": start it (the program, or "
+                        + "`robocode-s battle sample.Walls,@ide`) and then this again.");
+                return 1;
+            }
+            socket.setTcpNoDelay(true);
+            System.err.println("Waiting for a battle with " + description.getName() + " (robocode-s on "
+                    + server + ", From your IDE).");
+            String key = token;
+            Path robotHome = home;
+            Thread thread = new Thread(() -> {
+                boolean[] taken = {false};
+                int code = 1;
+                try (socket) {
+                    code = play(new BufferedInputStream(socket.getInputStream()),
+                            new BufferedOutputStream(socket.getOutputStream()), key,
+                            item.getUniqueFullClassNameWithVersion(), List.of(), robotHome, seed, engine,
+                            new RobotSpecification[] {spec}, description, () -> {
+                                taken[0] = true;
+                                state.taken();
+                            });
+                } catch (Exception e) {
+                    if (taken[0]) {
+                        e.printStackTrace();
+                    }
+                } finally {
+                    state.ended(taken[0], code);
+                }
+            }, "robot-host " + description.getName());
+            threads.add(thread);
+        }
+        threads.forEach(Thread::start);
+        return state.await(threads.size());
+    }
+
+    /** What a robot from an IDE says about itself in its {@code Hello}. */
+    private static RobotDescription describe(IRobotSpecItem item) {
         RobotDescription.Builder description = RobotDescription.newBuilder()
                 .setName(item.getUniqueFullClassNameWithVersion())
                 .setFullClassName(item.getFullClassName())
@@ -215,12 +401,37 @@ public final class RobotHost {
                     .setInteractive(robotItem.isInteractiveRobot())
                     .setPaint(robotItem.isPaintRobot());
         }
-        int colon = server.lastIndexOf(':');
-        try (Socket socket = new Socket(server.substring(0, colon), Integer.parseInt(server.substring(colon + 1)))) {
-            socket.setTcpNoDelay(true);
-            return play(new BufferedInputStream(socket.getInputStream()),
-                    new BufferedOutputStream(socket.getOutputStream()), token, robot, jars, home, seed,
-                    engine, found, description.build());
+        return description.build();
+    }
+
+    /**
+     * The robots of an IDE's host: the host ends when every robot taken for a battle is
+     * done, or when all connections ended without a battle (the server went away).
+     */
+    private static final class IdeRobots {
+        private int taken;
+        private int done;
+        private int ended;
+        private int code;
+
+        synchronized void taken() {
+            taken++;
+        }
+
+        synchronized void ended(boolean wasTaken, int exit) {
+            ended++;
+            if (wasTaken) {
+                done++;
+                code = Math.max(code, exit);
+            }
+            notifyAll();
+        }
+
+        synchronized int await(int robots) throws InterruptedException {
+            while (!(taken > 0 && done == taken) && ended < robots) {
+                wait();
+            }
+            return taken > 0 ? code : 1;
         }
     }
 
@@ -232,7 +443,7 @@ public final class RobotHost {
         // robots by process and container instead (design §6).
         System.setProperty("NOSECURITY", "true");
         copyJars(jars, home);
-        return play(in, out, token, robot, jars, home, seed, null, null, null);
+        return play(in, out, token, robot, jars, home, seed, null, null, null, null);
     }
 
     /**
@@ -269,7 +480,7 @@ public final class RobotHost {
                     StandardCopyOption.REPLACE_EXISTING));
         }
         return play(in, out, token, assignment.getRobot(), jars, home, assignment.getSeed(), engine,
-                null, null);
+                null, null, null);
     }
 
     /** Loads the protocol's classes, which the robot's connection needs first. */
@@ -284,11 +495,11 @@ public final class RobotHost {
     /**
      * The robot's side of the protocol, with classic's {@code engine} if it is started
      * already. A robot from an IDE has looked itself up ({@code found}) and describes
-     * itself in its {@code Hello}.
+     * itself in its {@code Hello}; {@code taken} runs once it is in a battle.
      */
     private static int play(InputStream in, OutputStream out, String token, String robot,
             List<Path> jars, Path home, long seed, RobocodeEngine engine,
-            RobotSpecification[] found, RobotDescription description) throws Exception {
+            RobotSpecification[] found, RobotDescription description, Runnable taken) throws Exception {
         Hello.Builder hello = Hello.newBuilder()
                 .setVersion(ProtocolVersion.newBuilder().setMajor(1).setMinor(2))
                 .setRole(Role.ROLE_ROBOT)
@@ -299,9 +510,16 @@ public final class RobotHost {
         ClientMessage.newBuilder().setHello(hello).build().writeDelimitedTo(out);
         out.flush();
         ServerMessage first = ServerMessage.parseDelimitedFrom(in);
+        if (first == null && description != null) {
+            System.err.println(robot + ": robocode-s ended the connection without a battle");
+            return 1;
+        }
         if (first == null || !first.hasHelloAck()) {
             System.err.println("server refused the robot: " + (first == null ? "connection closed" : first));
             return 1;
+        }
+        if (taken != null) {
+            taken.run();
         }
         var statics = first.getHelloAck().getRobot();
         if (RobotRandomness.isAgentInstalled()) {
@@ -321,7 +539,11 @@ public final class RobotHost {
             return 1;
         }
         RemotePeer peer = new RemotePeer(out);
-        IHostingRobotProxy proxy = createProxy(found[0], statics, peer);
+        IHostingRobotProxy proxy;
+        // A host from an IDE may start several of its robots at once.
+        synchronized (RobotHost.class) {
+            proxy = createProxy(found[0], statics, peer);
+        }
         return serve(in, proxy, peer, description != null);
     }
 
