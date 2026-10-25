@@ -123,6 +123,8 @@ The version comes from the build file, so there is one place to change it for a 
   </dependencies>
 
   <build>
+    <!-- The jar's name, as classic Robocode names a robot jar: package.Class_version.jar -->
+    <finalName>jd.MyRobot_${project.version}</finalName>
     <resources>
       <!-- Fills ${project.version} into MyRobot.properties. -->
       <resource>
@@ -141,7 +143,7 @@ The version comes from the build file, so there is one place to change it for a 
 </project>
 ```
 
-`mvn package` makes `target/myrobot-1.0.jar`.
+`mvn package` makes `target/jd.MyRobot_1.0.jar`. IntelliJ IDEA includes Maven, so without `mvn` installed you can use its *Maven* tool window instead: *Lifecycle*, double-click *package*.
 
 ### With Gradle
 
@@ -173,9 +175,12 @@ tasks.processResources {
     inputs.property("version", version)
     filesMatching("**/*.properties") { expand("version" to version) }
 }
+
+// The jar's name, as classic Robocode names a robot jar: package.Class_version.jar
+tasks.jar { archiveFileName = "jd.MyRobot_${version}.jar" }
 ```
 
-`gradle jar` (or `./gradlew jar` with a wrapper) makes `build/libs/myrobot-1.0.jar`.
+`gradle jar` (or `./gradlew jar` with a wrapper) makes `build/libs/jd.MyRobot_1.0.jar`.
 
 Both compile for Java 21, the Java that robocode-s runs robots on, so you can use everything in it (records, `var`, text blocks, `Math.clamp`). Above 21 the runtime can't load the class files. If you want your robot to run in classic Robocode and in classic RoboRumble clients too, set the level to 8 (`<maven.compiler.release>8</maven.compiler.release>` or `options.release = 8`); the compiler then holds you to Java 8 (`records are not supported in -source 8`).
 
@@ -184,10 +189,10 @@ In an IDE, open the folder as a Maven or Gradle project, so that the IDE reads t
 ## 6. Fight
 
 ```sh
-robocode-s battle "jd.MyRobot 1.0,sample.Walls" --jar target/myrobot-1.0.jar --rounds 5 --seed 1
+robocode-s battle "jd.MyRobot 1.0,sample.Walls" --jar target/jd.MyRobot_1.0.jar --rounds 5 --seed 1
 ```
 
-(`build/libs/myrobot-1.0.jar` with Gradle; the quotes are for the space in the name.) Something like:
+(`build/libs/jd.MyRobot_1.0.jar` with Gradle; the quotes are for the space in the name.) Something like:
 
 ```
 Rank  Robot Name      Total Score  Survival  Surv Bonus  Bullet Dmg  Bullet Bonus  ...  1sts  2nds
@@ -243,7 +248,7 @@ With Maven, the dependency and the shade plugin, which bundles it (in `<plugins>
 ```
 
 ```xml
-<!-- In <plugins>: the robot jar, target/myrobot-1.0.jar, with the library classes the robot uses. -->
+<!-- In <plugins>: the robot jar, target/jd.MyRobot_1.0.jar, with the library classes the robot uses. -->
 <plugin>
   <groupId>org.apache.maven.plugins</groupId>
   <artifactId>maven-shade-plugin</artifactId>
@@ -271,6 +276,8 @@ With Maven, the dependency and the shade plugin, which bundles it (in `<plugins>
 </plugin>
 ```
 
+`mvn package` now makes two jars: `target/jd.MyRobot_1.0.jar` is the robot, with the library, and `target/original-jd.MyRobot_1.0.jar` is the same jar before the library went in, which the shade plugin always leaves next to it. Submit the first. To keep the robot alone in a folder, give the shade plugin `<outputFile>${project.build.directory}/robot/jd.MyRobot_${project.version}.jar</outputFile>` in its `<configuration>` (and drop the `<finalName>`): the robot is then `target/robot/jd.MyRobot_1.0.jar`, alone in its folder, and the jar without the library stays as `target/myrobot-1.0.jar`, with no `original-` one.
+
 With Gradle, the [Shadow](https://gradleup.com/shadow/) plugin does the same:
 
 ```kotlin
@@ -285,9 +292,9 @@ dependencies {
     implementation("org.apache.commons:commons-lang3:3.17.0")
 }
 
-// The robot jar, build/libs/myrobot-1.0.jar, with the library classes the robot uses.
+// The robot jar, build/libs/jd.MyRobot_1.0.jar, with the library classes the robot uses.
 tasks.shadowJar {
-    archiveClassifier = ""
+    archiveFileName = "jd.MyRobot_${version}.jar"
     minimize()
     exclude("module-info.class", "META-INF/versions/**", "META-INF/maven/**")
 }
@@ -304,7 +311,7 @@ What to know about libraries:
 - **The library's license stays in the jar** (`META-INF/LICENSE.txt` and `NOTICE.txt`); the Apache license asks for that when you hand the library on.
 - **The sandbox applies to the library too:** no network, no files outside your robot's data folder.
 - **Classes named `java.*`, `javax.*`, `kotlin.*` or `robocode*` are never loaded from your jar**, so don't bundle those (Kotlin's standard library is provided).
-- **Test the jar itself** (`robocode-s battle "jd.MyRobot 1.0,sample.Walls" --jar target/myrobot-1.0.jar`). In the IDE's debugger the library is on the classpath anyway, so a robot that forgot to bundle it works there and fails in a real battle.
+- **Test the jar itself** (`robocode-s battle "jd.MyRobot 1.0,sample.Walls" --jar target/jd.MyRobot_1.0.jar`). In the IDE's debugger the library is on the classpath anyway, so a robot that forgot to bundle it works there and fails in a real battle.
 
 ## 9. Release it
 
