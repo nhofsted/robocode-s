@@ -1259,6 +1259,8 @@ impl Contributor {
                                     why: Some("the battle thread panicked".into()),
                                     snapshots: Vec::new(),
                                 });
+                                let stopping = stop.requested() || abort.load(Ordering::Relaxed);
+                                let outcome = unless_stopping(outcome, stopping);
                                 let _ = tx.send(Msg::Battle {
                                     key,
                                     pos,
@@ -1448,6 +1450,26 @@ fn account(summary: &mut Summary, end: PostEnd) -> bool {
             summary.fatal = Some(f);
             true
         }
+    }
+}
+
+/// A battle's outcome, with a robot failure while the client was `stopping` (a stop request
+/// or an abort) made `notRun`: the stop may be what ended the robot (a signal for the whole
+/// process group or cgroup, #124), and a robot failure is reported only when the robot
+/// failed.
+fn unless_stopping(outcome: Outcome, stopping: bool) -> Outcome {
+    let result = &outcome.result;
+    if !stopping || result.status != BattleStatus::RobotFailed {
+        return outcome;
+    }
+    let failed = result.failure.as_ref().map_or(String::new(), |f| {
+        format!(": robot {} failed ({:?}) meanwhile", f.robot, f.reason)
+    });
+    Outcome {
+        result: status_only(result.index, BattleStatus::NotRun),
+        tracks: Vec::new(),
+        why: Some(format!("stopped{failed}")),
+        snapshots: Vec::new(),
     }
 }
 
@@ -1734,6 +1756,36 @@ mod tests {
         stop.stop();
         stop.stop();
         assert!(copy.aborting());
+    }
+
+    #[test]
+    fn a_robot_crash_while_stopping_is_not_reported() {
+        let outcome = |status| {
+            let mut result = robot_failed(3, 1, "exit 130");
+            result.failure.as_mut().unwrap().reason = FailureReason::Crash;
+            if status != BattleStatus::RobotFailed {
+                result = status_only(3, status);
+            }
+            Outcome {
+                result,
+                tracks: vec![vec![1]],
+                why: None,
+                snapshots: Vec::new(),
+            }
+        };
+        let stopped = unless_stopping(outcome(BattleStatus::RobotFailed), true);
+        assert_eq!(stopped.result, status_only(3, BattleStatus::NotRun));
+        assert!(stopped.tracks.is_empty());
+        assert_eq!(
+            stopped.why.as_deref(),
+            Some("stopped: robot 1 failed (Crash) meanwhile")
+        );
+        let crashed = unless_stopping(outcome(BattleStatus::RobotFailed), false);
+        assert_eq!(crashed.result.status, BattleStatus::RobotFailed);
+        // Finished battles are posted as they are.
+        let ok = unless_stopping(outcome(BattleStatus::Ok), true);
+        assert_eq!(ok.result.status, BattleStatus::Ok);
+        assert_eq!(ok.tracks, [vec![1]]);
     }
 
     #[test]

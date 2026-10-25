@@ -16,9 +16,10 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::os::unix::process::CommandExt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, mpsc};
 
 /// The largest file a robot writes (classic's data quota is 200 KB a robot).
 const FSIZE: u64 = 64 << 20;
@@ -228,6 +229,53 @@ pub(super) fn bwrap_command(program: &Path, grants: &Grants) -> io::Result<Comma
         });
     }
     Ok(command)
+}
+
+/// Has the kernel kill the program when the runner dies (`PR_SET_PDEATHSIG`). The kernel
+/// sends it when the *thread* that started the program ends, so the program must be
+/// started by [`spawn_from_keeper`]. Done after the sandbox's own steps: the filter allows
+/// `prctl`.
+pub(super) fn die_with_parent(command: &mut Command) {
+    let runner = std::process::id() as libc::pid_t;
+    // SAFETY: only system calls.
+    unsafe {
+        command.pre_exec(move || {
+            check(libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) as i64)?;
+            // The runner died before the signal was set up: nothing would send it.
+            if libc::getppid() != runner {
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Starts `command` on a thread that lives as long as the process, for
+/// [`die_with_parent`] (and bwrap's `--die-with-parent`, the same signal): robot hosts are
+/// started by battle threads, which end before them (a warm host outlives the battle that
+/// started it).
+pub(super) fn spawn_from_keeper(command: Command) -> io::Result<std::process::Child> {
+    type Job = (Command, mpsc::SyncSender<io::Result<std::process::Child>>);
+    static KEEPER: OnceLock<Option<mpsc::Sender<Job>>> = OnceLock::new();
+    let keeper = KEEPER.get_or_init(|| {
+        let (jobs, rx) = mpsc::channel::<Job>();
+        let started = std::thread::Builder::new()
+            .name("robot starter".into())
+            .spawn(move || {
+                for (mut command, reply) in rx {
+                    // A panic would end the thread, and with it every program it started.
+                    let spawned = catch_unwind(AssertUnwindSafe(|| command.spawn()))
+                        .unwrap_or_else(|_| Err(io::Error::other("starting it panicked")));
+                    let _ = reply.send(spawned);
+                }
+            });
+        started.ok().map(|_| jobs)
+    });
+    let gone = || io::Error::other("the thread that starts robot hosts is gone");
+    let keeper = keeper.as_ref().ok_or_else(gone)?;
+    let (reply, spawned) = mpsc::sync_channel(1);
+    keeper.send((command, reply)).map_err(|_| gone())?;
+    spawned.recv().map_err(|_| gone())?
 }
 
 /// A system call's result: -1 is its error.
