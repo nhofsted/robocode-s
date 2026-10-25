@@ -49,9 +49,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let out = serde_json::json!({
             "mainClass": c.main_class,
             "classpath": c.classpath(),
-            "vmOptions": c.vm_options,
             "programArguments": c.arguments,
-            "environment": { c.env_name.as_str(): c.env_value },
             "javaAgent": c.agent_option(),
         });
         println!("{out}");

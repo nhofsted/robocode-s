@@ -7,7 +7,7 @@ description: Print the run configuration for debugging a robot from IntelliJ IDE
 robocode-s ide-config [options]
 ```
 
-Prints the run configuration for debugging a robot from your IDE: the IDE starts the robot host with its debugger, and `robocode-s battle sample.Walls,@ide` (or the GUI's *From your IDE...*) waits for it. It has ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code.
+Prints the run configuration for debugging a robot from your IDE: the IDE starts the robot host with its debugger, and `robocode-s battle sample.Walls,@ide` (or the GUI's *From your IDE...*) waits for it. It has ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code: the main class, the robot host's jars for the classpath, and the program argument `--ide`, plus `--server` and `--data` where the port or the data folder aren't the defaults. The robot host finds the robots in your project's output, and the token in the data folder.
 
 | Option | Meaning |
 |---|---|

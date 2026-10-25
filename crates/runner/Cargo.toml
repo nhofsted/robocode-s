@@ -39,6 +39,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",
 ] }
 
+[dev-dependencies]
+serde_json = "=1.0.151"
+
 # What the Windows sandbox's tests try.
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61.2", features = [

@@ -330,9 +330,7 @@ fn configuration_ui(ui: &mut egui::Ui, c: &RunConfiguration) {
     let rows = [
         ("Main class", c.main_class.clone()),
         ("Classpath", c.classpath()),
-        ("VM options", c.vm_options_line()),
         ("Program arguments", c.arguments_line()),
-        ("Environment", format!("{}={}", c.env_name, c.env_value)),
     ];
     for (name, value) in rows {
         ui.horizontal(|ui| {
@@ -348,9 +346,9 @@ fn configuration_ui(ui: &mut egui::Ui, c: &RunConfiguration) {
     ui.add(
         egui::Label::new(
             RichText::new(
-                "Replace my.Robot with your robot's class name and <output-folder> with the \
-                 folder your IDE compiles to. The classpath is every jar in that folder, besides \
-                 the project's own. The port and the token stay the same, so this is set up once.",
+                "The classpath is every jar in that folder, besides the project's own. The robot \
+                 host offers the robots of your project's output; they appear here. This stays \
+                 the same, so it is set up once.",
             )
             .weak()
             .small(),

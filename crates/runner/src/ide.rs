@@ -5,16 +5,12 @@
 //! from the robots that are connected. This is the IDE side's configuration, and how a
 //! battle names such robots.
 
-use crate::MODULE_OPENINGS;
-use crate::local::{Described, Environment};
+use crate::local::{Described, Environment, user_data_dir};
 use robocode_s_server::DETERMINISTIC_RULES;
-use robocode_s_server::ide::{IdeListener, check_description};
+use robocode_s_server::ide::{DEFAULT_PORT, IdeListener, check_description};
 
 /// The robot host's main class, which an IDE runs.
 pub const MAIN_CLASS: &str = "io.github.nhofsted.robocodes.compat.RobotHost";
-
-/// The environment variable the IDE's robot host reads its token from.
-pub const TOKEN_ENV: &str = "ROBOCODES_IDE_TOKEN";
 
 /// What a command line writes for "a robot from my IDE" (`robocode-s battle sample.Walls,@ide`).
 pub const CLI_MARKER: &str = "@ide";
@@ -72,53 +68,40 @@ pub fn split(
     Ok((from_ide, names))
 }
 
-/// What to enter in an IDE to run a robot with its debugger.
+/// What to enter in an IDE to run a robot with its debugger: the robot host finds the
+/// robots in the project's output itself (the class folders on its classpath), and its
+/// token and home in the data folder.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunConfiguration {
     pub main_class: String,
     /// The robot host's jars: a folder, all of whose jars the classpath takes (`dir/*`).
     pub host_lib: String,
-    pub vm_options: Vec<String>,
-    /// With the placeholders [`ROBOT_PLACEHOLDER`] and [`OUTPUT_PLACEHOLDER`] to replace.
+    /// `--ide`, and the server and the data folder where they aren't the robot host's
+    /// defaults.
     pub arguments: Vec<String>,
-    pub env_name: String,
-    pub env_value: String,
     /// The determinism agent, for seeded random numbers (optional).
     pub agent: String,
 }
 
-pub const ROBOT_PLACEHOLDER: &str = "my.Robot";
-pub const OUTPUT_PLACEHOLDER: &str = "<output-folder>";
-
 /// The configuration for robots connecting to `127.0.0.1:port`. Makes the token the
 /// first time.
 pub fn run_configuration(env: &Environment, port: u16) -> Result<RunConfiguration, String> {
-    let absolute = |p: &std::path::Path| {
-        std::path::absolute(p)
-            .unwrap_or_else(|_| p.to_path_buf())
-            .display()
-            .to_string()
-    };
-    let token = robocode_s_server::ide::token(&env.data)?;
+    let absolute = |p: &std::path::Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    robocode_s_server::ide::token(&env.data)?;
+    let mut arguments = vec!["--ide".to_string()];
+    if port != DEFAULT_PORT {
+        arguments.extend(["--server".into(), format!("127.0.0.1:{port}")]);
+    }
+    // The robot host finds the user's data folder as this program does; another is named.
+    let data = absolute(&env.data);
+    if user_data_dir().map(|d| absolute(&d)) != Some(data.clone()) {
+        arguments.extend(["--data".into(), data.display().to_string()]);
+    }
     Ok(RunConfiguration {
         main_class: MAIN_CLASS.into(),
-        host_lib: absolute(&env.host_lib),
-        vm_options: MODULE_OPENINGS.map(String::from).to_vec(),
-        arguments: [
-            "--ide".to_string(),
-            "--server".into(),
-            format!("127.0.0.1:{port}"),
-            "--robot".into(),
-            ROBOT_PLACEHOLDER.into(),
-            "--jar".into(),
-            OUTPUT_PLACEHOLDER.into(),
-            "--home".into(),
-            absolute(&env.data.join("ide-home")),
-        ]
-        .to_vec(),
-        env_name: TOKEN_ENV.into(),
-        env_value: token,
-        agent: absolute(&env.agent_jar),
+        host_lib: absolute(&env.host_lib).display().to_string(),
+        arguments,
+        agent: absolute(&env.agent_jar).display().to_string(),
     })
 }
 
@@ -155,10 +138,6 @@ impl RunConfiguration {
         )
     }
 
-    pub fn vm_options_line(&self) -> String {
-        self.vm_options.join(" ")
-    }
-
     pub fn arguments_line(&self) -> String {
         self.arguments
             .iter()
@@ -174,16 +153,13 @@ impl RunConfiguration {
     /// A Visual Studio Code launch configuration (`launch.json`).
     pub fn vscode(&self) -> String {
         let q = json_string;
+        let args = self.arguments.iter().map(|a| q(a)).collect::<Vec<_>>();
         format!(
             "{{\n  \"type\": \"java\",\n  \"request\": \"launch\",\n  \"name\": \"robocode-s robot\",\n  \
-             \"mainClass\": {},\n  \"classPaths\": [\"$Auto\", {}],\n  \"vmArgs\": {},\n  \
-             \"args\": {},\n  \"env\": {{ {}: {} }}\n}}",
+             \"mainClass\": {},\n  \"classPaths\": [\"$Auto\", {}],\n  \"args\": [{}]\n}}",
             q(&self.main_class),
             q(&self.classpath()),
-            q(&self.vm_options_line()),
-            q(&self.arguments_line()),
-            q(&self.env_name),
-            q(&self.env_value),
+            args.join(", "),
         )
     }
 
@@ -191,7 +167,7 @@ impl RunConfiguration {
     pub fn text(&self) -> String {
         let mut out = String::new();
         out.push_str(
-            "Run configuration for your IDE (Java 17 or newer; a Debug button starts it)\n\n",
+            "Run configuration for your IDE (Java 21 or newer; its Debug button starts it)\n\n",
         );
         let rows = [
             ("Main class", self.main_class.clone()),
@@ -202,29 +178,24 @@ impl RunConfiguration {
                     self.classpath()
                 ),
             ),
-            ("VM options", self.vm_options_line()),
             ("Program arguments", self.arguments_line()),
-            (
-                "Environment",
-                format!("{}={}", self.env_name, self.env_value),
-            ),
         ];
         for (name, value) in rows {
             out.push_str(&format!("  {name:<18} {value}\n"));
         }
         out.push_str(&format!(
-            "\nReplace {ROBOT_PLACEHOLDER} with your robot's class name and {OUTPUT_PLACEHOLDER} with the folder your IDE \
-             compiles to (out/production/..., bin or target/classes).\n\
+            "\nThe robot host offers the robots of your project's output (bin, target/classes, ...): \
+             pick one in robocode-s. --robot NAME offers only that one.\n\
              Seeded random numbers (optional): add {} to the VM options and --seed N (the battle's seed) to the \
              program arguments.\n\n",
             self.agent_option()
         ));
         out.push_str(
-            "IntelliJ IDEA: Run > Edit Configurations > + > Application; set the main class, VM options, program \
-             arguments and environment variables (Modify options); add the classpath folder as a library \
-             (File > Project Structure > Libraries > + > Java).\n\
-             Eclipse: Run > Debug Configurations > Java Application; Classpath > User Entries > Add External \
-             JARs (the jars of that folder); Arguments (program and VM); Environment.\n\
+            "IntelliJ IDEA: Run > Edit Configurations > + > Application; set the main class and the program \
+             arguments; add the classpath folder to your module as a library (File > Project Structure > \
+             Libraries > + > Java).\n\
+             Eclipse: Run > Debug Configurations > Java Application; the main class; Classpath > User Entries > \
+             Add External JARs (the jars of that folder); Arguments.\n\
              Visual Studio Code: add to launch.json (\"configurations\"):\n",
         );
         for line in self.vscode().lines() {
@@ -232,7 +203,7 @@ impl RunConfiguration {
             out.push_str(line);
             out.push('\n');
         }
-        out.push_str("\nThe port and the token stay the same, so this is set up once.\n");
+        out.push_str("\nThis stays the same, so it is set up once.\n");
         out
     }
 }
@@ -245,18 +216,9 @@ mod tests {
         RunConfiguration {
             main_class: MAIN_CLASS.into(),
             host_lib: "/opt/robocode-s/lib/robot-host".into(),
-            vm_options: MODULE_OPENINGS.map(String::from).to_vec(),
-            arguments: [
-                "--ide",
-                "--server",
-                "127.0.0.1:7878",
-                "--home",
-                "/my data/ide-home",
-            ]
-            .map(String::from)
-            .to_vec(),
-            env_name: TOKEN_ENV.into(),
-            env_value: "abc".into(),
+            arguments: ["--ide", "--server", "127.0.0.1:7900", "--data", "/my data"]
+                .map(String::from)
+                .to_vec(),
             agent: "/opt/robocode-s/lib/agent/java-determinism.jar".into(),
         }
     }
@@ -286,14 +248,14 @@ mod tests {
         for part in [
             MAIN_CLASS,
             "/opt/robocode-s/lib/robot-host/*",
-            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-            "--ide --server 127.0.0.1:7878",
-            "\"/my data/ide-home\"",
-            "ROBOCODES_IDE_TOKEN=abc",
+            "--ide --server 127.0.0.1:7900 --data \"/my data\"",
             "-javaagent:/opt/robocode-s/lib/agent/java-determinism.jar",
             "launch.json",
         ] {
             assert!(text.contains(part), "{part} missing from\n{text}");
+        }
+        for gone in ["--add-opens", "ROBOCODES_IDE_TOKEN", "--jar", "--home"] {
+            assert!(!text.contains(gone), "{gone} in\n{text}");
         }
     }
 
@@ -302,8 +264,37 @@ mod tests {
         let mut c = configuration();
         c.host_lib = r"C:\robocode-s\lib\robot-host".into();
         let json = c.vscode();
-        assert!(json.contains("\"ROBOCODES_IDE_TOKEN\": \"abc\""));
-        assert!(json.contains("\\\"/my data/ide-home\\\""));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value["args"],
+            serde_json::json!(["--ide", "--server", "127.0.0.1:7900", "--data", "/my data"])
+        );
         assert!(json.contains("C:\\\\robocode-s"), "{json}");
+    }
+
+    #[test]
+    fn the_defaults_need_only_ide() {
+        let dir = std::env::temp_dir().join(format!("robocodes-ide-config-{}", std::process::id()));
+        let mut env = Environment::from_env();
+        env.data = dir.clone();
+        let c = run_configuration(&env, DEFAULT_PORT).unwrap();
+        assert_eq!(c.arguments[0], "--ide");
+        assert!(!c.arguments.contains(&"--server".to_string()));
+        // A data folder that isn't the user's is named.
+        assert_eq!(
+            c.arguments[1..],
+            ["--data".to_string(), dir.display().to_string()]
+        );
+        if let Some(user) = user_data_dir() {
+            let _ = std::fs::remove_dir_all(&dir);
+            env.data = user;
+            if env.data.join(robocode_s_server::ide::TOKEN_FILE).is_file() {
+                assert_eq!(
+                    run_configuration(&env, DEFAULT_PORT).unwrap().arguments,
+                    ["--ide"]
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

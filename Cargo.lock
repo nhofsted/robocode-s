@@ -2797,6 +2797,7 @@ dependencies = [
  "robocode-s-engine",
  "robocode-s-protocol",
  "robocode-s-server",
+ "serde_json",
  "sha2",
  "tar",
  "ureq",
