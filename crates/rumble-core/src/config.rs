@@ -218,6 +218,9 @@ pub struct PlanConfig {
     /// Prior variance of a battle's pairing score (APS points squared).
     pub prior_variance: PerDivision<f64>,
     pub prior_weight: f64,
+    /// Prior variance of a bot's pairing means over its opponents (APS points squared): how
+    /// uncertain an APS from a few opponents is. Its weight is `prior_weight`.
+    pub opponent_variance: PerDivision<f64>,
     pub close_factor: f64,
     pub rank_factor: f64,
     pub min_hourly: PerDivision<u32>,
@@ -232,6 +235,10 @@ impl Default for PlanConfig {
                 melee: 25.0,
             },
             prior_weight: 3.0,
+            opponent_variance: PerDivision {
+                one_vs_one: 625.0,
+                melee: 121.0,
+            },
             close_factor: 10.0,
             rank_factor: 2.0,
             min_hourly: PerDivision {
@@ -371,6 +378,7 @@ mod tests {
                 "probation": {"battles": 10, "failShare": 0.8},
                 "slots": {"top": 50, "perSide": 5, "maxBytes": 262144},
                 "plan": {"priorVariance": {"1v1": 16.0, "melee": 25.0}, "priorWeight": 3.0,
+                         "opponentVariance": {"1v1": 625.0, "melee": 121.0},
                          "closeFactor": 10.0, "rankFactor": 2.0,
                          "minHourly": {"1v1": 200, "melee": 20}, "headroom": 1.5},
                 "jar": {"maxBytes": 5242880, "maxUnpacked": 20971520, "maxEntries": 5000},
