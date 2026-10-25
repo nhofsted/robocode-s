@@ -11,7 +11,7 @@ A robot jar is the same as in classic: your classes plus a `.properties` file ne
 robot.classname=jd.MyRobot
 robot.version=1.2
 robot.author.name=Jane Doe
-robot.description=Circles its enemy and fires where it is
+robot.description=Seesaws back and forth, spins its gun and fires at what it sees
 robot.webpage=https://example.com/myrobot
 robocode.version=1.11.1
 ```

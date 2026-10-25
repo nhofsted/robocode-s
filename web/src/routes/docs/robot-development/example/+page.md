@@ -32,60 +32,46 @@ The `.properties` file must end up next to the class in the jar (`jd/MyRobot.cla
 ```java
 package jd;
 
-import robocode.AdvancedRobot;
-import robocode.HitWallEvent;
+import robocode.HitByBulletEvent;
+import robocode.Robot;
 import robocode.ScannedRobotEvent;
-import robocode.util.Utils;
 
-/** Keeps its radar on the enemy, circles it and fires where it is. */
-public class MyRobot extends AdvancedRobot {
-
-    /** 1 or -1: which way it circles. */
-    private int direction = 1;
+/** Jane's first robot, after the one in the classic Robocode tutorial: a seesaw that shoots what it sees. */
+public class MyRobot extends Robot {
 
     @Override
     public void run() {
-        // Turn gun and radar on their own, not with the body.
-        setAdjustGunForRobotTurn(true);
-        setAdjustRadarForGunTurn(true);
         out.println("MyRobot is ready");
         while (true) {
-            // Until an enemy is seen; then onScannedRobot keeps the radar on it.
-            if (getRadarTurnRemaining() == 0) {
-                setTurnRadarRight(Double.POSITIVE_INFINITY);
-            }
-            execute();
+            ahead(100);        // forward, then
+            turnGunRight(360); // a full turn of the gun scans for enemies
+            back(100);         // backward, then
+            turnGunRight(360); // the same again
         }
     }
 
+    /** The gun saw another robot: fire. */
     @Override
     public void onScannedRobot(ScannedRobotEvent e) {
-        double bearing = getHeadingRadians() + e.getBearingRadians();
-        // Radar: overshoot a little, so the enemy stays in the beam.
-        setTurnRadarRightRadians(2 * Utils.normalRelativeAngle(bearing - getRadarHeadingRadians()));
-        // Gun: where the enemy will be if it keeps going (linear targeting), and fire once it
-        // points there.
-        double power = Math.min(2, getEnergy() / 10);
-        double sideways = e.getVelocity() * Math.sin(e.getHeadingRadians() - bearing);
-        double aim = bearing + Math.asin(sideways / (20 - 3 * power));
-        setTurnGunRightRadians(Utils.normalRelativeAngle(aim - getGunHeadingRadians()));
-        if (Math.abs(getGunTurnRemaining()) < 10) {
-            setFire(power);
-        }
-        // Body: sideways to the enemy, changing direction now and then.
-        if (getTime() % 40 == 0) {
-            direction = -direction;
-        }
-        setTurnRightRadians(Utils.normalRelativeAngle(e.getBearingRadians() + Math.PI / 2));
-        setAhead(100 * direction);
+        fire(1);
     }
 
+    /** A bullet hit us: turn across its path, to be harder to hit by the next one. */
     @Override
-    public void onHitWall(HitWallEvent e) {
-        direction = -direction;
+    public void onHitByBullet(HitByBulletEvent e) {
+        turnLeft(90 - e.getBearing());
     }
 }
 ```
+
+This is the robot of the classic Robocode tutorial, `MyFirstRobot`, in Jane's package:
+
+- `run()` is the robot's main loop. It drives forward and back 100 pixels, and after each move turns the gun a full circle, which scans for other robots.
+- `onScannedRobot` runs when the gun sees one, and fires a bullet of power 1.
+- `onHitByBullet` runs when a bullet hits: the robot turns across the bullet's path.
+- `out.println` writes to the robot's console.
+
+It extends `Robot`, the simplest base class. `AdvancedRobot` adds non-blocking commands for robots that move, aim and fire in the same turn; Jane can switch when she needs it. The [RoboWiki](https://robowiki.net/) is the place to learn how to make it better.
 
 ## 4. The properties file
 
@@ -95,7 +81,7 @@ public class MyRobot extends AdvancedRobot {
 robot.classname=jd.MyRobot
 robot.version=${project.version}
 robot.author.name=Jane Doe
-robot.description=Circles its enemy and fires where it is
+robot.description=Seesaws back and forth, spins its gun and fires at what it sees
 robocode.version=1.11.1
 ```
 
@@ -203,11 +189,11 @@ robocode-s battle "jd.MyRobot 1.0,sample.Walls" --jar target/myrobot-1.0.jar --r
 
 ```
 Rank  Robot Name      Total Score  Survival  Surv Bonus  Bullet Dmg  Bullet Bonus  ...  1sts  2nds
- 1st  jd.MyRobot 1.0    852 (98%)       250          50         460            92  ...     5     0
- 2nd  sample.Walls        14 (2%)         0           0          10             0  ...     0     5
+ 1st  sample.Walls      804 (94%)       250          50         418            84  ...     5     0
+ 2nd  jd.MyRobot 1.0      52 (6%)         0           0          52             0  ...     0     5
 ```
 
-The same seed gives the same battle again, so Jane can rerun one she wants to look at. Her `out.println` output goes to the console here, and to the robot's output tab in the GUI.
+`sample.Walls` wins, and that is fine for a first robot: `MyRobot` drives, aims by spinning its gun and shoots, which is all the tutorial robot does, and Jane now has something to improve and a number to improve it against. The same seed gives the same battle again, so she can rerun one she wants to look at. Her `out.println` output goes to the console here, and to the robot's output tab in the GUI.
 
 **While she works on it** she skips the jar and points robocode-s at the folder her IDE or build compiles to. A folder is a development robot, named with a `*`, and robocode-s reads it in place, so the next battle runs her newest code:
 
