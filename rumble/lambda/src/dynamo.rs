@@ -17,7 +17,7 @@ use aws_sdk_dynamodb::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_dynamodb::types::{
     AttributeValue, Delete, Put, ReturnValue, TransactWriteItem, Update,
 };
-use rumble_core::api::Rejected;
+use rumble_core::api::{BotColors, Rejected};
 use rumble_core::ids::{Division, WeightClass, parse_vid36, vid36};
 use rumble_core::store::{
     Alert, BatchMarker, BotItem, BotSource, BotState, LogItem, Reputation, ResultsTransaction, Run,
@@ -376,7 +376,22 @@ fn version_item(version: &VersionItem) -> Item {
     if let Some(url) = &version.url {
         item.insert("url".into(), s(url));
     }
+    if let Some(colors) = &version.colors {
+        item.insert("col".into(), s(json(colors)));
+    }
     item
+}
+
+fn json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("serializable")
+}
+
+/// A JSON attribute; absent is `T::default()`.
+fn opt_json<T: serde::de::DeserializeOwned + Default>(item: &Item, name: &str) -> StoreResult<T> {
+    match opt_s(item, name)? {
+        Some(text) => serde_json::from_str(&text).map_err(|_| bad(name)),
+        None => Ok(T::default()),
+    }
 }
 
 fn version_from(item: &Item) -> StoreResult<VersionItem> {
@@ -403,6 +418,7 @@ fn version_from(item: &Item) -> StoreResult<VersionItem> {
         created: n_or(item, "cr", 0)?,
         retired: opt_n(item, "ret")?,
         url: opt_s(item, "url")?,
+        colors: opt_json(item, "col")?,
     })
 }
 
@@ -498,6 +514,9 @@ fn run_value(run: &Run) -> AttributeValue {
     }
     map.insert("rec".into(), b(run.record.clone()));
     map.insert("held".into(), AttributeValue::Bool(run.held));
+    if !run.colors.is_empty() {
+        map.insert("col".into(), s(json(&run.colors)));
+    }
     AttributeValue::M(map)
 }
 
@@ -508,6 +527,7 @@ fn run_from(value: &AttributeValue) -> StoreResult<Run> {
         hash: opt_s(map, "h")?,
         record: get_b(map, "rec")?,
         held: get_bool(map, "held")?,
+        colors: opt_json(map, "col")?,
     })
 }
 
@@ -1049,6 +1069,21 @@ impl Store for DynamoStore {
         .map_err(map_err)
     }
 
+    fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()> {
+        block_on(
+            self.client
+                .update_item()
+                .table_name(&self.table)
+                .set_key(Some(version_key(vid)))
+                .update_expression("SET col = :col")
+                .condition_expression("attribute_exists(pk) AND attribute_not_exists(col)")
+                .expression_attribute_values(":col", s(json(colors)))
+                .send(),
+        )
+        .map(|_| ())
+        .map_err(map_err)
+    }
+
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         self.get(marker_key(batch_id))?
             .as_ref()
@@ -1363,10 +1398,23 @@ mod tests {
             created: 1,
             retired: None,
             url: Some("https://x".into()),
+            colors: None,
         };
         let item = version_item(&version);
         assert_eq!(item["sk"], s("V#rs"));
+        assert!(!item.contains_key("col"));
         assert_eq!(version_from(&item).unwrap(), version);
+        let colored = VersionItem {
+            colors: Some(BotColors {
+                body: Some("#000000".into()),
+                gun: None,
+                radar: Some("#ffffff".into()),
+            }),
+            ..version
+        };
+        let item = version_item(&colored);
+        assert_eq!(item["col"], s(r##"{"body":"#000000","radar":"#ffffff"}"##));
+        assert_eq!(version_from(&item).unwrap(), colored);
         let marker = BatchMarker {
             batch_id: "b-1".into(),
             uid: "g1".into(),
@@ -1404,6 +1452,7 @@ mod tests {
                 hash: None,
                 record: vec![9],
                 held: false,
+                colors: Vec::new(),
             }],
             uids: vec!["g1".into()],
             stage: 2,
@@ -1413,6 +1462,15 @@ mod tests {
             ttl: 6,
         };
         assert_eq!(verify_from(&verify_item(&verify)).unwrap(), verify);
+        let mut colored = verify.clone();
+        colored.runs[0].colors = vec![
+            None,
+            Some(BotColors {
+                gun: Some("#ff0000".into()),
+                ..Default::default()
+            }),
+        ];
+        assert_eq!(verify_from(&verify_item(&colored)).unwrap(), colored);
         let entry = SlotEntry {
             status: SlotStatus::Claimed,
             batch: "b-1".into(),

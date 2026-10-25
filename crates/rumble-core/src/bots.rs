@@ -141,6 +141,7 @@ pub fn submit<S: Store + ?Sized>(
         created: now,
         retired: None,
         url: source_url.map(str::to_string),
+        colors: None,
     };
     let homepage = homepage.and_then(non_empty);
     let item = match &bot {
@@ -312,6 +313,7 @@ pub fn import<S: Store + ?Sized>(
         created: now,
         retired: None,
         url: request.source_url.clone(),
+        colors: None,
     };
     let author = request
         .author

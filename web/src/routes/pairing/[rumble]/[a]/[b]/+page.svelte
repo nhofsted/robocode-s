@@ -36,7 +36,7 @@
 	<section class="duel panel">
 		{#each sides as s, i (s.bot.id)}
 			<div class="side" class:right={i === 1}>
-				<Tank colors={tankColors(s.bot.id)} size={88} heading={i === 0 ? 90 : 270} />
+				<Tank colors={tankColors(s.bot.id, s.bot.versions[0]?.colors)} size={88} heading={i === 0 ? 90 : 270} />
 				<div>
 					<a class="name" href={botHref(s.bot.id)}>{shortName(s.bot.id)}</a>
 					<div class="muted small">
@@ -57,10 +57,10 @@
 			role="img"
 			aria-label="{shortName(data.a.id)} {formatNumber(scoreA, 1)}%, {shortName(data.b.id)} {formatNumber(100 - scoreA, 1)}%"
 		>
-			<div class="fill a" style:width="{scoreA}%" style:background={css(tankColors(data.a.id).body)}>
+			<div class="fill a" style:width="{scoreA}%" style:background={css(tankColors(data.a.id, data.a.versions[0]?.colors).body)}>
 				<span>{formatNumber(scoreA, 1)}%</span>
 			</div>
-			<div class="fill b" style:width="{100 - scoreA}%" style:background={css(tankColors(data.b.id).body)}>
+			<div class="fill b" style:width="{100 - scoreA}%" style:background={css(tankColors(data.b.id, data.b.versions[0]?.colors).body)}>
 				<span>{formatNumber(100 - scoreA, 1)}%</span>
 			</div>
 		</div>

@@ -310,6 +310,44 @@ pub enum BattleStatus {
     Error,
 }
 
+/// The colours a robot gave its tank with `setColors` and the like, each `#rrggbb` (lower
+/// case); the parts it didn't colour are absent. Clients report them with a battle's
+/// results ([`RobotResult::colors`]), the backend keeps a bot version's once a second run
+/// of a battle confirmed them, and the data files publish them (`BotColors` in
+/// `web/src/lib/rumble/types.ts`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BotColors {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gun: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radar: Option<String>,
+}
+
+impl BotColors {
+    /// The colours of a protocol ARGB value (the alpha is dropped).
+    pub fn hex(argb: i32) -> String {
+        format!("#{:06x}", argb as u32 & 0xff_ffff)
+    }
+
+    /// These colours if they are some and all `#rrggbb`: what a client sends is checked
+    /// before it is kept.
+    pub fn checked(&self) -> Option<&BotColors> {
+        let ok = |part: &Option<String>| {
+            part.as_deref().is_none_or(|c| {
+                c.len() == 7
+                    && c.starts_with('#')
+                    && c[1..]
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            })
+        };
+        let some = self.body.is_some() || self.gun.is_some() || self.radar.is_some();
+        (some && ok(&self.body) && ok(&self.gun) && ok(&self.radar)).then_some(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RobotResult {
@@ -324,6 +362,10 @@ pub struct RobotResult {
     pub seconds: u32,
     pub thirds: u32,
     pub rank: u32,
+    /// The colours the robot set ([`BotColors`]), as of the first snapshot in which it had
+    /// set any. Absent where it set none, and from clients (or robot hosts) that don't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<BotColors>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -853,6 +895,32 @@ mod tests {
         );
         assert!(request.battles[2].robots.is_none());
         round_trip::<ResultsResponse>(RESULTS_RESPONSE);
+    }
+
+    #[test]
+    fn bot_colors() {
+        let json = RESULTS.replace(
+            r#""thirds": 0, "rank": 1}"#,
+            r##""thirds": 0, "rank": 1, "colors": {"body": "#000000", "gun": "#ff0000"}}"##,
+        );
+        let request: ResultsRequest = round_trip(&json);
+        let robots = request.battles[0].robots.as_ref().unwrap();
+        let colors = robots[0].colors.as_ref().unwrap();
+        assert_eq!(colors.body.as_deref(), Some("#000000"));
+        assert_eq!(colors.radar, None);
+        assert_eq!(colors.checked(), Some(colors));
+        assert_eq!(robots[1].colors, None);
+        assert_eq!(BotColors::hex(0xFF29_298C_u32 as i32), "#29298c");
+        assert_eq!(BotColors::hex(-1), "#ffffff");
+        let radar = |c: &str| BotColors {
+            radar: Some(c.into()),
+            ..Default::default()
+        };
+        assert!(radar("#a0b1c2").checked().is_some());
+        for c in ["#A0B1C2", "a0b1c2", "#a0b1c", "#a0b1c2d", "#g0b1c2", ""] {
+            assert_eq!(radar(c).checked(), None, "{c}");
+        }
+        assert_eq!(BotColors::default().checked(), None);
     }
 
     #[test]

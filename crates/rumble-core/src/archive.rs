@@ -78,6 +78,7 @@ mod tests {
             created: 1_792_843_200,
             retired: None,
             url: None,
+            colors: None,
         }
     }
 

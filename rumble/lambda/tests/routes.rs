@@ -202,6 +202,7 @@ fn verifiers_get_verification_work_first() {
                     hash: Some("a".repeat(64)),
                     record: vec![],
                     held: false,
+                    colors: Vec::new(),
                 }],
                 uids: vec!["g9".into()],
                 stage: 1,

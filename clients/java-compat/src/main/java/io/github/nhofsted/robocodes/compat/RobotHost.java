@@ -749,7 +749,8 @@ public final class RobotHost {
                 case ROUND_START -> {
                     peer.newRound();
                     var start = message.getRoundStart();
-                    proxy.startRound(Convert.commands(start.getCommands()), Convert.status(start.getStatus()));
+                    proxy.startRound(Convert.commands(start.getCommands(), peer.colors),
+                            Convert.status(start.getStatus()));
                 }
                 case TICK -> peer.deliver(message.getTick());
                 case ROUND_OVER -> {

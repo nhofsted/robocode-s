@@ -14,8 +14,8 @@ use robocode_s_runner::local::{Environment, host_info, prepare_with, run_local_b
 use robocode_s_runner::pool::Pool;
 use robocode_s_server::{Connection, DETERMINISTIC_RULES, ServerConfig};
 use rumble_core::api::{
-    BattleResult, BattleStatus, Failure, FailureReason, Info, RobotResult, RoundResult, Rules,
-    TrackClaim, WorkBattle, WorkBot,
+    BattleResult, BattleStatus, BotColors, Failure, FailureReason, Info, RobotResult, RoundResult,
+    Rules, TrackClaim, WorkBattle, WorkBot,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -354,7 +354,14 @@ impl Runner {
             .map(|r| (r.hash, r.track.sha256))
             .collect();
         let battle_hash = hash::battle_hash(ENGINE_VERSION, battle.seed, &pairs, results);
-        let robots = results.iter().map(robot_result).collect();
+        let robots = results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| RobotResult {
+                colors: observer.colors.get(i).cloned().flatten(),
+                ..robot_result(r)
+            })
+            .collect();
         let mut tracks = Vec::with_capacity(observer.rounds.len());
         let mut snapshots = Vec::new();
         let rounds = observer
@@ -435,7 +442,20 @@ fn robot_result(r: &v1::Results) -> RobotResult {
         seconds: r.seconds.max(0) as u32,
         thirds: r.thirds.max(0) as u32,
         rank: r.rank.max(0) as u32,
+        colors: None,
     }
+}
+
+/// The tank colours a robot set itself (`Colors.set_parts`), `None` where it set none of
+/// body, gun and radar, or its host doesn't say (older hosts: their battles report none).
+pub fn set_colors(colors: Option<&v1::Colors>) -> Option<BotColors> {
+    let c = colors?;
+    let part = |bit: u32, argb: i32| (c.set_parts & bit != 0).then(|| BotColors::hex(argb));
+    (c.set_parts & 0b111 != 0).then(|| BotColors {
+        body: part(1, c.body),
+        gun: part(2, c.gun),
+        radar: part(4, c.radar),
+    })
 }
 
 /// One finished round, as observed.
@@ -462,6 +482,9 @@ pub struct Observer {
     pub rounds: Vec<ObservedRound>,
     /// Something the observer didn't expect (a snapshot of another round).
     pub error: Option<String>,
+    /// Per robot, the tank colours it set ([`set_colors`]) in the first snapshot in which
+    /// it had set any: most robots set them once, at the start of `run()`.
+    pub colors: Vec<Option<BotColors>>,
 }
 
 impl Observer {
@@ -474,6 +497,7 @@ impl Observer {
             keep_snapshots: false,
             rounds: Vec::new(),
             error: None,
+            colors: Vec::new(),
         }
     }
 
@@ -495,6 +519,14 @@ impl Observer {
                 self.hasher
                     .get_or_insert_with(|| RoundHasher::new(round))
                     .snapshot(s);
+                if self.colors.len() < s.robots.len() {
+                    self.colors.resize(s.robots.len(), None);
+                }
+                for (seen, robot) in self.colors.iter_mut().zip(&s.robots) {
+                    if seen.is_none() {
+                        *seen = set_colors(robot.colors.as_ref());
+                    }
+                }
                 self.snapshots.push(s.clone());
                 None
             }
@@ -578,6 +610,74 @@ mod tests {
         // Robots that die together each get a first (classic): both are reported.
         let tie = results(&[(150.0, 2), (150.0, 2)]);
         assert_eq!(round_scores(Some(&second), &tie).1, vec![0, 1]);
+    }
+
+    #[test]
+    fn robots_report_the_colours_they_set_first() {
+        let classic = 0xFF29_298C_u32 as i32;
+        let colors = |set_parts: u32, body: i32| v1::Colors {
+            body,
+            gun: classic,
+            radar: -1,
+            scan: 0xFF00_00FF_u32 as i32,
+            bullet: -1,
+            set_parts,
+        };
+        // None set, an older host, only the scan: nothing to report.
+        assert_eq!(set_colors(None), None);
+        assert_eq!(set_colors(Some(&colors(0, 0xFF00_0000_u32 as i32))), None);
+        assert_eq!(set_colors(Some(&colors(8, classic))), None);
+        // Body and radar set: those, the gun left out.
+        assert_eq!(
+            set_colors(Some(&colors(5, 0xFF12_3456_u32 as i32))),
+            Some(BotColors {
+                body: Some("#123456".into()),
+                gun: None,
+                radar: Some("#ffffff".into()),
+            })
+        );
+
+        let rules = Rules {
+            rounds: 2,
+            width: 800,
+            height: 600,
+            gun_cooling_rate: 0.1,
+            inactivity_time: 450,
+            sentry_border: 100,
+            hide_enemy_names: false,
+        };
+        let snapshot = |round: i32, turn: i64, robot0: v1::Colors| {
+            server_message::Msg::TurnSnapshot(v1::TurnSnapshot {
+                round,
+                turn,
+                robots: vec![
+                    v1::RobotSnapshot {
+                        colors: Some(robot0),
+                        ..Default::default()
+                    },
+                    v1::RobotSnapshot {
+                        colors: Some(colors(0, classic)),
+                        ..Default::default()
+                    },
+                ],
+                bullets: vec![],
+            })
+        };
+        let mut observer = Observer::new(&rules);
+        observer.observe(&snapshot(0, 0, colors(0, classic)));
+        observer.observe(&snapshot(0, 1, colors(1, 0xFF00_0000_u32 as i32)));
+        // A robot that changes its colours later: the first ones count.
+        observer.observe(&snapshot(0, 2, colors(1, 0xFF00_00FF_u32 as i32)));
+        assert_eq!(
+            observer.colors,
+            [
+                Some(BotColors {
+                    body: Some("#000000".into()),
+                    ..Default::default()
+                }),
+                None
+            ]
+        );
     }
 
     #[test]

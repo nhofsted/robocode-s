@@ -377,6 +377,7 @@ mod tests {
             seconds: 0,
             thirds: 0,
             rank: 1,
+            colors: None,
         }
     }
 

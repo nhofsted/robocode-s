@@ -672,6 +672,7 @@ mod tests {
                 hash: Some("h".into()),
                 record: vec![],
                 held: false,
+                colors: Vec::new(),
             }],
             uids: vec!["g9".into()],
             stage: 1,
@@ -729,6 +730,7 @@ mod tests {
                 created: NOW,
                 retired: None,
                 url: None,
+                colors: None,
             })
             .unwrap();
         store

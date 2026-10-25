@@ -3,7 +3,6 @@
  */
 package io.github.nhofsted.robocodes.compat;
 
-import io.github.nhofsted.robocodes.protocol.v1.Colors;
 import io.github.nhofsted.robocodes.protocol.v1.RobotCommands;
 import io.github.nhofsted.robocodes.protocol.v1.Tick;
 import net.sf.robocode.peer.BulletCommand;
@@ -55,8 +54,8 @@ final class Convert {
     private Convert() {
     }
 
-    /** The robot's command state for {@code Execute}. */
-    static RobotCommands commands(ExecCommands c) {
+    /** The robot's command state for {@code Execute}; {@code colors} knows which colours it set. */
+    static RobotCommands commands(ExecCommands c, ColorTracker colors) {
         RobotCommands.Builder b = RobotCommands.newBuilder()
                 .setBodyTurnRemaining(c.getBodyTurnRemaining())
                 .setGunTurnRemaining(c.getGunTurnRemaining())
@@ -68,12 +67,7 @@ final class Convert {
                 .setAdjustRadarForBodyTurnSet(c.isAdjustRadarForBodyTurnSet())
                 .setMaxTurnRate(c.getMaxTurnRate())
                 .setMaxVelocity(c.getMaxVelocity())
-                .setColors(Colors.newBuilder()
-                        .setBody(c.getBodyColor())
-                        .setGun(c.getGunColor())
-                        .setRadar(c.getRadarColor())
-                        .setScan(c.getScanColor())
-                        .setBullet(c.getBulletColor()))
+                .setColors(colors.fromRobot(c))
                 .setScan(c.isScan())
                 .setIoRobot(c.isIORobot());
         for (BulletCommand bullet : c.getBullets()) {
@@ -96,8 +90,11 @@ final class Convert {
         return b.build();
     }
 
-    /** The server's copy of the command state (no one-shot parts), as classic returns it. */
-    static ExecCommands commands(RobotCommands c) {
+    /**
+     * The server's copy of the command state (no one-shot parts), as classic returns it, but
+     * with {@link ColorTracker#MARKER} for the colours, which {@code colors} keeps.
+     */
+    static ExecCommands commands(RobotCommands c, ColorTracker colors) {
         ExecCommands e = new ExecCommands();
         e.setBodyTurnRemaining(c.getBodyTurnRemaining());
         e.setGunTurnRemaining(c.getGunTurnRemaining());
@@ -114,13 +111,9 @@ final class Convert {
             e.setMaxVelocity(c.getMaxVelocity());
         }
         if (c.hasColors()) {
-            Colors colors = c.getColors();
-            e.setBodyColor(colors.getBody());
-            e.setGunColor(colors.getGun());
-            e.setRadarColor(colors.getRadar());
-            e.setScanColor(colors.getScan());
-            e.setBulletColor(colors.getBullet());
+            colors.fromServer(c.getColors());
         }
+        ColorTracker.mark(e);
         return e;
     }
 

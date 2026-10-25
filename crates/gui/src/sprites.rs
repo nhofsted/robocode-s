@@ -254,6 +254,15 @@ mod tests {
     }
 
     #[test]
+    fn default_colors_are_the_websites() {
+        // web/src/lib/components/tank-colors.spec.ts has the same values.
+        assert_eq!(
+            default_colors("sample.Fire"),
+            [[44, 150, 84], [100, 180, 131], [199, 60, 221]]
+        );
+    }
+
+    #[test]
     fn default_colors_are_stable_per_name() {
         assert_eq!(default_colors("sample.Fire"), default_colors("sample.Fire"));
         assert_ne!(

@@ -290,6 +290,7 @@ pub fn resolve<S: Store + ?Sized>(
             if !delete_claimed(store, engine, sort, &uid)? {
                 return Ok(Outcome::Ignored);
             }
+            confirm_colors(store, &item.bots, &original, &run)?;
             credit_user(store, config, &uid)?;
             credit_user(store, config, &original.uid)?;
             if original.held {
@@ -321,6 +322,7 @@ pub fn resolve<S: Store + ?Sized>(
     match (with_original, with_first) {
         (true, false) => {
             // The first verifier was wrong; the original stands.
+            confirm_colors(store, &item.bots, &original, &run)?;
             credit_user(store, config, &original.uid)?;
             credit_user(store, config, &uid)?;
             if original.held {
@@ -336,6 +338,7 @@ pub fn resolve<S: Store + ?Sized>(
         }
         (false, true) => {
             // The original was wrong. If it was counted, correct it.
+            confirm_colors(store, &item.bots, &first, &run)?;
             credit_user(store, config, &first.uid)?;
             credit_user(store, config, &uid)?;
             let corrected = !original.held;
@@ -384,6 +387,23 @@ pub fn resolve<S: Store + ?Sized>(
             })
         }
     }
+}
+
+/// Keeps the colours two agreeing runs of a battle report alike for a robot as its version's
+/// ([`Store::set_version_colors`]), unless the version has colours already: the first
+/// confirmed colours stay, also for robots whose colours change from battle to battle. Two
+/// users reporting the same colours for the same battle (the battle hash covers the colour
+/// values, through every snapshot's check) is what makes them trusted; a single post never
+/// sets them. `bots` is the battle's robot order.
+fn confirm_colors<S: Store + ?Sized>(store: &S, bots: &[u32], a: &Run, b: &Run) -> StoreResult<()> {
+    for ((vid, x), y) in bots.iter().zip(&a.colors).zip(&b.colors) {
+        if let (Some(x), Some(y)) = (x, y)
+            && x == y
+        {
+            ignore_existing(store.set_version_colors(*vid, x))?;
+        }
+    }
+    Ok(())
 }
 
 /// Deletes the item if it is still claimed by `uid`; `false` if it isn't.
@@ -551,6 +571,7 @@ pub fn create_rechecks<S: Store + ?Sized>(
                 hash: None,
                 record: record.to_bytes(),
                 held: false,
+                colors: Vec::new(),
             }],
             uids: vec![uid.to_string()],
             stage: 1,
@@ -623,6 +644,7 @@ mod tests {
             hash: Some(hash.to_string()),
             record: record(uid, score).to_bytes(),
             held,
+            colors: Vec::new(),
         }
     }
 
@@ -683,6 +705,123 @@ mod tests {
         assert_eq!(tier(&r, &c), Tier::Banned);
         assert_ne!(reporter_id("g1"), reporter_id("g2"));
         assert_eq!(reporter_id("g1"), reporter_id("g1"));
+    }
+
+    fn colors(body: &str) -> Option<crate::api::BotColors> {
+        Some(crate::api::BotColors {
+            body: Some(body.to_string()),
+            ..Default::default()
+        })
+    }
+
+    fn add_versions(store: &MemStore) {
+        for vid in [1, 2] {
+            store
+                .put_version(&crate::store::VersionItem {
+                    vid,
+                    bot: format!("a.Bot{vid}"),
+                    version: "1".into(),
+                    sha256: "ab".into(),
+                    size: 1,
+                    codesize: None,
+                    class: crate::ids::WeightClass::Mega,
+                    divisions: vec![Division::OneVsOne],
+                    state: crate::store::VersionState::Active,
+                    probation_battles: 0,
+                    probation_failures: 0,
+                    class_name: String::new(),
+                    created: 0,
+                    retired: None,
+                    url: None,
+                    colors: None,
+                })
+                .unwrap();
+        }
+    }
+
+    fn colors_of(store: &MemStore, vid: u32) -> Option<crate::api::BotColors> {
+        store.get_version(vid).unwrap().unwrap().colors
+    }
+
+    /// Resolves the check item as `uid`, with the colours its run reports.
+    fn resolve_colored(
+        store: &MemStore,
+        uid: &str,
+        hash: &str,
+        colors: Vec<Option<crate::api::BotColors>>,
+    ) -> Outcome {
+        claim(store, uid);
+        resolve(
+            store,
+            &config(),
+            1,
+            "0000000000001#b0.0",
+            Run {
+                colors,
+                ..run(uid, hash, 1500.0, false)
+            },
+            &format!("b-{uid}.0"),
+            NOW_MS,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn only_colours_two_runs_agree_on_are_kept() {
+        let store = MemStore::new();
+        add_versions(&store);
+        for uid in ["g1", "g2", "g3", "g4"] {
+            add_user(&store, uid, 60, UserState::New);
+        }
+        // The original run alone sets nothing.
+        let original = Run {
+            colors: vec![colors("#000000"), colors("#112233")],
+            ..run("g1", "h", 1500.0, false)
+        };
+        store.put_verify(&check_item(original.clone())).unwrap();
+        assert_eq!(colors_of(&store, 1), None);
+        // A matching run: the colours both report are kept, not those only one does.
+        let outcome = resolve_colored(&store, "g2", "h", vec![colors("#000000"), None]);
+        assert_eq!(outcome, Outcome::Matched);
+        assert_eq!(colors_of(&store, 1), colors("#000000"));
+        assert_eq!(colors_of(&store, 2), None);
+
+        // Another confirmed battle with other colours (a robot that changes them): the
+        // first stay; the other bot's are new.
+        store.put_verify(&check_item(original.clone())).unwrap();
+        let outcome = resolve_colored(
+            &store,
+            "g3",
+            "h",
+            vec![colors("#ffffff"), colors("#112233")],
+        );
+        assert_eq!(outcome, Outcome::Matched);
+        assert_eq!(colors_of(&store, 1), colors("#000000"));
+        assert_eq!(colors_of(&store, 2), colors("#112233"));
+    }
+
+    #[test]
+    fn a_majority_confirms_colours_and_a_mismatch_doesnt() {
+        let store = MemStore::new();
+        add_versions(&store);
+        for uid in ["g1", "g2", "g3"] {
+            add_user(&store, uid, 60, UserState::New);
+        }
+        let reported = vec![colors("#123456"), colors("#abcdef")];
+        let original = Run {
+            colors: reported.clone(),
+            ..run("g1", "wrong", 1500.0, false)
+        };
+        store.put_verify(&check_item(original)).unwrap();
+        // A different battle hash: nothing kept yet.
+        let outcome = resolve_colored(&store, "g2", "right", reported.clone());
+        assert_eq!(outcome, Outcome::TieBreak);
+        assert_eq!(colors_of(&store, 1), None);
+        // The third run agrees with the second: theirs count.
+        let outcome = resolve_colored(&store, "g3", "right", reported);
+        assert!(matches!(outcome, Outcome::Majority { .. }), "{outcome:?}");
+        assert_eq!(colors_of(&store, 1), colors("#123456"));
+        assert_eq!(colors_of(&store, 2), colors("#abcdef"));
     }
 
     #[test]

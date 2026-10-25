@@ -10,6 +10,7 @@ import {
 	SCHEMA_VERSION,
 	type Archive,
 	type BotDetails,
+	type BotColors,
 	type BotId,
 	type BotRumble,
 	type BotVersion,
@@ -192,7 +193,8 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 	const recordedBot = (b: Bot): RecordedBot => ({
 		bot: b.id,
 		version: b.versions[0].version,
-		sha16: b.versions[0].sha256.slice(0, 16)
+		sha16: b.versions[0].sha256.slice(0, 16),
+		...colorsOf(b.versions[0])
 	});
 	const rankIn = (rumble: RumbleId) =>
 		new Map(rumbles.get(rumble)?.rows.map((r) => [r.id, r.rank]) ?? []);
@@ -230,7 +232,14 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 				]);
 			}
 			rounds.sort((x, y) => (x[0] < y[0] ? -1 : 1));
-			pairs.push({ opp: opp.id, oppVersion: opp.versions[0].version, oppSha16: recordedBot(opp).sha16, rounds });
+			const oppColors = opp.versions[0].colors;
+			pairs.push({
+				opp: opp.id,
+				oppVersion: opp.versions[0].version,
+				oppSha16: recordedBot(opp).sha16,
+				...(oppColors ? { oppColors } : {}),
+				rounds
+			});
 		}
 		if (pairs.length === 0) return undefined;
 		pairs.sort((x, y) => (x.opp < y.opp ? -1 : 1));
@@ -427,7 +436,23 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 		day = last && fresh ? Math.floor(rand() * 7) : Math.floor(day * (0.25 + 0.5 * rand()));
 	}
 	for (let i = 0; i < versions.length - 1; i++) versions[i].retiredAt = versions[i + 1].addedAt;
-	return versions.reverse();
+	versions.reverse();
+	// A third of the bots have the colours their robot sets (from the id, so the seeded data
+	// doesn't move); some colour only the body.
+	const h = hash(`colors:${id}`);
+	if (h % 3 === 0) versions[0].colors = fixtureColors(h);
+	return versions;
+}
+
+function fixtureColors(h: number): BotColors {
+	const hex = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0');
+	const body = hex(Math.imul(h, 2654435761));
+	return h % 4 === 0 ? { body } : { body, gun: hex(Math.imul(h, 40503)), radar: hex(Math.imul(h, 69069)) };
+}
+
+/** `{ colors }` where the version has colours, to spread into data that carries them. */
+function colorsOf(v: BotVersion): { colors?: BotColors } {
+	return v.colors ? { colors: v.colors } : {};
 }
 
 function buildRumble(
@@ -567,7 +592,8 @@ function buildRumble(
 			...rounded,
 			pairings: m.pairings,
 			battles: m.battles,
-			rankWeekAgo: weekAgo
+			rankWeekAgo: weekAgo,
+			...colorsOf(bot.versions[0])
 		};
 	});
 

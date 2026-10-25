@@ -167,6 +167,34 @@ mod tests {
     }
 
     #[test]
+    fn round_hash_ignores_which_colours_were_set() {
+        // Hosts that say which colours a robot set and hosts that don't must agree: the
+        // values count, the flag doesn't.
+        let result = v1::RoundResult::default();
+        let mut old_host = snapshot(1, 5.0);
+        old_host.robots[0].colors = Some(v1::Colors {
+            body: 0xFF10_2030_u32 as i32,
+            gun: 0xFF29_298C_u32 as i32,
+            radar: 0xFF29_298C_u32 as i32,
+            scan: 0xFF00_00FF_u32 as i32,
+            bullet: -1,
+            set_parts: 0,
+        });
+        let mut new_host = old_host.clone();
+        new_host.robots[0].colors.as_mut().unwrap().set_parts = 1;
+        assert_eq!(
+            round_hash(0, std::slice::from_ref(&old_host), &result),
+            round_hash(0, std::slice::from_ref(&new_host), &result)
+        );
+        let mut other = old_host.clone();
+        other.robots[0].colors.as_mut().unwrap().body = 0xFF10_2031_u32 as i32;
+        assert_ne!(
+            round_hash(0, &[old_host], &result),
+            round_hash(0, &[other], &result)
+        );
+    }
+
+    #[test]
     fn battle_hash_is_the_documented_layout() {
         let rounds = [([1u8; 32], [2u8; 32]), ([3u8; 32], [4u8; 32])];
         let results = [

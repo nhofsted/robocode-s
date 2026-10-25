@@ -41,6 +41,8 @@ pub struct Member {
     pub country: Option<String>,
     /// Rank one week ago (from the snapshot), if the bot was ranked then.
     pub rank_week_ago: Option<u32>,
+    /// The version's colours, where known.
+    pub colors: Option<crate::data::BotColors>,
 }
 
 /// One pairing of a bot, from its side.
@@ -426,6 +428,7 @@ impl RumbleMetrics {
                         pairings: bot.pairing_count,
                         battles: bot.battles,
                         rank_week_ago: member.rank_week_ago,
+                        colors: member.colors.clone(),
                         metrics: rounded(&bot.metrics),
                     }
                 })
@@ -484,6 +487,7 @@ mod tests {
             author: "x".to_string(),
             country: None,
             rank_week_ago: None,
+            colors: None,
         }
     }
 

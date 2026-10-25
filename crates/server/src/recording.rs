@@ -50,7 +50,9 @@ impl Recorder {
 }
 
 /// The hash a snapshot is verified by: FNV-1a over its encoding without output, paint, CPU
-/// times (timing) and debug properties: not battle state.
+/// times (timing), debug properties and which colours robots set (`Colors.set_parts`, which
+/// older hosts don't send): not battle state. The rumble's round hashes include it, so what
+/// it covers must not change between versions.
 pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
     let mut s = snapshot.clone();
     for r in &mut s.robots {
@@ -59,6 +61,9 @@ pub fn check(snapshot: &v1::TurnSnapshot) -> u64 {
         r.cpu_nanos = 0;
         r.budget_nanos = 0;
         r.debug_properties.clear();
+        if let Some(colors) = &mut r.colors {
+            colors.set_parts = 0;
+        }
     }
     s.encode_to_vec()
         .iter()
@@ -251,6 +256,42 @@ pub fn round_result(battle: &Battle) -> v1::RoundResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_check_ignores_which_colours_were_set() {
+        let colors = v1::Colors {
+            body: 0xFF29_298C_u32 as i32,
+            gun: 0xFF29_298C_u32 as i32,
+            radar: 0xFF29_298C_u32 as i32,
+            scan: 0xFF00_00FF_u32 as i32,
+            bullet: -1,
+            set_parts: 0,
+        };
+        let snapshot = |colors: v1::Colors| v1::TurnSnapshot {
+            round: 2,
+            turn: 7,
+            robots: vec![v1::RobotSnapshot {
+                x: Some(18.0),
+                y: Some(400.5),
+                colors: Some(colors),
+                ..Default::default()
+            }],
+            bullets: vec![],
+        };
+        let without = snapshot(colors);
+        let with = snapshot(v1::Colors {
+            set_parts: 0b11111,
+            ..colors
+        });
+        assert_ne!(with.encode_to_vec(), without.encode_to_vec());
+        assert_eq!(check(&with), check(&without));
+        // The colours themselves count.
+        let other = snapshot(v1::Colors {
+            gun: 0xFF00_0000_u32 as i32,
+            ..colors
+        });
+        assert_ne!(check(&other), check(&without));
+    }
 
     #[test]
     fn warns_only_about_another_engine_version() {

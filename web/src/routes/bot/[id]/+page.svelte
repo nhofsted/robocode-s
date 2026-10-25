@@ -128,7 +128,7 @@
 	</p>
 
 	<header class="head">
-		<Tank colors={tankColors(bot.id)} size={88} heading={20} gunHeading={60} radarHeading={100} />
+		<Tank colors={tankColors(bot.id, bot.versions[0]?.colors)} size={88} heading={20} gunHeading={60} radarHeading={100} />
 		<div>
 			<h1>{shortName(bot.id)} <span class="version mono">{current.version}</span></h1>
 			<p class="sub">
@@ -314,7 +314,7 @@
 							<td class="num">{p.opponentRank ?? '–'}</td>
 							<td>
 								<a class="opp" href={pairingHref(p.opponent)}>
-									<Tank colors={tankColors(p.opponent)} size={26} heading={270} />
+									<Tank colors={tankColors(p.opponent, opponents.get(p.opponent)?.colors)} size={26} heading={270} />
 									<Flag code={opponents.get(p.opponent)?.country} />
 									{shortName(p.opponent)} <span class="mono muted">{p.opponentVersion}</span>
 								</a>

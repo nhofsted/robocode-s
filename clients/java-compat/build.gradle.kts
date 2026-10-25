@@ -27,6 +27,10 @@ dependencies {
     runtimeOnly(libs.kotlin.stdlib.classic)
     implementation(libs.protobuf.java)
     implementation(project(":clients:java-determinism"))
+
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 protobuf {
@@ -50,4 +54,8 @@ application {
 
 tasks.withType<JavaCompile>().configureEach {
     options.release = 21
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

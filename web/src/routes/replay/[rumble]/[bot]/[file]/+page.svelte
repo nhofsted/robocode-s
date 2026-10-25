@@ -28,6 +28,7 @@
 	url={trackUrlMelee(data.rec.engine, data.rec, round.file)}
 	names={displayNames(round.robots.map((r) => r.bot))}
 	colorKeys={round.robots.map((r) => r.bot)}
+	colors={round.robots.map((r) => r.colors)}
 	fighters={round.robots.map((r) => ({
 		id: r.bot,
 		version: r.version,

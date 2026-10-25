@@ -258,22 +258,36 @@ pub fn sprite(
     Shape::mesh(mesh)
 }
 
-/// A robot's body, gun, radar and bullet colours.
+/// Classic's default body, gun and radar colour (`ExecCommands.defaultBodyColor`).
+const CLASSIC_TANK: i32 = 0xFF29_298C_u32 as i32;
+
+/// Which of its tank's body, gun and radar a robot coloured itself (`Colors.set_parts`).
+/// Hosts that don't say (older ones, and recordings and tracks made with them) send 0
+/// there: then a part is set unless it is 0 ("none") or all three are classic's default,
+/// which is what a classic robot that set none sends.
+pub fn tank_parts_set(c: &v1::Colors) -> [bool; 3] {
+    let values = [c.body, c.gun, c.radar];
+    if c.set_parts != 0 {
+        return [0, 1, 2].map(|bit| c.set_parts & 1 << bit != 0);
+    }
+    let classic = values.iter().all(|&v| v == CLASSIC_TANK);
+    values.map(|v| v != 0 && !classic)
+}
+
+/// A robot's body, gun, radar and bullet colours: the parts it didn't colour itself in its
+/// website colours ([`sprites::default_colors`]), the bullet in classic's when it set none.
 pub fn colors(statics: &v1::RobotStatics, snapshot: &v1::RobotSnapshot) -> ([Rgb; 3], Color32) {
     let defaults = sprites::default_colors(&statics.full_class_name);
     let c = snapshot.colors.unwrap_or_default();
-    let pick = |argb: i32, default: Rgb| {
-        if argb == 0 {
-            default
-        } else {
+    let set = tank_parts_set(&c);
+    let pick = |i: usize, argb: i32| {
+        if set[i] {
             sprites::rgb(argb)
+        } else {
+            defaults[i]
         }
     };
-    let tank = [
-        pick(c.body, defaults[0]),
-        pick(c.gun, defaults[1]),
-        pick(c.radar, defaults[2]),
-    ];
+    let tank = [pick(0, c.body), pick(1, c.gun), pick(2, c.radar)];
     let bullet = if c.bullet == 0 {
         BULLET
     } else {
@@ -845,6 +859,56 @@ fn outline(t: Transform, shape: &v1::Shape) -> Vec<(Vec<Pos2>, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn robots_that_colour_nothing_get_their_website_colours() {
+        let statics = v1::RobotStatics {
+            full_class_name: "nz.jdc.nano.PatternAdept".into(),
+            ..Default::default()
+        };
+        let website = sprites::default_colors("nz.jdc.nano.PatternAdept");
+        let snapshot = |colors: v1::Colors| v1::RobotSnapshot {
+            colors: Some(colors),
+            ..Default::default()
+        };
+        let classic = v1::Colors {
+            body: CLASSIC_TANK,
+            gun: CLASSIC_TANK,
+            radar: CLASSIC_TANK,
+            scan: 0xFF00_00FF_u32 as i32,
+            bullet: -1,
+            set_parts: 0,
+        };
+        // A host that says none were set, and an older one that sends classic's defaults.
+        assert_eq!(colors(&statics, &snapshot(classic)).0, website);
+        assert_eq!(colors(&statics, &v1::RobotSnapshot::default()).0, website);
+        // Classic's white bullet stays.
+        assert_eq!(colors(&statics, &snapshot(classic)).1, Color32::WHITE);
+        // Only the gun set (to classic's blue, even): the rest in website colours.
+        let gun = v1::Colors {
+            set_parts: 2,
+            ..classic
+        };
+        assert_eq!(
+            colors(&statics, &snapshot(gun)).0,
+            [website[0], [0x29, 0x29, 0x8C], website[2]]
+        );
+        // An older host and a robot that set its colours (Fe4r: black, red, white).
+        let fe4r = v1::Colors {
+            body: 0xFF00_0000_u32 as i32,
+            gun: 0xFFFF_0000_u32 as i32,
+            radar: -1,
+            ..classic
+        };
+        assert_eq!(
+            colors(&statics, &snapshot(fe4r)).0,
+            [[0, 0, 0], [255, 0, 0], [255, 255, 255]]
+        );
+        assert_eq!(tank_parts_set(&fe4r), [true; 3]);
+        // 0 is "none".
+        let none = v1::Colors { gun: 0, ..fe4r };
+        assert_eq!(tank_parts_set(&none), [true, false, true]);
+    }
 
     #[test]
     fn the_turn_rate_counts_every_turn_a_frame_skips() {

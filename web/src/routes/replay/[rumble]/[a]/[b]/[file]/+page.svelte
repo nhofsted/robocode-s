@@ -33,6 +33,7 @@
 	url={trackUrl1v1(found.engine, found.a, found.b, round.file)}
 	names={displayNames(robots.map((r) => r.bot))}
 	colorKeys={robots.map((r) => r.bot)}
+	colors={robots.map((r) => r.colors)}
 	fighters={robots.map((r) => ({
 		id: r.bot,
 		version: r.version,

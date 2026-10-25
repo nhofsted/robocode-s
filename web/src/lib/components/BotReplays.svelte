@@ -78,7 +78,7 @@
 					<tr>
 						<td>
 							<a class="opp" href={resolve('/pairing/[rumble]/[a]/[b]', { rumble, a: bot, b: o.opponent }) + '#replays'}>
-								<Tank colors={tankColors(o.opponent)} size={26} heading={270} />
+								<Tank colors={tankColors(o.opponent, o.colors)} size={26} heading={270} />
 								{shortName(o.opponent)} <span class="mono muted">{o.version}</span>
 							</a>
 						</td>

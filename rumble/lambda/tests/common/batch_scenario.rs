@@ -155,6 +155,7 @@ fn version(vid: u32, bot: u32, version: &str, state: VersionState) -> VersionIte
         created: T0 - 86_400 + u64::from(vid),
         retired: None,
         url: None,
+        colors: None,
     }
 }
 

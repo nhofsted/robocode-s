@@ -619,6 +619,7 @@ mod tests {
             created: NOW - 1000 + u64::from(vid),
             retired: None,
             url: None,
+            colors: None,
         }
     }
 

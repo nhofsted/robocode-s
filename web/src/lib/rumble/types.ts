@@ -19,6 +19,19 @@ export type RumbleId = string;
 /** Bot id: the robot's fully qualified class name without version (e.g. `sample.Walls`). */
 export type BotId = string;
 
+/**
+ * The colours a bot version's robot gives its tank (`setColors` and the like), each `#rrggbb`
+ * in lower case; parts it doesn't colour are absent. The rumble learns them from battles that
+ * a second volunteer confirmed, so they are absent (or null) until then, and for robots that
+ * set none: the site then derives the tank's colours from the bot id (`tankColors`), part by
+ * part. Added within v1.
+ */
+export interface BotColors {
+	body?: string;
+	gun?: string;
+	radar?: string;
+}
+
 /** `/data/v1/rumbles.json` */
 export interface RumbleIndex {
 	schema: typeof SCHEMA_VERSION;
@@ -88,6 +101,8 @@ export interface RankingRow extends Metrics {
 	battles: number;
 	/** Rank by APS one week ago; null for bots that were not ranked then. */
 	rankWeekAgo: number | null;
+	/** The ranked version's colours (additive; absent where unknown). */
+	colors?: BotColors | null;
 }
 
 /** `/data/v1/bots/<id>.json` */
@@ -131,6 +146,8 @@ export interface BotVersion {
 	addedAt: string;
 	/** Set when the version was replaced or retired. */
 	retiredAt: string | null;
+	/** The version's colours (additive; absent where unknown). */
+	colors?: BotColors | null;
 }
 
 export interface BotRumble extends Metrics {
@@ -235,6 +252,8 @@ export interface RecordedBot {
 	version: string;
 	/** The first 16 hex digits of the jar's SHA-256. */
 	sha16: string;
+	/** The version's colours (additive; absent where unknown). */
+	colors?: BotColors | null;
 }
 
 /**
@@ -253,11 +272,15 @@ export interface Recordings1v1 {
 	bot: BotId;
 	version: string;
 	sha16: string;
+	/** The bot's colours (additive; absent where unknown). */
+	colors?: BotColors | null;
 	/** Sorted by opponent id. */
 	pairs: {
 		opp: BotId;
 		oppVersion: string;
 		oppSha16: string;
+		/** The opponent's colours (additive; absent where unknown). */
+		oppColors?: BotColors | null;
 		/** Sorted by file. */
 		rounds: Round1v1[];
 	}[];

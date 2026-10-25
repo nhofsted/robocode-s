@@ -207,7 +207,8 @@ Assignments are therefore **not stored**: the token is the assignment. What make
    "battleHash": "<hex sha256>",
    "robots": [{"score": 4123.5, "survival": 1100, "lastSurvivorBonus": 220, "bulletDamage": 2201.3,
                "bulletDamageBonus": 312.4, "ramDamage": 12.0, "ramDamageBonus": 0,
-               "firsts": 22, "seconds": 13, "thirds": 0, "rank": 1}, {"...": "..."}],
+               "firsts": 22, "seconds": 13, "thirds": 0, "rank": 1,
+               "colors": {"body": "#000000", "gun": "#ff0000", "radar": "#ffffff"}}, {"...": "..."}],
    "rounds": [{"turns": 912, "winner": 0, "scores": [151.2, 60.3],
                "hash": "<hex sha256>", "track": {"sha256": "<hex>", "size": 3401}}]},
   {"index": 1, "status": "robotFailed", "failure": {"robot": 1, "reason": "load", "detail": "class not found"}},
@@ -217,6 +218,7 @@ Assignments are therefore **not stored**: the token is the assignment. What make
 
 - One post per batch, with every battle of it. Battles the client didn't run (stopped, deadline near) are `notRun`. `robotFailed` reasons: `load` (the robot couldn't be described or never connected), `crash` (its process ended during the battle); the battle's other fields are optional then. `error` is a client-side failure (no JRE, sandbox broken): not counted, and the client stops after 3 in a row.
 - `robots` in the battle's robot order, as classic's results (the CLI's JSON results without `name`). `rounds[i].scores` is each robot's score in round `i` (the per-round difference of the cumulative `RoundResult`), `firsts` the robots whose `firsts` rose in that round (classic gives robots that die together a first each, so a round can have several; added 2026-10-24, absent from older clients), and `winner` the one robot whose `firsts` rose, or `-1` if none or several did (a tie fills no "rounds won by" slot). The server counts wins from `firsts`, or from `winner` when `firsts` is absent.
+- `robots[i].colors` (optional, added 2026-10-25): the tank colours the robot set itself (`rumble_core::api::BotColors`, `#rrggbb`, only the parts it set), from the first snapshot in which it had set any (`Colors.set_parts` from the robot host). Absent for robots that set none and from older clients or hosts. They are not validated with the battle: malformed ones are dropped. The server keeps them with a verification run and stores a version's colours only when two agreeing runs of a battle report the same (§11.3).
 - Hashes are defined in §13.4.
 
 Response 200:
@@ -335,10 +337,10 @@ Table `rumble` (prod) / `rumble-dev`: partition key `pk` (S), sort key `sk` (S),
 | Token index | `U#<uid>` | `T#<first 12 hex of hash>` | `h` (full hash), `k`, `lbl`, `cr` | sessions: expiry |
 | Counter | `CTR` | `vid` | `n` (N) | - |
 | Bot | `BOT#<bot id>` | `M` | `au` (author name), `uid` (owner, if claimed), `hp`, `ds` (description), `dv` (SS divisions), `vs` (L of vids, newest first), `cur` (current ranked vid), `st` (`active`/`retired`/`removed`), `cr`, `src` (`import`/`submit`) | - |
-| Version | `REG` | `V#<vid36>` | `bot`, `ver`, `sha`, `sz`, `cs` (codesize or absent), `wc` (`mega`/`mini`/`micro`/`nano`), `dv` (SS), `st` (`probation`/`active`/`failed`/`retired`/`removed`), `pb` (probation battles), `pf` (probation failures), `cls` (main class), `cr`, `ret` (retired at), `url` (source URL) | - |
+| Version | `REG` | `V#<vid36>` | `bot`, `ver`, `sha`, `sz`, `cs` (codesize or absent), `wc` (`mega`/`mini`/`micro`/`nano`), `dv` (SS), `st` (`probation`/`active`/`failed`/`retired`/`removed`), `pb` (probation battles), `pf` (probation failures), `cls` (main class), `cr`, `ret` (retired at), `url` (source URL), `col` (JSON `BotColors`, the robot's confirmed colours, §11.3; absent until then) | - |
 | Batch marker | `B#<batchId>` | `B` | `uid`, `acc` (accepted indices, binary), `rej` (JSON of rejections), `slots` (SS of claimed slot ids) | `exp` + 7 days |
 | Result log | `R#<E>#<YYYYMMDDHH>` (post time, UTC) | `<post ms>#<batchId>` | `uid`, `recs` (B: concatenated records), `nb` (N battles), `held` (BOOL, quarantined user) | 400 days |
-| Verification | `V#<E>` | `<created ms>#<id>` | `div`, `seed`, `bots` (L of vids), `rounds`, `runs` (L of `{uid, h, rec, held}`), `uids` (SS), `stage` (1, 2), `cl` (claimant uid), `cu` (claim until), `kind` (`check`/`probation`/`recheck`) | 30 days |
+| Verification | `V#<E>` | `<created ms>#<id>` | `div`, `seed`, `bots` (L of vids), `rounds`, `runs` (L of `{uid, h, rec, held, col}`; `col` the JSON of the colours each robot set as reported, absent when none were), `uids` (SS), `stage` (1, 2), `cl` (claimant uid), `cu` (claim until), `kind` (`check`/`probation`/`recheck`) | 30 days |
 | Slot | `S#<E>#<division>#<key>` | `S` | `m` (M: slot id → `{st: c/f, b: batchId, r: round, h: sha256 b64, n: size, x: claim expiry, sd: seed, v: L of N}`; `v` (M6) is the battle's robot order, the vids as passed to `claim_battle`, absent in entries written before M6), `full` (BOOL) | - |
 | Alert | `ALERT` | `<ms>#<id>` | `kind`, `text`, `ref` | 90 days |
 | Watch (deferred after M6, #113, model only) | `W#<E>` | `<ms>#<id>` | `div`, `bots`, `seed`, `round`, `uid`, `st` (`open`/`claimed`/`done`), `cl`, `cu` | 1 day |
@@ -485,6 +487,7 @@ At `POST results`, for each accepted `ok` battle of a user in state `new`: with 
 
 A verifier's `verify` battle comes back in its results post (the token's `ref` names the `V#` item). The server reads the item and compares `battleHash`:
 
+- **Colours:** when two runs agree (a stage 1 match, or the majority of stage 2), each robot's colours that both report alike become its version's `col`, with an update conditioned on `col` being absent: the first confirmed colours stay (a robot that changes its colours keeps the first ones confirmed). A single post never sets them. The battle hash covers the colour values (through every snapshot's `check`), not which parts were set or the reported `colors`, which is why both runs must report the same.
 - **Stage 1, match:** both users `rep += 1`, `vm += 1` (a quarantined original: `qm += 1`; at `rep.quarantineMatches` it returns to `new` with `rep` 0). If the original was held, its record is released: appended to the verifier's log item as a record with the original's `uid`. Delete the item. The verifier's own run is not counted again (the battle counted once already).
 - **Stage 1, mismatch:** add the verifier's run, `stage: 2`, clear the claim. The next verifier (not in `uids`) breaks the tie.
 - **Stage 2:** three runs. If two hashes agree, the third user is **penalized**: `rep = 0`, `st = quar`, `mm += 1`, mismatch time appended to `mmt`. If the penalized run is the one that was counted, the server appends a correction to the log: the original record with weight −1 and the majority's record with weight +1, both `uid: system`. The two that agreed get `rep += 1`. `rep.recheckOnPenalty` of the penalized user's most recent counted battles (found by querying the last 48 hourly `R#` partitions, filtered by `uid`) get `V#` items of `kind: recheck`, each a battle that is corrected the same way if it turns out wrong. If all three disagree: an **alert** (`ALERT` item and the log line `ALERT engine-mismatch <id>`, which a CloudWatch metric filter turns into an alarm e-mail), nobody is penalized, the counted result stays.
@@ -577,7 +580,7 @@ loop:
 
 ### 13.4 Hashes and tracks
 
-- **Round hash** = SHA-256 of `"rsr1"` ‖ `u32 LE round` ‖ for every `TurnSnapshot` of the round in order, `u64 LE server::recording::check(snapshot)` ‖ the prost encoding of the round's `RoundResult`. `check` already leaves out console output, paint, CPU times and debug properties.
+- **Round hash** = SHA-256 of `"rsr1"` ‖ `u32 LE round` ‖ for every `TurnSnapshot` of the round in order, `u64 LE server::recording::check(snapshot)` ‖ the prost encoding of the round's `RoundResult`. `check` already leaves out console output, paint, CPU times and debug properties, and which colours robots set (`Colors.set_parts`, which older robot hosts don't send); the colour values count.
 - **Track:** the round as a `replay::Track` (ADR 0017) built from its snapshots: `rumble_client::track::from_snapshots(rules, snapshots) -> Track` (positions ×2, headings to 1/1024 turn, energy ×100, bullets from their first and last snapshot state, `engine_version` = `ENGINE_VERSION`), encoded with `replay::encode`; `track.sha256` = SHA-256 of the bytes. Deterministic (fdlibm), so every volunteer gets the same bytes.
 - **Battle hash** = SHA-256 of `"rsb1"` ‖ `u32 LE engine` ‖ `i64 LE seed` ‖ per round (round hash ‖ track sha256) ‖ the prost encoding of each robot's final `Results` in robot order.
 - Verification compares battle hashes; the per-round hashes let a mismatch report name the first round that differs (logged with the alert).
