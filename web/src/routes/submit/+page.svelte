@@ -120,7 +120,7 @@
 					</p>
 				{:else}
 					<p>
-						<input type="url" placeholder="https://example.com/my.Robot_1.0.jar" aria-label="URL of the jar" bind:value={url} />
+						<input type="url" placeholder="https://example.com/jd.MyRobot_1.0.jar" aria-label="URL of the jar" bind:value={url} />
 					</p>
 					<p class="muted small">The rumble fetches it once (10 s limit, up to 3 redirects).</p>
 				{/if}

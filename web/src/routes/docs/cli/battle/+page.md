@@ -11,7 +11,7 @@ Runs a battle and prints the results as a table (or JSON). Robots are class name
 
 ```sh
 robocode-s battle sample.Fire,sample.Walls,sampleteam.MyFirstTeam --rounds 10
-robocode-s battle my.Robot*,sample.Walls --jar build/classes/java/main --seed 42
+robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main --seed 42
 ```
 
 `@ide` is a robot you debug from your IDE: see [`ide-config`](/docs/cli/ide-config). One `@ide` per robot, after the others.
@@ -35,7 +35,7 @@ robocode-s battle my.Robot*,sample.Walls --jar build/classes/java/main --seed 42
 
 | Option | Meaning |
 |---|---|
-| `--jar PATH` | A robot jar, or a class folder (an IDE's output, read in place; name its robots with classic's `*`, such as `my.Robot*`). Repeatable. Default: `$ROBOCODES_ROBOT_JARS`, else the installation's robots, or the sample robots of a source tree. |
+| `--jar PATH` | A robot jar, or a class folder (an IDE's output, read in place; name its robots with classic's `*`, such as `jd.MyRobot*`). Repeatable. Default: `$ROBOCODES_ROBOT_JARS`, else the installation's robots, or the sample robots of a source tree. |
 | `--memory MB` | Heap per robot JVM (default 512). |
 | `--warm N` | Start N robot JVMs while the robots are looked up, instead of afterwards (default: one per robot; 0 starts them when the battle does). |
 | `--ide-port N` | The port robots from your IDE connect to (default 7878). |

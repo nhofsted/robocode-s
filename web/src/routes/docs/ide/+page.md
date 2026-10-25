@@ -5,6 +5,8 @@ description: Write a robot in IntelliJ IDEA, Eclipse or VS Code, build it with G
 
 You write a robot in your IDE against classic Robocode's API, and robocode-s runs the folder your IDE compiles into. Recompile, start a battle, and it runs the new code. No packaging step.
 
+The examples on this page use Jane Doe's robot, `jd.MyRobot`: [her whole path](/docs/robot-development/example) from an empty folder to a release is worked out in full. Use your own package and class name.
+
 Breakpoints and stepping work too: your IDE's own debugger starts the robot, and robocode-s waits for it ([debug it from the IDE](#debug-it-with-your-ides-debugger), below).
 
 ## 1. Get the API
@@ -68,10 +70,10 @@ Put robot metadata in `src/main/resources/<package>/<Robot>.properties` ([Packag
 A folder of class files is a development folder: robocode-s reads it in place, and its robots are named with classic's `*` (a development robot has no fixed version).
 
 ```sh
-robocode-s battle my.Robot*,sample.Walls --jar build/classes/java/main
+robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main
 ```
 
-In the GUI, open the options (the gear) and add the folder under the robot folders (`build/classes/java/main`, `target/classes`, or `bin` for Eclipse). Your robot appears in Start Battle; select it, add opponents and start. If its `.properties` names a version, the name is `my.Robot 1.0*`.
+In the GUI, open the options (the gear) and add the folder under the robot folders (`build/classes/java/main`, `target/classes`, or `bin` for Eclipse). Your robot appears in Start Battle; select it, add opponents and start. If its `.properties` names a version, the name is `jd.MyRobot 1.0*`.
 
 Recompile in the IDE and the next battle is new code. A battle already running keeps the old one.
 
@@ -80,16 +82,16 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 1. New Project, Java, build system Gradle or Maven. Use the snippets above (IDEA reads the build file; pick a JDK 21 and keep `release` at 21).
 
    **Added the build file afterwards?** IDEA only reads `pom.xml` or `build.gradle.kts` in a project it created with that build system. In a plain Java project, `src/main/java` is just a folder, and nothing compiles against `robocode.api`. Right-click `pom.xml`, *Add as Maven Project* (Gradle: right-click `build.gradle.kts`, *Link Gradle Project*). You know it worked when `src/main/java` turns blue, `src/main/resources` purple, and *External Libraries* lists `robocode.api`.
-2. Write `src/main/java/yourinitials/Kestrel.java` extending `AdvancedRobot`.
+2. Write `src/main/java/jd/MyRobot.java` extending `AdvancedRobot`.
 3. Build with Ctrl+F9 (Build Project) or `./gradlew classes`. The output is `build/classes/java/main` (Gradle) or `target/classes` (Maven). Without a build tool: File, Project Structure, add `robocode.api-1.11.1.jar` as a library, and the output is `out/production/<module>`.
-4. Add a Run configuration of type Shell Script, or an External Tool (Settings, Tools, External Tools), running `robocode-s battle yourinitials.Kestrel*,sample.Walls --jar $ProjectFileDir$/build/classes/java/main`, so one key builds and fights.
+4. Add a Run configuration of type Shell Script, or an External Tool (Settings, Tools, External Tools), running `robocode-s battle jd.MyRobot*,sample.Walls --jar $ProjectFileDir$/build/classes/java/main`, so one key builds and fights.
 
 ## Eclipse
 
 1. File, New, Java Project (or Gradle/Maven project with the snippets above). Set the compiler compliance to 21: Project, Properties, Java Compiler.
 2. Project, Properties, Java Build Path, Libraries, Add External JARs: `robocode.api-1.11.1.jar` (skip this with Gradle or Maven).
 3. Eclipse builds on save into `bin` (plain projects) or `build/classes/java/main` / `target/classes` (Gradle, Maven). Point robocode-s at that folder.
-4. Optional: Run, External Tools Configurations, a Program running `robocode-s` with `battle yourinitials.Kestrel*,sample.Walls --jar ${project_loc}/bin`.
+4. Optional: Run, External Tools Configurations, a Program running `robocode-s` with `battle jd.MyRobot*,sample.Walls --jar ${project_loc}/bin`.
 
 ## VS Code
 
@@ -104,7 +106,7 @@ Recompile in the IDE and the next battle is new code. A battle already running k
   "tasks": [{
     "label": "fight",
     "type": "shell",
-    "command": "./gradlew classes && robocode-s battle yourinitials.Kestrel*,sample.Walls --jar build/classes/java/main",
+    "command": "./gradlew classes && robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main",
     "problemMatcher": []
   }]
 }
@@ -136,11 +138,11 @@ The robot proves it's yours with a token that robocode-s keeps in its data folde
 **Then, each time:**
 
 1. Start the battle. In the GUI, leave robocode-s open: it listens while it runs. On the command line, `robocode-s battle sample.Walls,@ide` (one `@ide` for each robot from the IDE; they come after the others in the battle) waits: *waiting for 1 robot from your IDE on 127.0.0.1:7878*.
-2. Start the configuration with the IDE's Debug button. Your robots show in *From your IDE* at the top of the available robots, with a notice (up to 16; `--robot your.Kestrel` in the program arguments offers only that one). *Add to battle*, then Start Battle. On the command line the first one is taken.
+2. Start the configuration with the IDE's Debug button. Your robots show in *From your IDE* at the top of the available robots, with a notice (up to 16; `--robot jd.MyRobot` in the program arguments offers only that one). *Add to battle*, then Start Battle. On the command line the first one is taken.
 3. Hit a breakpoint. The whole battle pauses with the robot: the others wait for it, however long you look. When you let it go, the battle goes on.
 4. When the battle ends the robot's JVM ends with it. Start it again from the IDE for the next battle.
 
-**What differs from a normal battle.** A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`your.Kestrel*`), and a second copy gets `(2)`. A few details:
+**What differs from a normal battle.** A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`jd.MyRobot*`), and a second copy gets `(2)`. A few details:
 
 - A robot from the IDE runs in the IDE's JVM, outside the sandbox, with its own home in robocode-s's data folder (`ide-home`; `--home` changes it): its data files are kept there, not with the other robots'.
 - Teams need several JVMs, so they can't start from the IDE yet; the robot host leaves team robots out.
