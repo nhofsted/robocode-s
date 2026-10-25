@@ -3,6 +3,7 @@
 	// the neighbouring rounds. The routes under /replay work out the title, names and links.
 	import { resolve } from '$app/paths';
 	import Replay from './Replay.svelte';
+	import { downloadTrack, type TrackBattle } from './download.ts';
 	import { TrackError, fetchTrack } from './fetch.ts';
 	import { formatBytes, formatCount } from '../rumble/format.ts';
 
@@ -28,6 +29,8 @@
 		size: number;
 		rules: { rounds: number; width: number; height: number };
 		downloadName: string;
+		/** The battle the download carries, for the desktop app to run it again. */
+		battle: TrackBattle;
 		back: Link;
 		prev?: Link;
 		next?: Link;
@@ -46,6 +49,7 @@
 		size,
 		rules,
 		downloadName,
+		battle,
 		back,
 		prev,
 		next
@@ -111,9 +115,19 @@
 			This replay shows the round as the engine drew it, not every detail of it.
 		</p>
 		<p>
-			<a class="button" href={url} download={downloadName}>Download .track ({formatBytes(size)})</a>
+			<a
+				class="button"
+				href={url}
+				download={downloadName}
+				onclick={(e) => {
+					e.preventDefault();
+					downloadTrack(url, downloadName, battle);
+				}}>Download .track ({formatBytes(size)})</a
+			>
 			<span class="muted">Open it with Watch Battle in the <a href={resolve('/download')}>desktop app</a>, or on the
-			<a href={resolve('/replay/file')}>replay file page</a>.</span>
+			<a href={resolve('/replay/file')}>replay file page</a>. The file names its battle, so the desktop app (from
+			the version after 0.2.1) can run the whole battle again with Run this battle, for the names, scores and console
+			output.</span>
 		</p>
 	</section>
 </div>
