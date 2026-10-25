@@ -25,6 +25,8 @@ Your robot compiles against `robocode.api` 1.11.1, the classic API. You need it 
 
 **Java level:** compile with `--release 8`. Classic Robocode 1.11.1 runs on Java 8, so a robot built for 8 also runs in classic and in classic RoboRumble clients, and robocode-s runs robots on a Temurin 21 JRE, which runs it unchanged. If you only target robocode-s, any level up to 21 works. Don't go above 21: the runtime can't load newer class files.
 
+If your code needs a newer level, the compiler tells you: `records are not supported in -source 8` (records need 16), `cannot find symbol` on a newer method such as `Math.clamp` (21). Raise the level in the build file (`<maven.compiler.release>21</maven.compiler.release>` in Maven, `options.release = 21` in Gradle) and know that the robot then no longer runs in classic Robocode.
+
 ## 2. Build setup
 
 Gradle (`build.gradle.kts`):
@@ -75,7 +77,9 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
 ## IntelliJ IDEA
 
-1. New Project, Java, build system Gradle or Maven. Use the snippets above (IDEA reads the build file; pick a JDK 21 and keep `release` at 8).
+1. New Project, Java, build system Gradle or Maven. Use the snippets above (IDEA reads the build file; pick a JDK 21 and keep `release` at 8, unless your code needs more).
+
+   **Added the build file afterwards?** IDEA only reads `pom.xml` or `build.gradle.kts` in a project it created with that build system. In a plain Java project, `src/main/java` is just a folder, and nothing compiles against `robocode.api`. Right-click `pom.xml`, *Add as Maven Project* (Gradle: right-click `build.gradle.kts`, *Link Gradle Project*). You know it worked when `src/main/java` turns blue, `src/main/resources` purple, and *External Libraries* lists `robocode.api`.
 2. Write `src/main/java/yourinitials/Kestrel.java` extending `AdvancedRobot`.
 3. Build with Ctrl+F9 (Build Project) or `./gradlew classes`. The output is `build/classes/java/main` (Gradle) or `target/classes` (Maven). Without a build tool: File, Project Structure, add `robocode.api-1.11.1.jar` as a library, and the output is `out/production/<module>`.
 4. Add a Run configuration of type Shell Script, or an External Tool (Settings, Tools, External Tools), running `robocode-s battle yourinitials.Kestrel*,sample.Walls --jar $ProjectFileDir$/build/classes/java/main`, so one key builds and fights.
@@ -115,6 +119,16 @@ The IDE starts the robot itself (its Debug button), so breakpoints, stepping and
 - the main class `io.github.nhofsted.robocodes.compat.RobotHost`, with every jar of your installation's `lib/robot-host` folder (the folder of the jar in [the table above](#1-get-the-api)) added to your project as a library;
 - the program argument `--ide`.
 
+How that looks in your IDE:
+
+- **IntelliJ IDEA.**
+  1. File, Project Structure (Ctrl+Alt+Shift+S), *Libraries*, **+**, *Java*. Paste the `lib/robot-host` folder into the file dialog's address bar (on Windows `AppData` is hidden, so browsing to it fails; see [the table above](#1-get-the-api)), select all the jars in it and confirm.
+  2. IDEA asks which module gets the library: pick yours. If it didn't ask, or the library isn't listed under *External Libraries* afterwards, go to *Modules*, select your module, *Dependencies*, **+**, *Library…*, choose the one you just made and *Add Selected*. (The library exists in the project, but only a module's dependencies reach its classpath.)
+  3. Run, Edit Configurations, **+**, *Application*. Main class `io.github.nhofsted.robocodes.compat.RobotHost`, program arguments `--ide`, and your module in the classpath box (`-cp`), so your build output is on the classpath.
+  4. Build (Ctrl+F9), start robocode-s, and press the *Debug* button for this configuration.
+- **Eclipse.** Run, Debug Configurations, *Java Application*, New. Choose your project, the main class above, and `--ide` under *Arguments*. Under *Classpath*, *User Entries*, *Add External JARs…*: the jars of `lib/robot-host`.
+- **VS Code.** `robocode-s ide-config` prints a `launch.json` entry to paste into `.vscode/launch.json`; run it from *Run and Debug*.
+
 That's all. The robot host finds your robots itself in your project's output (the class folders on its classpath), so there is nothing to change when you add or rename a robot. `robocode-s ide-config` prints the same, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows it with Copy buttons). It adds `--server` or `--data` only if you changed the port (7878 on 127.0.0.1; `--ide-port` and the options change it) or the data folder.
 
 The robot proves it's yours with a token that robocode-s keeps in its data folder, readable by you only, so no other user on the machine can take the slot. The robot host reads it there; you never copy it.
@@ -133,6 +147,20 @@ The robot proves it's yours with a token that robocode-s keeps in its data folde
 - Your robots come from class folders. A robot in a jar works with `--jar robot.jar`, but then the VM options also need `--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED` (the robot host says so).
 - For seeded random numbers (the same battle again with `--seed N`), add `-javaagent:<the determinism agent>` to the VM options and `--seed N` to the program arguments; `ide-config` prints the path. Without it the robot's `Math.random()` isn't seeded.
 - A deterministic battle (the default) needs the robot host of the same robocode-s version: use the jars `ide-config` names. `--classic` has no such limit.
+
+**If it doesn't work.** What the robot host or the IDE says, and what to check:
+
+| You see | Check |
+|---|---|
+| Your source folder is a plain folder; `robocode.api` can't be found | The build file isn't imported ([IntelliJ IDEA](#intellij-idea), step 1). |
+| `records are not supported in -source 8`, `cannot find symbol` on a newer method | The compiler level in the build file is lower than your code needs ([Java level](#1-get-the-api)). |
+| `ClassNotFoundException` or `NoClassDefFoundError` for `io.github.nhofsted…` or `net.sf.robocode…` when the run configuration starts | The robot host's jars aren't on the configuration's classpath: not all of them, or the library isn't a dependency of your module (it must show under *External Libraries*). |
+| `No class folders on the classpath` | The configuration doesn't have your module's classpath (IntelliJ's `-cp` box), so there is no build output to look in. |
+| `No robots found in …: build your project first` | Nothing is compiled yet, or the `.class` files are elsewhere. Build, and check the output folder. |
+| `robocode-s isn't listening on 127.0.0.1:7878` | robocode-s isn't running (open the GUI, or start `robocode-s battle …,@ide`), or it listens on another port (`--ide-port`; then add `--server 127.0.0.1:PORT` to the program arguments, as `ide-config` prints). |
+| `server refused the robot` … `wrong IDE token` | The token doesn't match: the robot host and robocode-s use different data folders (`--data` names the one robocode-s uses, `ide-config` prints it when it isn't the default). |
+| The battle refuses with `follows deterministic rules` | The robot host's jars are of another robocode-s version than the one running. After installing a new version, use its `lib/robot-host` jars (same folder, if it upgraded in place; re-index the library), or run a `--classic` battle. |
+| `is a jar: robots in jars need the VM options …` | You gave `--jar robot.jar`. Give the class folder instead, or add the two `--add-opens` options it names. |
 
 ## Find out what your robot does
 

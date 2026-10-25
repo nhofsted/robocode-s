@@ -191,6 +191,10 @@ tasks.processResources {
 
 Both compile for Java 8, so the robot also runs in classic Robocode and in classic RoboRumble clients. A JDK 21 warns that 8 is obsolete; that is fine.
 
+If her code later uses something newer (a `record`, `Math.clamp`, ...), the compiler says so (`records are not supported in -source 8`). She then raises the level, `<maven.compiler.release>21</maven.compiler.release>` or `options.release = 21`, and the robot runs in robocode-s but no longer in classic. Up to 21 works; above, the runtime can't load it.
+
+In an IDE she opens the folder as a Maven or Gradle project, so that the IDE reads the build file: otherwise `src/main/java` is just a folder, and nothing finds `robocode.api`. In IntelliJ IDEA, if she added the build file to an existing project, right-click it and choose *Add as Maven Project* (or *Link Gradle Project*); `src/main/java` turns blue when it worked ([details](/docs/ide#intellij-idea)).
+
 ## 6. Fight
 
 ```sh
@@ -224,10 +228,10 @@ In the GUI, she adds the folder under the robot folders in the options (the gear
 
 To stop at a breakpoint, Jane adds one run configuration to her IDE, once:
 
-- main class `io.github.nhofsted.robocodes.compat.RobotHost`, with the jars of robocode-s's `lib/robot-host` folder added to the project as a library;
+- main class `io.github.nhofsted.robocodes.compat.RobotHost`, with the jars of robocode-s's `lib/robot-host` folder added to the project as a library (in IntelliJ: Project Structure, *Libraries*, **+**, *Java*, and make sure the library is a dependency of her module, which shows as *External Libraries*);
 - program argument `--ide`.
 
-She starts a battle in the GUI, presses her IDE's Debug button, and `jd.MyRobot` shows up under *From your IDE*. She adds it to the battle and starts. The battle waits whenever her robot is stopped at a breakpoint. [Using an IDE](/docs/ide#debug-it-with-your-ides-debugger) has the details for IntelliJ IDEA, Eclipse and VS Code.
+She builds the project, starts robocode-s, presses her IDE's Debug button, and `jd.MyRobot` shows up under *From your IDE*. She adds it to the battle and starts. The battle waits whenever her robot is stopped at a breakpoint. [Using an IDE](/docs/ide#debug-it-with-your-ides-debugger) has the steps for IntelliJ IDEA, Eclipse and VS Code, and a table of what its messages mean if something doesn't work.
 
 ## 8. Use a library
 
