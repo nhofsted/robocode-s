@@ -8,6 +8,7 @@ export const DOCS: readonly DocLink[] = [
 		href: '/docs/robot-development',
 		title: 'Developing a robot',
 		children: [
+			{ href: '/docs/robot-development/example', title: 'Example: a first robot' },
 			{ href: '/docs/robot-development/project', title: 'Project and code' },
 			{ href: '/docs/robot-development/testing', title: 'Running and testing' },
 			{ href: '/docs/robot-development/debugging', title: 'Debugging' },
