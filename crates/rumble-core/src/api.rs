@@ -727,6 +727,11 @@ pub struct ImportRequest {
     /// is registered `retired`, behind the bot's other versions, and nothing else changes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub historic: bool,
+    /// With `historic`: when the version left the rumble, milliseconds since the epoch; set
+    /// as `ret` on a new historic version (else its release date), and on an existing retired
+    /// one whose `ret` differs (`updated`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

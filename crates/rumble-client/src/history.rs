@@ -39,6 +39,10 @@ pub struct HistoryEntry {
     pub file: PathBuf,
     /// Milliseconds since the epoch.
     pub released: u64,
+    /// When it left the rumble (ms): the last participants revision listing it
+    /// (`wiki.lastListed`), else the release of the bot's next version; `None` if neither is
+    /// known (still listed, or the bot's newest). Never before `released`.
+    pub retired: Option<u64>,
     pub division: Division,
 }
 
@@ -215,12 +219,18 @@ pub fn parse_dataset(text: &str, dir: &Path) -> Result<Dataset, String> {
             dataset.unusable.push(unusable("bad release date"));
             continue;
         };
+        let last_listed = record
+            .get("wiki")
+            .and_then(|w| w.get("lastListed"))
+            .and_then(Value::as_str)
+            .and_then(parse_time);
         dataset.entries.push(HistoryEntry {
             id: id.clone().unwrap_or_default(),
             version: version.clone().unwrap_or_default(),
             sha256: text("sha256").unwrap_or_default().to_ascii_lowercase(),
             file: resolve_file(dir, file.unwrap_or_default()),
             released,
+            retired: last_listed,
             division: Division::OneVsOne,
         });
         divisions.push(named_division(record));
@@ -248,6 +258,26 @@ pub fn parse_dataset(text: &str, dir: &Path) -> Result<Dataset, String> {
         entry.division = division
             .or_else(|| fallback.get(&entry.id).copied())
             .unwrap_or(Division::OneVsOne);
+    }
+    // Versions the wiki never listed left when the bot's next one came out.
+    let mut releases: HashMap<String, Vec<u64>> = HashMap::new();
+    for entry in &dataset.entries {
+        releases
+            .entry(entry.id.clone())
+            .or_default()
+            .push(entry.released);
+    }
+    for list in releases.values_mut() {
+        list.sort_unstable();
+    }
+    for entry in dataset.entries.iter_mut() {
+        if entry.retired.is_none() {
+            entry.retired = releases[&entry.id]
+                .iter()
+                .copied()
+                .find(|&r| r > entry.released);
+        }
+        entry.retired = entry.retired.map(|r| r.max(entry.released));
     }
     Ok(dataset)
 }
@@ -390,6 +420,9 @@ fn process(
     });
     if row.historic {
         body["historic"] = json!(true);
+        if let Some(retired) = entry.retired {
+            body["retired"] = json!(retired);
+        }
     }
     if version_from_list {
         body["versionFromList"] = json!(true);
@@ -535,6 +568,9 @@ mod tests {
             ]
         );
         assert_eq!(dataset.entries[0].sha256, "ab");
+        // a.B 1 (2005) left when a.B 2 came out (2006); a.B 2 is the newest: still in.
+        assert_eq!(dataset.entries[0].retired, parse_time("2006-01-01"));
+        assert_eq!(dataset.entries[1].retired, None);
         assert_eq!(
             dataset.entries[1].released,
             parse_time("2006-01-01").unwrap()

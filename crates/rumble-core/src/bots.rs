@@ -338,10 +338,10 @@ pub(crate) fn retire_replaced<S: Store + ?Sized>(
 /// version with the same jar is `exists`, `divisionAdded` when the entry's division is new for
 /// it, or `updated` when only its release date changed; with another jar 409.
 ///
-/// `historic`: the bot must exist (404). A new version is registered **retired** (`ret` = its
-/// release date, else now) with the request's division, appended to `vs` (behind the bot's
-/// other versions); `cur`, the bot and its other versions stay as they are. An existing
-/// version only gets the release date.
+/// `historic`: the bot must exist (404). A new version is registered **retired** (`ret` = the
+/// request's `retired`, else its release date, else now) with the request's division, appended
+/// to `vs` (behind the bot's other versions); `cur`, the bot and its other versions stay as
+/// they are. An existing version only gets the release date, and a retired one `retired`.
 pub fn import<S: Store + ?Sized>(
     store: &S,
     request: &ImportRequest,
@@ -393,6 +393,15 @@ pub fn import<S: Store + ?Sized>(
                 result = ImportResult::Updated;
             }
         }
+        if let Some(retired) = request.retired.filter(|_| request.historic)
+            && version.state == VersionState::Retired
+            && version.retired != Some(retired / 1000)
+        {
+            version.retired = Some(retired / 1000);
+            if result == ImportResult::Exists {
+                result = ImportResult::Updated;
+            }
+        }
         if version != *existing {
             store.put_version(&version)?;
         }
@@ -414,7 +423,12 @@ pub fn import<S: Store + ?Sized>(
             request.released,
             now,
         );
-        version.retired = Some(request.released.map_or(now, |ms| ms / 1000));
+        version.retired = Some(
+            request
+                .retired
+                .or(request.released)
+                .map_or(now, |ms| ms / 1000),
+        );
         let expected = bot.versions.clone();
         bot.versions.push(vid);
         return match store.register_version(&bot, Some(&expected), &version) {
@@ -921,7 +935,49 @@ mod tests {
             version_from_list: false,
             released: None,
             historic: false,
+            retired: None,
         }
+    }
+
+    #[test]
+    fn historic_versions_take_their_retirement_date() {
+        let store = MemStore::new();
+        let current = import_request("jk.B", "2", 'b', Division::OneVsOne);
+        import(&store, &current, &info("jk.B", "2", 'b'), NOW).unwrap();
+        let historic = |retired: Option<u64>| ImportRequest {
+            historic: true,
+            released: Some(1_200_000_000_000),
+            retired,
+            ..import_request("jk.B", "1", 'a', Division::OneVsOne)
+        };
+        let created = import(
+            &store,
+            &historic(Some(1_250_000_000_000)),
+            &info("jk.B", "1", 'a'),
+            NOW,
+        )
+        .unwrap();
+        let retired = |vid| store.get_version(vid).unwrap().unwrap().retired;
+        assert_eq!(retired(created.vid), Some(1_250_000_000));
+        // A rerun with another date corrects it; the same date changes nothing.
+        let again = |ms| import(&store, &historic(Some(ms)), &info("jk.B", "1", 'a'), NOW);
+        assert_eq!(
+            again(1_260_000_000_000).unwrap().result,
+            ImportResult::Updated
+        );
+        assert_eq!(retired(created.vid), Some(1_260_000_000));
+        assert_eq!(
+            again(1_260_000_000_000).unwrap().result,
+            ImportResult::Exists
+        );
+        // The current version is never given a retirement date.
+        let listed = ImportRequest {
+            historic: true,
+            retired: Some(1_270_000_000_000),
+            ..import_request("jk.B", "2", 'b', Division::OneVsOne)
+        };
+        import(&store, &listed, &info("jk.B", "2", 'b'), NOW).unwrap();
+        assert_eq!(retired(1), None);
     }
 
     #[test]
