@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::data::{
     self, Author, BotDetails, BotVersion, Contributor, Contributors, RumbleIndex, RumbleSummary,
 };
+use crate::flags::FlagMap;
 use crate::ids::{Division, RumbleId};
 use crate::metrics::{self, Member, RumbleMetrics};
 use crate::state::State;
@@ -75,6 +76,8 @@ pub struct Catalog<'a> {
     pub bots: &'a BTreeMap<String, BotItem>,
     /// The owners of claimed bots, by uid.
     pub owners: &'a BTreeMap<String, User>,
+    /// The RoboWiki's flags by package (§16.7).
+    pub flags: &'a FlagMap,
 }
 
 fn country(user: Option<&User>) -> Option<String> {
@@ -85,6 +88,12 @@ fn country(user: Option<&User>) -> Option<String> {
 impl Catalog<'_> {
     fn owner(&self, bot: &BotItem) -> Option<&User> {
         bot.owner.as_ref().and_then(|uid| self.owners.get(uid))
+    }
+
+    /// The flag of a bot: the country its owner chose, else the RoboWiki's flag of its
+    /// package.
+    fn country(&self, bot: &BotItem) -> Option<String> {
+        country(self.owner(bot)).or_else(|| self.flags.of(&bot.id).map(str::to_string))
     }
 
     /// The ranked version of each bot of a division (§15 step 3): its active versions with
@@ -193,7 +202,7 @@ pub fn compute_rumble(
                 id: v.bot.clone(),
                 version: v.version.clone(),
                 author: bot.author.clone(),
-                country: country(catalog.owner(bot)),
+                country: catalog.country(bot),
                 rank_week_ago: week_ago.and_then(|s| s.get(&v.bot)).map(|row| row.0),
                 colors: v.colors.clone(),
             })
@@ -275,7 +284,7 @@ pub fn bot_details(
         author: Author {
             name: bot.author.clone(),
             github: owner.map(|u| u.login.clone()),
-            country: country(owner),
+            country: catalog.country(bot),
         },
         description: text(&bot.description),
         homepage: text(&bot.homepage),
@@ -500,10 +509,19 @@ mod tests {
         bots.insert("c.C".into(), bot("c.C", vec![5, 4], 4, None));
         let mut owners = BTreeMap::new();
         owners.insert("g9".into(), user("g9", 0, 0, UserState::New, false));
+        // The owner's country wins over the wiki's flag; an unclaimed bot takes the wiki's.
+        let flags = FlagMap {
+            packages: [("a", "us"), ("b", "nl")]
+                .into_iter()
+                .map(|(p, f)| (p.to_string(), f.to_string()))
+                .collect(),
+            at: 0,
+        };
         let catalog = Catalog {
             versions: &versions,
             bots: &bots,
             owners: &owners,
+            flags: &flags,
         };
         let mut state = State::new(1, Division::OneVsOne, 0);
         battle(&mut state, 2, 3, 70.0);
@@ -538,6 +556,9 @@ mod tests {
         let b_row = rankings.bots.iter().find(|r| r.id == "b.B").unwrap();
         assert_eq!(b_row.rank_week_ago, Some(1));
         assert_eq!(b_row.colors, None);
+        assert_eq!(b_row.country.as_deref(), Some("nl"));
+        let c_row = rankings.bots.iter().find(|r| r.id == "c.C").unwrap();
+        assert_eq!(c_row.country, None);
         let snapshot = mega.snapshot();
         assert_eq!(snapshot["a.A"].0, 1);
         assert_eq!(snapshot["a.A"].3, "1.2");
@@ -555,6 +576,9 @@ mod tests {
         assert_eq!(a.versions[0].colors.as_ref(), Some(&black));
         assert_eq!(a.versions[1].colors, None);
         assert_eq!(a.author.github.as_deref(), Some("lg9"));
+        assert_eq!(a.author.country.as_deref(), Some("be"));
+        let b = bot_details(&bots["b.B"], &catalog, &runs, None, "2026-10-24").unwrap();
+        assert_eq!(b.author.country.as_deref(), Some("nl"));
         assert_eq!(a.description, None);
         assert_eq!(a.rumbles.len(), 2);
         assert_eq!(a.rumbles["1v1"].history.len(), 1);
@@ -606,10 +630,12 @@ mod tests {
             },
         );
         let owners = BTreeMap::new();
+        let flags = FlagMap::default();
         let catalog = Catalog {
             versions: &versions,
             bots: &bots,
             owners: &owners,
+            flags: &flags,
         };
         let mut state = State::new(1, Division::OneVsOne, 0);
         battle(&mut state, 1, 2, 60.0);
