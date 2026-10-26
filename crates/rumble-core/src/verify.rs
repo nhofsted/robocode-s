@@ -31,6 +31,9 @@ pub fn ban_alert(uid: &str, why: &str, now_ms: u64) -> Alert {
 
 /// Items read per queue query when serving work (§10.4).
 pub const QUEUE_PAGE: usize = 25;
+/// Queue pages read at most per request for work: past the items a verifier can't take
+/// (its own runs, claimed items, other divisions), which can fill the oldest pages.
+pub const QUEUE_PAGES: usize = 40;
 /// Hours of the result log searched for a penalized user's recent battles (§11.3).
 pub const RECHECK_HOURS: u64 = 48;
 /// Tries of a reputation read-modify-write before giving up.
@@ -147,8 +150,8 @@ pub fn runs_agree(a: &Run, b: &Run) -> bool {
     }
 }
 
-/// Serves up to `max` verification items to a verifier (§10.4 step 2): one query page,
-/// oldest first, skipping items it ran or that are claimed, each claimed with a conditional
+/// Serves up to `max` verification items to a verifier (§10.4 step 2): query pages, oldest
+/// first, up to [`QUEUE_PAGES`], skipping items it ran or that are claimed, each claimed with a conditional
 /// update (`cl = uid, cu = until`). Items lost to a concurrent claim are skipped.
 pub fn take_work<S: Store + ?Sized>(
     store: &S,
@@ -176,24 +179,33 @@ pub fn take_work_in<S: Store + ?Sized>(
     if max == 0 {
         return Ok(taken);
     }
-    for mut item in store.query_verify(engine, None, QUEUE_PAGE)? {
-        if taken.len() >= max {
-            break;
-        }
-        if division.is_some_and(|d| d != item.division)
-            || item.uids.iter().any(|u| u == uid)
-            || !item.claimable(now)
-        {
-            continue;
-        }
-        match store.claim_verify(engine, &item.sort, uid, until, now) {
-            Ok(()) => {
-                item.claimant = Some(uid.to_string());
-                item.claim_until = Some(until);
-                taken.push(item);
+    let mut after: Option<String> = None;
+    for _ in 0..QUEUE_PAGES {
+        let page = store.query_verify(engine, after.as_deref(), QUEUE_PAGE)?;
+        let last = page.len() < QUEUE_PAGE;
+        after = page.last().map(|item| item.sort.clone());
+        for mut item in page {
+            if taken.len() >= max {
+                return Ok(taken);
             }
-            Err(StoreError::ConditionFailed) => continue,
-            Err(e) => return Err(e),
+            if division.is_some_and(|d| d != item.division)
+                || item.uids.iter().any(|u| u == uid)
+                || !item.claimable(now)
+            {
+                continue;
+            }
+            match store.claim_verify(engine, &item.sort, uid, until, now) {
+                Ok(()) => {
+                    item.claimant = Some(uid.to_string());
+                    item.claim_until = Some(until);
+                    taken.push(item);
+                }
+                Err(StoreError::ConditionFailed) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        if last || taken.len() >= max {
+            break;
         }
     }
     Ok(taken)
@@ -880,6 +892,34 @@ mod tests {
         assert!(store.verify_items(1)[0].claimant.is_none());
         // Its own runner never gets it.
         assert!(take_work(&store, 1, "g1", 5, 0, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn take_work_reads_past_pages_of_own_runs() {
+        let store = MemStore::new();
+        // The oldest three pages are g1's own runs; then two of g2's.
+        for i in 0..3 * QUEUE_PAGE + 2 {
+            let uid = if i < 3 * QUEUE_PAGE { "g1" } else { "g2" };
+            let mut item = check_item(run(uid, "h", 2000.0, false));
+            item.sort = format!("{i:013}#b{i}.0");
+            store.put_verify(&item).unwrap();
+        }
+        let taken = take_work(&store, 1, "g1", 5, 100, 0).unwrap();
+        let sorts: Vec<_> = taken.iter().map(|i| i.sort.as_str()).collect();
+        assert_eq!(sorts, ["0000000000075#b75.0", "0000000000076#b76.0"]);
+        // Beyond QUEUE_PAGES pages it gives up.
+        let store = MemStore::new();
+        for i in 0..QUEUE_PAGES * QUEUE_PAGE + 1 {
+            let uid = if i < QUEUE_PAGES * QUEUE_PAGE {
+                "g1"
+            } else {
+                "g2"
+            };
+            let mut item = check_item(run(uid, "h", 2000.0, false));
+            item.sort = format!("{i:013}#b{i}.0");
+            store.put_verify(&item).unwrap();
+        }
+        assert!(take_work(&store, 1, "g1", 5, 100, 0).unwrap().is_empty());
     }
 
     #[test]
