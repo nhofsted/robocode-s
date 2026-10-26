@@ -25,7 +25,7 @@ each battle and when the connection drops; Ctrl+C stops it.
   --warm N               robot JVMs to keep started, waiting for the next
                          battle's robots (default: --slots; 0: none, they start
                          when the battle asks)
-  --sandbox KIND         what robots run in: os, bwrap, docker, none, as for
+  --sandbox KIND         what robots run in: os, bwrap, docker, podman, none, as for
                          `robocode-s battle` (default os where there is one)
   --data DIR             data directory: JRE, jar cache, robots' data files
                          ($ROBOCODES_DATA)

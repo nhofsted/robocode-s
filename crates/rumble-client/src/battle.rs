@@ -54,8 +54,8 @@ pub fn check_engine(info: &Info) -> Result<(), String> {
 pub fn check_sandbox(sandbox: Sandbox, allow_unsandboxed: bool) -> Result<(), String> {
     if sandbox == Sandbox::None && !allow_unsandboxed {
         return Err(
-            "the rumble runs robots from anyone: it needs a sandbox (--sandbox os, bwrap or \
-             docker); to run them as plain processes anyway, give --unsandboxed"
+            "the rumble runs robots from anyone: it needs a sandbox (--sandbox os, bwrap, \
+             docker or podman); to run them as plain processes anyway, give --unsandboxed"
                 .into(),
         );
     }

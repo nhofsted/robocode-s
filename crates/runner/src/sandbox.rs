@@ -9,6 +9,7 @@ mod linux;
 #[cfg(windows)]
 mod windows;
 
+use docker::Engine;
 pub use docker::pulling as docker_pulling;
 pub(crate) use docker::{HOME as CONTAINER_HOME, container_path};
 
@@ -29,27 +30,52 @@ pub enum Sandbox {
     Bwrap,
     /// A container of the pinned Temurin JRE image, with no network (#70): needs Docker.
     Docker,
+    /// The same container in Podman.
+    Podman,
     /// A plain process.
     None,
 }
 
 impl Sandbox {
-    pub const ALL: [Sandbox; 4] = [Self::Os, Self::Bwrap, Self::Docker, Self::None];
+    pub const ALL: [Sandbox; 5] = [
+        Self::Os,
+        Self::Bwrap,
+        Self::Docker,
+        Self::Podman,
+        Self::None,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Os => "os",
             Self::Bwrap => "bwrap",
             Self::Docker => "docker",
+            Self::Podman => "podman",
             Self::None => "none",
         }
+    }
+
+    /// The engine of a container sandbox (`docker`, `podman`), which has its own Java and
+    /// sees the robot's files at other paths.
+    pub(crate) fn engine(self) -> Option<Engine> {
+        match self {
+            Self::Docker => Some(Engine::Docker),
+            Self::Podman => Some(Engine::Podman),
+            _ => None,
+        }
+    }
+
+    /// Whether robots run in a container (`docker`, `podman`).
+    pub fn is_container(self) -> bool {
+        self.engine().is_some()
     }
 
     /// Why robots can't run in this sandbox on this platform; `None` if they can.
     pub fn unavailable(self) -> Option<String> {
         match self {
             Self::None => None,
-            Self::Docker => docker::unavailable(),
+            Self::Docker => docker::unavailable(Engine::Docker),
+            Self::Podman => docker::unavailable(Engine::Podman),
             #[cfg(target_os = "linux")]
             Self::Os => linux::os_unavailable(),
             #[cfg(target_os = "linux")]
@@ -79,17 +105,19 @@ impl Sandbox {
             Self::Os | Self::Bwrap => linux::report(self),
             #[cfg(windows)]
             Self::Os => "os (AppContainer, Job Object)".into(),
-            Self::Docker => "docker (eclipse-temurin 21.0.12.1, no network)".into(),
+            Self::Docker | Self::Podman => {
+                format!("{} (eclipse-temurin 21.0.12.1, no network)", self.name())
+            }
             _ => self.name().into(),
         }
     }
 
-    /// What robots need before they start: for `docker` the image, pulled on first use
-    /// (the pull takes a while: [`docker_pulling`] says so).
+    /// What robots need before they start: for `docker` and `podman` the image, pulled on
+    /// first use (the pull takes a while: [`docker_pulling`] says so).
     pub fn prepare(self) -> Result<(), String> {
-        match self {
-            Self::Docker => docker::prepare(),
-            _ => Ok(()),
+        match self.engine() {
+            Some(engine) => docker::prepare(engine),
+            None => Ok(()),
         }
     }
 }
@@ -270,8 +298,8 @@ fn kept(name: &str) -> bool {
 /// Windows' `os` can't be started by `Command`: the runner starts it itself.
 pub(crate) struct Sandboxed {
     pub command: Command,
-    /// The name of the container `command` starts (`docker`).
-    container: Option<String>,
+    /// The engine and name of the container `command` starts (`docker`, `podman`).
+    container: Option<(Engine, String)>,
     #[cfg(windows)]
     contained: Option<Grants>,
 }
@@ -287,11 +315,11 @@ impl Sandboxed {
         }
     }
 
-    /// The container `name`, which `command` (`docker run`) starts.
-    pub fn container(command: Command, name: String) -> Self {
+    /// The container `name`, which `command` (`docker run`, `podman run`) starts.
+    pub fn container(command: Command, engine: Engine, name: String) -> Self {
         Self {
             command,
-            container: Some(name),
+            container: Some((engine, name)),
             #[cfg(windows)]
             contained: None,
         }
@@ -383,8 +411,8 @@ pub(crate) struct Child {
 }
 
 enum Process {
-    /// A process, or the `docker` program of a container (named).
-    Plain(std::process::Child, Option<String>),
+    /// A process, or the `docker` (`podman`) program of a container (named).
+    Plain(std::process::Child, Option<(Engine, String)>),
     #[cfg(windows)]
     Contained(windows::Process),
 }
@@ -410,8 +438,8 @@ impl Child {
         match &mut self.process {
             Process::Plain(p, container) => {
                 // Killing `docker` leaves the container running.
-                if let Some(name) = container {
-                    docker::kill(name);
+                if let Some((engine, name)) = container {
+                    docker::kill(*engine, name);
                 }
                 p.kill()
             }
@@ -431,11 +459,11 @@ pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::
         return Ok(Sandboxed::plain(program));
     }
     std::fs::create_dir_all(grants.home.join("tmp"))?;
-    if sandbox == Sandbox::Docker {
+    if let Some(engine) = sandbox.engine() {
         // `docker` needs its own environment (the engine's address, its settings); the
         // container gets what `docker run` names.
-        let (command, name) = docker::command(grants)?;
-        return Ok(Sandboxed::container(command, name));
+        let (command, name) = docker::command(engine, grants)?;
+        return Ok(Sandboxed::container(command, engine, name));
     }
     let mut sandboxed = match sandbox {
         #[cfg(target_os = "linux")]
@@ -473,17 +501,16 @@ mod tests {
     fn platforms_refuse_the_sandboxes_they_lack() {
         assert_eq!("none".parse(), Ok(Sandbox::None));
         // Docker is there or refused with the reason, which says what is there instead.
-        if let Err(docker) = "docker".parse::<Sandbox>() {
-            assert!(
-                docker.contains("docker") && docker.contains("none"),
-                "{docker}"
-            );
+        for engine in ["docker", "podman"] {
+            if let Err(why) = engine.parse::<Sandbox>() {
+                assert!(why.contains(engine) && why.contains("none"), "{why}");
+            }
         }
         assert!(
             "chroot"
                 .parse::<Sandbox>()
                 .unwrap_err()
-                .contains("os, bwrap, docker, none")
+                .contains("os, bwrap, docker, podman, none")
         );
         let os = "os".parse::<Sandbox>();
         if cfg!(any(target_os = "linux", windows)) {

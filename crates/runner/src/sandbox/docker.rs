@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! The Docker sandbox (ADR 0019, design §6.2): the robot host runs in the official
-//! Eclipse Temurin JRE image, pinned by digest, with the robot host, the agent and the
-//! robot's jars mounted read-only from the host and the robot's home writable. No network,
-//! a read-only root, no capabilities and limits on memory and processes. Its stdio carries
-//! the protocol, as for the other sandboxes.
+//! The Docker and Podman sandboxes (ADR 0019, design §6.2): the robot host runs in the
+//! official Eclipse Temurin JRE image, pinned by digest, with the robot host, the agent and
+//! the robot's jars mounted read-only from the host and the robot's home writable. No
+//! network, a read-only root, no capabilities and limits on memory and processes. Its stdio
+//! carries the protocol, as for the other sandboxes. Podman takes Docker's command line;
+//! [`Engine`] has what differs.
 //!
-//! Killing the `docker` program doesn't stop the container: [`kill`] does.
+//! Killing the `docker` (`podman`) program doesn't stop the container: [`kill`] does.
 
 use super::Grants;
 use std::ffi::OsString;
@@ -17,10 +18,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
+/// The digest of the pinned Temurin JRE image: the multi-arch index's (amd64 and arm64).
+macro_rules! digest {
+    () => {
+        "sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99"
+    };
+}
+
 /// The pinned Temurin JRE, the release of [`crate::jre::RELEASE`] (an Ubuntu image: glibc,
-/// as the downloaded JRE is). The digest is the multi-arch index's (amd64 and arm64):
-/// updating the JRE means updating both.
-pub(crate) const IMAGE: &str = "eclipse-temurin:21.0.12.1_1-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99";
+/// as the downloaded JRE is): updating the JRE means updating the tag and the digest.
+pub(crate) const IMAGE: &str = concat!("eclipse-temurin:21.0.12.1_1-jre@", digest!());
+
+/// The same image for Podman, which wants the registry named (it won't ask which one
+/// without a terminal) and the digest alone (older ones refuse a tag beside it).
+const PODMAN_IMAGE: &str = concat!("docker.io/library/eclipse-temurin@", digest!());
 
 /// Marks the runner's containers.
 const LABEL: &str = "robocode-s=1";
@@ -38,22 +49,93 @@ const PIDS: u32 = 512;
 /// How long `docker info` may take.
 const PROBE: Duration = Duration::from_secs(10);
 
-/// Why `docker` can't run robots here: no `docker` program, no engine answering, or an
-/// engine for Windows containers. Asked once.
-pub(super) fn unavailable() -> Option<String> {
-    static WHY: OnceLock<Option<String>> = OnceLock::new();
-    WHY.get_or_init(probe).clone()
+/// The program that runs the containers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Engine {
+    Docker,
+    Podman,
 }
 
-fn docker() -> Command {
-    let mut command = Command::new("docker");
-    crate::no_window(&mut command);
-    command
+/// What [`probe`] found of an engine that answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Found {
+    /// Podman without root: the container's user is the runner's (`keep-id`).
+    rootless: bool,
 }
 
-fn probe() -> Option<String> {
-    let mut child = match docker()
-        .args(["info", "--format", "{{.OSType}}"])
+impl Engine {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+        }
+    }
+
+    fn image(self) -> &'static str {
+        match self {
+            Self::Docker => IMAGE,
+            Self::Podman => PODMAN_IMAGE,
+        }
+    }
+
+    /// The engine's program, with no window on Windows.
+    fn command(self) -> Command {
+        let mut command = Command::new(program(self.name()));
+        crate::no_window(&mut command);
+        command
+    }
+
+    /// What `info --format` prints: the containers' OS, and for Podman whether it runs
+    /// without root.
+    fn info_format(self) -> &'static str {
+        match self {
+            Self::Docker => "{{.OSType}}",
+            Self::Podman => "{{.Host.OS}} {{.Host.Security.Rootless}}",
+        }
+    }
+
+    /// What the engine said when asked, once.
+    fn found(self) -> &'static Result<Found, String> {
+        static DOCKER: OnceLock<Result<Found, String>> = OnceLock::new();
+        static PODMAN: OnceLock<Result<Found, String>> = OnceLock::new();
+        match self {
+            Self::Docker => DOCKER.get_or_init(|| probe(self)),
+            Self::Podman => PODMAN.get_or_init(|| probe(self)),
+        }
+    }
+}
+
+/// `name` on the PATH, or else (an app started from the Finder has only the system's
+/// PATH) where macOS installers put it: Docker Desktop's `/usr/local/bin`, Homebrew's
+/// `/opt/homebrew/bin` and the Podman installer's `/opt/podman/bin`.
+fn program(name: &str) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        let on_path = std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(name).is_file()));
+        if !on_path
+            && let Some(found) = ["/usr/local/bin", "/opt/homebrew/bin", "/opt/podman/bin"]
+                .iter()
+                .map(|dir| Path::new(dir).join(name))
+                .find(|p| p.is_file())
+        {
+            return found;
+        }
+    }
+    PathBuf::from(name)
+}
+
+/// Why `engine` can't run robots here: no program, no engine answering, or an engine for
+/// Windows containers. Asked once.
+pub(super) fn unavailable(engine: Engine) -> Option<String> {
+    engine.found().as_ref().err().cloned()
+}
+
+fn probe(engine: Engine) -> Result<Found, String> {
+    let name = engine.name();
+    let mut child = match engine
+        .command()
+        .args(["info", "--format", engine.info_format()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -61,9 +143,9 @@ fn probe() -> Option<String> {
     {
         Ok(child) => child,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Some("docker isn't installed (no docker on the PATH)".into());
+            return Err(format!("{name} isn't installed (no {name} on the PATH)"));
         }
-        Err(e) => return Some(format!("docker: {e}")),
+        Err(e) => return Err(format!("{name}: {e}")),
     };
     let start = Instant::now();
     let status = loop {
@@ -73,36 +155,45 @@ fn probe() -> Option<String> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Some("docker doesn't answer (`docker info` timed out)".into());
+                return Err(format!("{name} doesn't answer (`{name} info` timed out)"));
             }
         }
     };
-    let output = child.wait_with_output().ok()?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("{name}: {e}"))?;
     refusal(
+        engine,
         status.success(),
         &String::from_utf8_lossy(&output.stdout),
         &String::from_utf8_lossy(&output.stderr),
     )
 }
 
-/// Why not, from what `docker info --format {{.OSType}}` did.
-fn refusal(succeeded: bool, stdout: &str, stderr: &str) -> Option<String> {
+/// What `engine` is, or why it can't run robots, from what `info --format` did.
+fn refusal(engine: Engine, succeeded: bool, stdout: &str, stderr: &str) -> Result<Found, String> {
+    let name = engine.name();
     if !succeeded {
-        let why = stderr
-            .trim()
-            .lines()
-            .next()
-            .unwrap_or("`docker info` failed");
-        return Some(format!("docker isn't running: {why}"));
+        let why = stderr.trim().lines().next();
+        let why = why.map_or(format!("`{name} info` failed"), String::from);
+        return Err(format!("{name} isn't running: {why}"));
     }
-    let os = stdout.trim();
-    (os != "linux").then(|| format!("docker runs {os} containers; the robot host needs Linux ones"))
+    let mut words = stdout.split_whitespace();
+    let os = words.next().unwrap_or_default();
+    if os != "linux" {
+        return Err(format!(
+            "{name} runs {os} containers; the robot host needs Linux ones"
+        ));
+    }
+    Ok(Found {
+        rootless: engine == Engine::Podman && words.next() == Some("true"),
+    })
 }
 
 static PULLING: AtomicBool = AtomicBool::new(false);
 
-/// Whether the image is being pulled (the first use of `docker`, a few hundred MB), to
-/// say so where the user waits.
+/// Whether the image is being pulled (the first use of `docker` or `podman`, a few hundred
+/// MB), to say so where the user waits.
 pub fn pulling() -> bool {
     PULLING.load(Ordering::Relaxed)
 }
@@ -111,10 +202,11 @@ pub fn pulling() -> bool {
 /// containers that an earlier runner left (once). Containers still running are not
 /// stray: they stop when their stdin closes, i.e. when the runner that started them is
 /// gone.
-pub(crate) fn prepare() -> Result<(), String> {
-    static CLEANED: Once = Once::new();
-    CLEANED.call_once(|| {
-        let _ = docker()
+pub(crate) fn prepare(engine: Engine) -> Result<(), String> {
+    static CLEANED: [Once; 2] = [Once::new(), Once::new()];
+    CLEANED[engine as usize].call_once(|| {
+        let _ = engine
+            .command()
             .args(["container", "prune", "--force", "--filter"])
             .arg(format!("label={LABEL}"))
             .args(["--filter", "until=10m"])
@@ -123,8 +215,10 @@ pub(crate) fn prepare() -> Result<(), String> {
             .stderr(Stdio::null())
             .status();
     });
-    let present = docker()
-        .args(["image", "inspect", "--format", "{{.Id}}", IMAGE])
+    let (name, image) = (engine.name(), engine.image());
+    let present = engine
+        .command()
+        .args(["image", "inspect", "--format", "{{.Id}}", image])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -133,20 +227,21 @@ pub(crate) fn prepare() -> Result<(), String> {
     if present {
         return Ok(());
     }
-    eprintln!("docker: pulling {IMAGE} (the first time)");
+    eprintln!("{name}: pulling {image} (the first time)");
     PULLING.store(true, Ordering::Relaxed);
-    let output = docker()
-        .args(["pull", "--quiet", IMAGE])
+    let output = engine
+        .command()
+        .args(["pull", "--quiet", image])
         .stdin(Stdio::null())
         .output();
     PULLING.store(false, Ordering::Relaxed);
     match output {
         Ok(o) if o.status.success() => Ok(()),
         Ok(o) => Err(format!(
-            "docker pull {IMAGE}: {}",
+            "{name} pull {image}: {}",
             String::from_utf8_lossy(&o.stderr).trim()
         )),
-        Err(e) => Err(format!("docker pull: {e}")),
+        Err(e) => Err(format!("{name} pull: {e}")),
     }
 }
 
@@ -162,20 +257,38 @@ pub(crate) fn container_path(i: usize, host: &Path) -> PathBuf {
     PathBuf::from(format!("/opt/robocode-s/read/{i}/{name}"))
 }
 
-/// The container's name and the `docker run` command up to the Java executable, whose
-/// arguments the caller adds.
-pub(super) fn command(grants: &Grants) -> io::Result<(Command, String)> {
+/// The container's name and the `docker run` (`podman run`) command up to the Java
+/// executable, whose arguments the caller adds.
+pub(super) fn command(engine: Engine, grants: &Grants) -> io::Result<(Command, String)> {
     let name = format!("robocode-s-{}", &robocode_s_server::random_token()[..16]);
-    let args = run_args(&name, &user(&grants.home)?, grants)?;
-    let mut command = docker();
+    let args = run_args(engine, &name, &user(engine, &grants.home)?, grants)?;
+    let mut command = engine.command();
     command.args(args);
     Ok((command, name))
 }
 
-/// The user the container runs as: the owner of the home (the runner's user) on Linux, so
-/// that the files the robot writes there are the user's; elsewhere (Docker Desktop shows
-/// mounted files to any user) a fixed one without rights.
-fn user(home: &Path) -> io::Result<String> {
+/// Who the container runs as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum User {
+    /// `uid:gid`.
+    Id(String),
+    /// The runner's user, mapped into rootless Podman's user namespace (`--userns
+    /// keep-id`, which also starts the container as that user).
+    KeepId,
+}
+
+/// The user the container runs as, so that the files the robot writes in its home are the
+/// user's: rootless Podman maps the runner's user in; otherwise the owner of the home (the
+/// runner's user) on Linux. Elsewhere (Docker Desktop shows mounted files to any user) a
+/// fixed one without rights.
+fn user(engine: Engine, home: &Path) -> io::Result<User> {
+    if let Ok(Found { rootless: true }) = engine.found() {
+        return Ok(User::KeepId);
+    }
+    user_id(home).map(User::Id)
+}
+
+fn user_id(home: &Path) -> io::Result<String> {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::MetadataExt;
@@ -189,8 +302,8 @@ fn user(home: &Path) -> io::Result<String> {
     }
 }
 
-/// `docker run` for `name`, as `user`, up to the image and `java`.
-fn run_args(name: &str, user: &str, grants: &Grants) -> io::Result<Vec<OsString>> {
+/// `docker run` (`podman run`) for `name`, as `user`, up to the image and `java`.
+fn run_args(engine: Engine, name: &str, user: &User, grants: &Grants) -> io::Result<Vec<OsString>> {
     // The heap and the JVM's metaspace, code, threads and GC structures (as Windows' job).
     let memory = format!("{}m", grants.memory_mb + 512);
     let mut args: Vec<OsString> = [
@@ -226,8 +339,6 @@ fn run_args(name: &str, user: &str, grants: &Grants) -> io::Result<Vec<OsString>
         "fsize=67108864",
         "--log-driver",
         "none",
-        "--user",
-        user,
         "--workdir",
         HOME,
         "--env",
@@ -236,6 +347,10 @@ fn run_args(name: &str, user: &str, grants: &Grants) -> io::Result<Vec<OsString>
     .into_iter()
     .map(OsString::from)
     .collect();
+    args.extend(match user {
+        User::Id(id) => ["--user".into(), id.into()],
+        User::KeepId => ["--userns".into(), "keep-id".into()],
+    });
     for (i, host) in grants.read.iter().enumerate() {
         args.extend([
             "--mount".into(),
@@ -246,7 +361,7 @@ fn run_args(name: &str, user: &str, grants: &Grants) -> io::Result<Vec<OsString>
         "--mount".into(),
         mount(&grants.home, Path::new(HOME), true)?,
     ]);
-    args.extend([IMAGE.into(), "java".into()]);
+    args.extend([engine.image().into(), "java".into()]);
     Ok(args)
 }
 
@@ -278,8 +393,9 @@ fn mount(host: &Path, container: &Path, write: bool) -> io::Result<OsString> {
 
 /// Stops the container `name` (killing the `docker` program doesn't); it is removed with
 /// `--rm`. Without effect once it has exited.
-pub(super) fn kill(name: &str) {
-    let _ = docker()
+pub(super) fn kill(engine: Engine, name: &str) {
+    let _ = engine
+        .command()
         .args(["kill", name])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -293,13 +409,17 @@ mod tests {
     use crate::sandbox::Sandboxed;
 
     fn args(read: &[&str], home: &str) -> Vec<String> {
+        engine_args(Engine::Docker, &User::Id("1000:1000".into()), read, home)
+    }
+
+    fn engine_args(engine: Engine, user: &User, read: &[&str], home: &str) -> Vec<String> {
         let grants = Grants {
             runtime: PathBuf::new(),
             read: read.iter().map(PathBuf::from).collect(),
             home: home.into(),
             memory_mb: 256,
         };
-        run_args("robocode-s-x", "1000:1000", &grants)
+        run_args(engine, "robocode-s-x", user, &grants)
             .unwrap()
             .into_iter()
             .map(|a| a.into_string().unwrap())
@@ -406,21 +526,67 @@ mod tests {
     }
 
     #[test]
+    fn podman_runs_its_image_as_the_user_without_root() {
+        let a = engine_args(Engine::Podman, &User::KeepId, &["/h/lib"], "/h/home");
+        assert!(has(&a, ["--userns", "keep-id"]), "{a:?}");
+        assert!(!a.contains(&"--user".to_string()), "{a:?}");
+        assert!(a.ends_with(&[PODMAN_IMAGE.to_string(), "java".to_string()]));
+        // The same image, fully named and by digest alone.
+        assert_eq!(PODMAN_IMAGE.rsplit('@').next(), IMAGE.rsplit('@').next());
+        assert!(PODMAN_IMAGE.starts_with("docker.io/library/eclipse-temurin@sha256:"));
+        // With root it is Docker's user.
+        let a = engine_args(Engine::Podman, &User::Id("1000:1000".into()), &[], "/h");
+        assert!(has(&a, ["--user", "1000:1000"]) && !a.contains(&"--userns".to_string()));
+    }
+
+    #[test]
     fn docker_is_refused_with_the_reason() {
-        assert_eq!(refusal(true, "linux\n", ""), None);
+        let docker = Engine::Docker;
         assert_eq!(
-            refusal(true, "windows\n", ""),
-            Some("docker runs windows containers; the robot host needs Linux ones".into())
+            refusal(docker, true, "linux\n", ""),
+            Ok(Found { rootless: false })
+        );
+        assert_eq!(
+            refusal(docker, true, "windows\n", ""),
+            Err("docker runs windows containers; the robot host needs Linux ones".into())
         );
         let down = refusal(
+            docker,
             false,
             "",
             "failed to connect to the docker API at unix:///var/run/docker.sock\nmore",
         )
-        .unwrap();
+        .unwrap_err();
         assert_eq!(
             down,
             "docker isn't running: failed to connect to the docker API at unix:///var/run/docker.sock"
+        );
+    }
+
+    #[test]
+    fn podman_says_whether_it_runs_without_root() {
+        let podman = Engine::Podman;
+        assert_eq!(
+            refusal(podman, true, "linux true\n", ""),
+            Ok(Found { rootless: true })
+        );
+        assert_eq!(
+            refusal(podman, true, "linux false\n", ""),
+            Ok(Found { rootless: false })
+        );
+        let down = refusal(
+            podman,
+            false,
+            "",
+            "Error: unable to connect to Podman socket\n",
+        );
+        assert_eq!(
+            down,
+            Err("podman isn't running: Error: unable to connect to Podman socket".into())
+        );
+        assert_eq!(
+            refusal(podman, false, "", ""),
+            Err("podman isn't running: `podman info` failed".into())
         );
     }
 
@@ -453,30 +619,32 @@ mod tests {
         }
     }
 
-    /// `docker run` as for a robot, but running `program` instead of `java`.
-    fn container(name: &str, grants: &Grants, program: &[&str]) -> Sandboxed {
-        let mut args = run_args(name, &user(&grants.home).unwrap(), grants).unwrap();
+    /// `docker run` (`podman run`) as for a robot, but running `program` instead of `java`.
+    fn container(engine: Engine, name: &str, grants: &Grants, program: &[&str]) -> Sandboxed {
+        let user = user(engine, &grants.home).unwrap();
+        let mut args = run_args(engine, name, &user, grants).unwrap();
         args.pop();
         args.extend(program.iter().map(OsString::from));
-        let mut command = docker();
+        let mut command = engine.command();
         command.args(args);
-        Sandboxed::container(command, name.into())
+        Sandboxed::container(command, engine, name.into())
     }
 
     /// What `program` prints in a container, and whether it succeeded.
-    fn run(grants: &Grants, program: &[&str]) -> (bool, String) {
+    fn run(engine: Engine, grants: &Grants, program: &[&str]) -> (bool, String) {
         let name = format!(
             "robocode-s-test-{}",
             &robocode_s_server::random_token()[..8]
         );
-        let output = container(&name, grants, program).output().unwrap();
+        let output = container(engine, &name, grants, program).output().unwrap();
         let text = String::from_utf8_lossy(&output.stdout).into_owned()
             + &String::from_utf8_lossy(&output.stderr);
         (output.status.success(), text)
     }
 
-    fn exists(name: &str) -> bool {
-        let output = docker()
+    fn exists(engine: Engine, name: &str) -> bool {
+        let output = engine
+            .command()
             .args(["ps", "--all", "--quiet", "--filter"])
             .arg(format!("name={name}"))
             .output()
@@ -484,41 +652,55 @@ mod tests {
         !output.stdout.is_empty()
     }
 
+    /// The engines that answer here, each prepared; the others are skipped, saying why.
+    fn engines() -> Vec<Engine> {
+        [Engine::Docker, Engine::Podman]
+            .into_iter()
+            .filter(|&engine| match unavailable(engine) {
+                None => {
+                    prepare(engine).unwrap();
+                    true
+                }
+                Some(why) => {
+                    eprintln!("skipped: {why}");
+                    false
+                }
+            })
+            .collect()
+    }
+
     #[test]
-    #[ignore = "needs Docker"]
+    #[ignore = "needs Docker or Podman"]
     fn a_container_is_what_the_arguments_say() {
-        if let Some(why) = unavailable() {
-            return eprintln!("skipped: {why}");
+        for engine in engines() {
+            container_is_what_the_arguments_say(engine);
         }
-        prepare().unwrap();
-        let g = grants("props");
+    }
+
+    fn container_is_what_the_arguments_say(engine: Engine) {
+        let g = grants(&format!("props-{}", engine.name()));
+        let run = |program: &[&str]| run(engine, &g, program);
         // The JRE inside is the pinned one.
-        let (ok, text) = run(&g, &["java", "-version"]);
+        let (ok, text) = run(&["java", "-version"]);
         let release = crate::jre::RELEASE.strip_prefix("jdk-").unwrap();
         assert!(ok && text.contains(&format!("Temurin-{release}")), "{text}");
         // No network: the loopback and nothing else.
-        let (ok, text) = run(&g, &["ls", "/sys/class/net"]);
+        let (ok, text) = run(&["ls", "/sys/class/net"]);
         assert!(ok && text.trim() == "lo", "{text}");
         // A read-only root and read-only mounts; /tmp is a (small) memory file system.
         for path in ["/x", "/opt/robocode-s/lib/x", "/usr/x"] {
-            let (ok, text) = run(&g, &["touch", path]);
+            let (ok, text) = run(&["touch", path]);
             assert!(!ok && text.contains("ead-only"), "{path}: {text}");
         }
-        assert!(run(&g, &["touch", "/tmp/x"]).0);
+        assert!(run(&["touch", "/tmp/x"]).0);
         // No capabilities, no new ones.
-        let (_, text) = run(
-            &g,
-            &["grep", "-E", "CapEff|NoNewPrivs", "/proc/self/status"],
-        );
+        let (_, text) = run(&["grep", "-E", "CapEff|NoNewPrivs", "/proc/self/status"]);
         assert!(
             text.contains("CapEff:\t0000000000000000") && text.contains("NoNewPrivs:\t1"),
             "{text}"
         );
         // The home is writable, and what is written there is the user's.
-        let (ok, text) = run(
-            &g,
-            &["sh", "-c", "echo data > /home/robot/data.txt && id -u"],
-        );
+        let (ok, text) = run(&["sh", "-c", "echo data > /home/robot/data.txt && id -u"]);
         assert!(ok, "{text}");
         let file = g.home.join("data.txt");
         #[cfg(unix)]
@@ -531,7 +713,7 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(file).unwrap(), "data\n");
         // The environment is the one `docker run` names.
-        let (_, text) = run(&g, &["env"]);
+        let (_, text) = run(&["env"]);
         assert!(
             text.contains("HOME=/home/robot/") && !text.contains("USER"),
             "{text}"
@@ -540,13 +722,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs Docker"]
+    #[ignore = "needs Docker or Podman"]
     fn a_container_is_gone_when_it_ends_and_when_it_is_killed() {
-        if let Some(why) = unavailable() {
-            return eprintln!("skipped: {why}");
+        for engine in engines() {
+            container_is_gone_when_it_ends_and_when_it_is_killed(engine);
         }
-        prepare().unwrap();
-        let g = grants("kill");
+    }
+
+    fn container_is_gone_when_it_ends_and_when_it_is_killed(engine: Engine) {
+        let g = grants(&format!("kill-{}", engine.name()));
+        let exists = |name: &str| exists(engine, name);
+        let container = |name: &str, program: &[&str]| container(engine, name, &g, program);
         let gone = |name: &str| {
             let start = Instant::now();
             while exists(name) {
@@ -559,12 +745,12 @@ mod tests {
         };
         // At its end.
         let name = "robocode-s-test-ends";
-        let mut child = container(name, &g, &["true"]).spawn(false, false).unwrap();
+        let mut child = container(name, &["true"]).spawn(false, false).unwrap();
         assert!(child.wait().unwrap().success());
         gone(name);
         // Killed while running: the `docker` program's death alone would leave it.
         let name = "robocode-s-test-killed";
-        let mut child = container(name, &g, &["sleep", "600"])
+        let mut child = container(name, &["sleep", "600"])
             .spawn(true, false)
             .unwrap();
         let start = Instant::now();
