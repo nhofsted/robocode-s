@@ -53,11 +53,11 @@ Options of `run`:
                          of memory); a melee battle takes 5 of them
   --divisions LIST       1v1, melee or 1v1,melee (default both; melee needs 5
                          parallel battles)
-  --sandbox KIND         what robots run in: os, bwrap, docker, none, as for
+  --sandbox KIND         what robots run in: os, bwrap, docker, podman, none, as for
                          `robocode-s battle --sandbox` (default os where there is one)
   --unsandboxed          run robots as plain processes (--sandbox none): the rumble
                          runs robots from anyone, so without this it refuses to run
-                         without a sandbox (on macOS: Docker, or this)
+                         without a sandbox (on macOS: Docker or Podman, or this)
   --memory MB            heap per robot JVM (default 512)
   --batches N            stop after N batches have been posted (default: go on)
   --json                 print the events as JSON lines instead of one line per

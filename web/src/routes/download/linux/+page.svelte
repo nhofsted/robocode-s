@@ -74,7 +74,7 @@ sudo dnf install robocode-s`;
 			Robots run in a sandbox built into Linux (seccomp, and Landlock where the kernel has it): no
 			network, and no files but the robot's own. Without Landlock the battle's header says
 			<code>filesystem not limited</code>. <code>--sandbox bwrap</code> uses bubblewrap, and
-			<code>--sandbox docker</code> a container.
+			<code>--sandbox docker</code> and <code>--sandbox podman</code> a container.
 		</p>
 	</section>
 </div>

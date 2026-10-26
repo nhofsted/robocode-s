@@ -65,8 +65,9 @@
 		<h2>Sandbox</h2>
 		<p>
 			macOS has no built-in sandbox for robots. Battles you run for yourself can use
-			<code>--sandbox docker</code> (Docker installed and running), or <code>--sandbox none</code>,
-			a plain process. Contributing to the rumble needs Docker, or
+			<code>--sandbox docker</code> (Docker installed and running), <code>--sandbox podman</code>
+			(Podman, with its machine started), or <code>--sandbox none</code>,
+			a plain process. Contributing to the rumble needs Docker or Podman, or
 			<code>--unsandboxed</code> if you accept running robots with your user's rights.
 		</p>
 	</section>

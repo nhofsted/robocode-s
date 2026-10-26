@@ -1251,7 +1251,7 @@ impl App {
                             Some(a) if !known => format!("Connecting to {a}…"),
                             Some(a) => format!("Waiting for the battle on {a} to start…"),
                             None if starting.prepared.is_some() && docker_pulling() => {
-                                "Pulling the Docker image (the first time, a few hundred MB)…"
+                                "Pulling the container image (the first time, a few hundred MB)…"
                                     .into()
                             }
                             None if starting.prepared.is_some() => "Looking up the robots…".into(),
@@ -2362,7 +2362,8 @@ fn sandbox_row(ui: &mut egui::Ui, settings: &mut Settings) {
         "What the robots run in: they are code from anyone. os is the system's own \
          sandbox (on Linux seccomp, and Landlock where the kernel has it; on Windows an \
          AppContainer and a Job Object): no network, and only the robot's files. bwrap is bubblewrap, if installed. docker is a \
-         container of the Temurin JRE image, with no network (needs Docker; the image is pulled the first time). none is a plain \
+         container of the Temurin JRE image, with no network (needs Docker; the image is pulled the first time); podman is the same \
+         container in Podman. none is a plain \
          process, with all your rights.",
     );
     ui.horizontal(|ui| {

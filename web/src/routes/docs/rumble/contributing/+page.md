@@ -30,9 +30,9 @@ The GUI has the same on its **Rumble** page: sign in, then switch Contribute on.
 
 The rumble runs other people's robots, so the client runs them in a sandbox (no network, no files outside the robot's own folder) and refuses to contribute without one.
 
-- **Linux:** built in (seccomp, and Landlock where the kernel has it). Bubblewrap and Docker work too (`--sandbox bwrap`, `--sandbox docker`).
+- **Linux:** built in (seccomp, and Landlock where the kernel has it). Bubblewrap, Docker and Podman work too (`--sandbox bwrap`, `--sandbox docker`, `--sandbox podman`).
 - **Windows:** built in (AppContainer and a Job Object). Nothing to install.
-- **macOS:** none built in. Install Docker (`--sandbox docker`), or pass `--unsandboxed` if you accept running robots with your user's rights.
+- **macOS:** none built in. Install Docker (`--sandbox docker`) or Podman (`--sandbox podman`), or pass `--unsandboxed` if you accept running robots with your user's rights.
 
 ## What runs
 

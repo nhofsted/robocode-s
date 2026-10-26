@@ -39,7 +39,7 @@ robocode-s battle jd.MyRobot*,sample.Walls --jar build/classes/java/main --seed 
 | `--memory MB` | Heap per robot JVM (default 512). |
 | `--warm N` | Start N robot JVMs while the robots are looked up, instead of afterwards (default: one per robot; 0 starts them when the battle does). |
 | `--ide-port N` | The port robots from your IDE connect to (default 7878). |
-| `--sandbox KIND` | `os`, `bwrap`, `docker` or `none`; see [sandboxes](/docs/cli#sandboxes). |
+| `--sandbox KIND` | `os`, `bwrap`, `docker`, `podman` or `none`; see [sandboxes](/docs/cli#sandboxes). |
 | `--data DIR`, `--fresh-data`, `--java PATH`, `--host-lib DIR`, `--agent-jar PATH` | See [shared options](/docs/cli#shared-options). |
 
 A robot's data files stay from battle to battle, as in classic; `--fresh-data` starts every robot with none.
