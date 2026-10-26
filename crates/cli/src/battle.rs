@@ -72,7 +72,8 @@ Robots and runtime:
                          AppContainer and a Job Object), bwrap (bubblewrap,
                          if installed), docker (a container of the Temurin
                          JRE image, no network; needs Docker, pulls the image
-                         the first time), none (a plain process); default os
+                         the first time), podman (the same container in
+                         Podman), none (a plain process); default os
                          where there is one, else none
 
 Output:
