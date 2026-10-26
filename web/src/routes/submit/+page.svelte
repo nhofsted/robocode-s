@@ -24,6 +24,7 @@
 
 	let mode: 'upload' | 'url' = $state('upload');
 	let file: File | undefined = $state();
+	let dragging = $state(false);
 	let url = $state('');
 	let homepage = $state('');
 	let divisions = $state(['1v1', 'melee']);
@@ -82,6 +83,13 @@
 		return '';
 	});
 
+	function ondrop(e: DragEvent) {
+		e.preventDefault();
+		dragging = false;
+		const dropped = e.dataTransfer?.files[0];
+		if (dropped) file = dropped;
+	}
+
 	const weight = (w: string) => (w in CLASS_NAMES ? CLASS_NAMES[w as WeightClass] : w);
 </script>
 
@@ -110,14 +118,35 @@
 					<label><input type="radio" bind:group={mode} value="url" /> From a URL</label>
 				</p>
 				{#if mode === 'upload'}
-					<p>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="drop"
+						class:dragging
+						ondragover={(e) => {
+							e.preventDefault();
+							dragging = true;
+						}}
+						ondragleave={() => (dragging = false)}
+						{ondrop}
+					>
+						<label class="button" for="jar-file">{file ? 'Choose another jar' : 'Choose a jar file'}</label>
 						<input
+							id="jar-file"
+							class="file"
 							type="file"
 							accept=".jar,application/java-archive"
 							aria-label="Robot jar"
-							onchange={(e) => (file = e.currentTarget.files?.[0])}
+							onchange={(e) => {
+								file = e.currentTarget.files?.[0] ?? file;
+								e.currentTarget.value = '';
+							}}
 						/>
-					</p>
+						{#if file}
+							<span class="mono name">{file.name}</span>
+						{:else}
+							<span class="muted">or drop it here</span>
+						{/if}
+					</div>
 				{:else}
 					<p>
 						<input type="url" placeholder="https://example.com/jd.MyRobot_1.0.jar" aria-label="URL of the jar" bind:value={url} />
@@ -222,6 +251,36 @@
 		display: flex;
 		gap: 1.2rem;
 		flex-wrap: wrap;
+	}
+	.drop {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.8rem;
+		padding: 1.2rem;
+		margin: 1rem 0;
+		border: 2px dashed var(--line-strong);
+		border-radius: var(--radius);
+		background: var(--panel);
+	}
+	.drop.dragging {
+		border-color: var(--radar);
+		background: var(--panel-2);
+	}
+	/* Visually hidden, but still focusable: the label is the button. */
+	.file {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		opacity: 0;
+		overflow: hidden;
+	}
+	.drop:has(.file:focus-visible) .button {
+		outline: 2px solid var(--amber);
+		outline-offset: 2px;
+	}
+	.name {
+		overflow-wrap: anywhere;
 	}
 	label input[type='url'] {
 		display: block;
