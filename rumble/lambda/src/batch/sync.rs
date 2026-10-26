@@ -3,7 +3,7 @@
 //! `sync` (daily, spec §16.5): the unclaimed imported bots follow the RoboWiki participants
 //! lists, as in LiteRumble. Reads both lists (a list that fails or shrank is left out, with an
 //! `ALERT sync`), `REG` and the bots (paced at [`READ_RATE`]); fetches the jars of new listed
-//! versions (the list's URL, then the mirror; [`DOWNLOAD_GAP`] apart, at most
+//! versions (the mirror, then the list's URL; [`DOWNLOAD_GAP`] apart, at most
 //! `sync.maxImportsPerRun`, within the time budget), validates them as an import does and puts
 //! them in `jars/`; then plans and applies the changes with `rumble_core::sync`. Fetch
 //! failures are kept in `state/sync.json`; one that is a week old raises an `ALERT sync` once.
@@ -75,8 +75,9 @@ fn fetch_list(batch: &Batch, url: &str) -> Result<ParsedList, String> {
     Ok(parse_list(&String::from_utf8_lossy(&bytes)))
 }
 
-/// The first source that yields a valid jar for `id version`: the list's URL, then the
-/// mirror. The error is the most telling one, as in the importer: the first `invalid` or
+/// The first source that yields a valid jar for `id version`: the mirror (strangeautomata
+/// picks up new listings within the hour and outlives authors' links), then the list's URL.
+/// The error is the most telling one, as in the importer: the first `invalid` or
 /// `mismatch`, else the last download failure.
 fn fetch_jar(
     batch: &Batch,
@@ -85,12 +86,12 @@ fn fetch_jar(
     version: &str,
     url: &str,
 ) -> Result<FetchedJar, String> {
-    let mut urls = vec![url.to_string()];
+    let mut urls = Vec::new();
     if !config.sync.mirror.is_empty() {
-        let mirror = mirror_url(&config.sync.mirror, id, version);
-        if mirror != url {
-            urls.push(mirror);
-        }
+        urls.push(mirror_url(&config.sync.mirror, id, version));
+    }
+    if !urls.iter().any(|u| u == url) {
+        urls.push(url.to_string());
     }
     let limit = MAX_JAR_BYTES.min(config.jar.max_bytes);
     let (mut invalid, mut download) = (None, None);
