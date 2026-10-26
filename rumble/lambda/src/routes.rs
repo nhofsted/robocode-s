@@ -1075,6 +1075,10 @@ impl App {
         if !is_sha256_hex(&body.sha256) {
             return Err(bad_request("sha256: 64 lower-case hex digits"));
         }
+        // A listed version's date (§16.6): no jar.
+        if body.date_only {
+            return Ok(Response::ok(&bots::set_release_date(self.store(), &body)?));
+        }
         let uid = caller.user().uid.clone();
         // A historic version needs its bot (§16.6): checked before its jar is published.
         if body.historic && self.store().get_bot(&body.bot)?.is_none() {

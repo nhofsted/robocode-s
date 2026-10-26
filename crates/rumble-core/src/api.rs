@@ -732,6 +732,11 @@ pub struct ImportRequest {
     /// one whose `ret` differs (`updated`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retired: Option<u64>,
+    /// Only set the release date `released` of the registered version of this name
+    /// (§16.6), whatever its jar: no jar is read or registered; 404 if there is no such
+    /// version. For a listed version, whose jar the archives may have in another build.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub date_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

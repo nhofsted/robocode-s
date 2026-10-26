@@ -341,7 +341,9 @@ pub(crate) fn retire_replaced<S: Store + ?Sized>(
 /// `historic`: the bot must exist (404). A new version is registered **retired** (`ret` = the
 /// request's `retired`, else its release date, else now) with the request's division, appended
 /// to `vs` (behind the bot's other versions); `cur`, the bot and its other versions stay as
-/// they are. An existing version only gets the release date, and a retired one `retired`.
+/// they are; its `cr` is its release date (when it entered the rumble), so it doesn't show
+/// as added today. An existing version only gets the release date (a retired one also `cr`)
+/// and, if retired, `retired`.
 pub fn import<S: Store + ?Sized>(
     store: &S,
     request: &ImportRequest,
@@ -393,6 +395,15 @@ pub fn import<S: Store + ?Sized>(
                 result = ImportResult::Updated;
             }
         }
+        if let Some(released) = request.released.filter(|_| request.historic)
+            && version.state == VersionState::Retired
+            && version.created != released / 1000
+        {
+            version.created = released / 1000;
+            if result == ImportResult::Exists {
+                result = ImportResult::Updated;
+            }
+        }
         if let Some(retired) = request.retired.filter(|_| request.historic)
             && version.state == VersionState::Retired
             && version.retired != Some(retired / 1000)
@@ -429,6 +440,9 @@ pub fn import<S: Store + ?Sized>(
                 .or(request.released)
                 .map_or(now, |ms| ms / 1000),
         );
+        if let Some(released) = request.released {
+            version.created = released / 1000;
+        }
         let expected = bot.versions.clone();
         bot.versions.push(vid);
         return match store.register_version(&bot, Some(&expected), &version) {
@@ -485,6 +499,35 @@ pub fn import<S: Store + ?Sized>(
     Ok(ImportResponse {
         vid,
         result: ImportResult::Created,
+    })
+}
+
+/// `admin/bots/import` with `dateOnly` (§16.6): sets the release date of the registered
+/// version `request.version` of `request.bot`, whichever jar it has; `updated` or `exists`.
+pub fn set_release_date<S: Store + ?Sized>(
+    store: &S,
+    request: &ImportRequest,
+) -> Result<ImportResponse, ApiError> {
+    let released = request
+        .released
+        .ok_or_else(|| ApiError::new(ErrorCode::BadRequest, "dateOnly needs released"))?;
+    let bot = store
+        .get_bot(&request.bot)?
+        .ok_or_else(|| not_found(format!("no bot {}", request.bot)))?;
+    let mut version = bot_versions(store, &bot)?
+        .into_iter()
+        .find(|v| v.version == request.version)
+        .ok_or_else(|| not_found(format!("no version {} {}", request.bot, request.version)))?;
+    let result = if version.released == Some(released) {
+        ImportResult::Exists
+    } else {
+        version.released = Some(released);
+        store.put_version(&version)?;
+        ImportResult::Updated
+    };
+    Ok(ImportResponse {
+        vid: version.vid,
+        result,
     })
 }
 
@@ -936,6 +979,37 @@ mod tests {
             released: None,
             historic: false,
             retired: None,
+            date_only: false,
+        }
+    }
+
+    #[test]
+    fn release_dates_without_a_jar() {
+        let store = MemStore::new();
+        let current = import_request("jk.B", "2", 'b', Division::OneVsOne);
+        let vid = import(&store, &current, &info("jk.B", "2", 'b'), NOW)
+            .unwrap()
+            .vid;
+        // Another build of the same version: the date is set, the jar stays.
+        let date = |bot: &str, version: &str| ImportRequest {
+            date_only: true,
+            released: Some(1_300_000_000_000),
+            ..import_request(bot, version, 'z', Division::OneVsOne)
+        };
+        let set = set_release_date(&store, &date("jk.B", "2")).unwrap();
+        assert_eq!((set.vid, set.result), (vid, ImportResult::Updated));
+        let v = store.get_version(vid).unwrap().unwrap();
+        assert_eq!(
+            (v.released, v.sha256.chars().next()),
+            (Some(1_300_000_000_000), Some('b'))
+        );
+        assert_eq!(
+            set_release_date(&store, &date("jk.B", "2")).unwrap().result,
+            ImportResult::Exists
+        );
+        for (bot, version) in [("jk.B", "9"), ("x.Y", "1")] {
+            let err = set_release_date(&store, &date(bot, version)).unwrap_err();
+            assert_eq!(err.code, ErrorCode::NotFound);
         }
     }
 
@@ -959,6 +1033,11 @@ mod tests {
         .unwrap();
         let retired = |vid| store.get_version(vid).unwrap().unwrap().retired;
         assert_eq!(retired(created.vid), Some(1_250_000_000));
+        // Added when it was released, not today.
+        assert_eq!(
+            store.get_version(created.vid).unwrap().unwrap().created,
+            1_200_000_000
+        );
         // A rerun with another date corrects it; the same date changes nothing.
         let again = |ms| import(&store, &historic(Some(ms)), &info("jk.B", "1", 'a'), NOW);
         assert_eq!(

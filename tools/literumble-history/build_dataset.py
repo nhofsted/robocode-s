@@ -142,7 +142,7 @@ def load_wiki(wiki_dir):
                                           "firstComment": rev.get("comment"),
                                           "firstPage": short, "preHistory": False,
                                           "lastListed": None, "pages": set(), "urls": set(),
-                                          "spans": 0, "stillListed": set()})
+                                          "spans": 0, "stillListed": set(), "removedAt": None})
                 if rev["timestamp"] < h["firstListed"]:
                     h.update(firstListed=rev["timestamp"], firstRevid=rev["revid"],
                              firstEditor=rev.get("user"), firstComment=rev.get("comment"),
@@ -156,6 +156,12 @@ def load_wiki(wiki_dir):
                     h["spans"] += 1
                 if h["lastListed"] is None or rev["timestamp"] > h["lastListed"]:
                     h["lastListed"] = rev["timestamp"]
+            # The revision that dropped a version: when it left this page (the ranked lists
+            # only: GigaRumble and MeleeTop30 lag behind them).
+            for key in (prev - now) if title in CURRENT_PAGES else ():
+                h = hist[key]
+                if h["removedAt"] is None or rev["timestamp"] > h["removedAt"]:
+                    h["removedAt"] = rev["timestamp"]
             prev = now
         for key in prev:
             hist[key]["stillListed"].add(short)
@@ -261,6 +267,7 @@ def main():
         if w:
             wiki = {"firstListed": w["firstListed"],
                     "lastListed": None if w["stillListed"] else w["lastListed"],
+                    "removedAt": None if w["stillListed"] else w["removedAt"],
                     "pages": sorted(w["pages"]), "urls": sorted(w["urls"]),
                     "firstEditor": w["firstEditor"], "firstComment": w["firstComment"],
                     "firstRevid": w["firstRevid"], "firstPage": w["firstPage"],

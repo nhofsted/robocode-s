@@ -39,8 +39,9 @@ pub struct HistoryEntry {
     pub file: PathBuf,
     /// Milliseconds since the epoch.
     pub released: u64,
-    /// When it left the rumble (ms): the last participants revision listing it
-    /// (`wiki.lastListed`), else the release of the bot's next version; `None` if neither is
+    /// When it left the rumble (ms): the first participants revision after its last listing
+    /// (`wiki.removedAt`), else its last listing (`wiki.lastListed`), else the release of the
+    /// bot's next version; `None` if neither is
     /// known (still listed, or the bot's newest). Never before `released`.
     pub retired: Option<u64>,
     pub division: Division,
@@ -219,11 +220,14 @@ pub fn parse_dataset(text: &str, dir: &Path) -> Result<Dataset, String> {
             dataset.unusable.push(unusable("bad release date"));
             continue;
         };
-        let last_listed = record
-            .get("wiki")
-            .and_then(|w| w.get("lastListed"))
-            .and_then(Value::as_str)
-            .and_then(parse_time);
+        let wiki_time = |key: &str| {
+            record
+                .get("wiki")
+                .and_then(|w| w.get(key))
+                .and_then(Value::as_str)
+                .and_then(parse_time)
+        };
+        let last_listed = wiki_time("removedAt").or_else(|| wiki_time("lastListed"));
         dataset.entries.push(HistoryEntry {
             id: id.clone().unwrap_or_default(),
             version: version.clone().unwrap_or_default(),
@@ -407,6 +411,23 @@ fn process(
     let Some(api) = api.filter(|_| !options.dry_run) else {
         return row;
     };
+    // A listed version only needs its date: the rumble may have another build of its jar.
+    if !row.historic {
+        let body = json!({
+            "bot": info.bot_id,
+            "version": info.version,
+            "sha256": info.sha256,
+            "division": division.as_str(),
+            "released": entry.released,
+            "dateOnly": true,
+        });
+        match import_call(api, pacer, &body) {
+            Ok(result) => row.result = result,
+            Err(why) if why == "no bot" => row.result = "noBot".to_string(),
+            Err(why) => return fail(row, why),
+        }
+        return row;
+    }
     if let Err(why) = upload(api, pacer, &info, &bytes) {
         return fail(row, why);
     }
