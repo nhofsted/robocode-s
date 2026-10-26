@@ -406,7 +406,9 @@ fn process(
 pub type Progress<'a> = &'a (dyn Fn(&HistoryRow, usize, usize) + Sync);
 
 /// Imports every usable entry of the dataset: `api` is required unless `options.dry_run`.
-/// Paced and threaded like the list import; the report lists them in dataset order.
+/// Paced and threaded like the list import, but a worker takes all of a bot's entries in turn:
+/// two registrations of one bot at once make the server answer 409 `conflict` (its `vs` list
+/// changed). The report lists them in dataset order.
 pub fn run(
     dataset: &Dataset,
     listed: &Listed,
@@ -419,23 +421,36 @@ pub fn run(
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let rows: Mutex<Vec<Option<HistoryRow>>> = Mutex::new(vec![None; total]);
-    let workers = options.concurrency.clamp(1, 64).min(total.max(1));
+    // The entries' indices by bot, bots in order of first appearance.
+    let mut bots: Vec<Vec<usize>> = Vec::new();
+    let mut by_id: HashMap<&str, usize> = HashMap::new();
+    for (i, entry) in dataset.entries.iter().enumerate() {
+        let group = *by_id.entry(entry.id.as_str()).or_insert_with(|| {
+            bots.push(Vec::new());
+            bots.len() - 1
+        });
+        bots[group].push(i);
+    }
+    let workers = options.concurrency.clamp(1, 64).min(bots.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
                 loop {
-                    let i = next.fetch_add(1, Ordering::SeqCst);
-                    let Some(entry) = dataset.entries.get(i) else {
+                    let b = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(group) = bots.get(b) else {
                         break;
                     };
-                    let mut row = process(entry, listed, options, api, &pacer);
-                    if api.is_none() && !options.dry_run && row.result == "valid" {
-                        row.result = "failed".to_string();
-                        row.error = Some("api (no API client)".to_string());
+                    for &i in group {
+                        let entry = &dataset.entries[i];
+                        let mut row = process(entry, listed, options, api, &pacer);
+                        if api.is_none() && !options.dry_run && row.result == "valid" {
+                            row.result = "failed".to_string();
+                            row.error = Some("api (no API client)".to_string());
+                        }
+                        let n = done.fetch_add(1, Ordering::SeqCst) + 1;
+                        progress(&row, n, total);
+                        rows.lock().unwrap()[i] = Some(row);
                     }
-                    let n = done.fetch_add(1, Ordering::SeqCst) + 1;
-                    progress(&row, n, total);
-                    rows.lock().unwrap()[i] = Some(row);
                 }
             });
         }
