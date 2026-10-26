@@ -259,12 +259,13 @@ test('dev distribution has no domain and no certificate', () => {
 	assert.equal(config.ViewerCertificate, undefined);
 });
 
-test('schedules: plan, publish, cleanup with their inputs', () => {
-	prod.resourceCountIs('AWS::Scheduler::Schedule', 3);
+test('schedules: plan, publish, cleanup, sync with their inputs', () => {
+	prod.resourceCountIs('AWS::Scheduler::Schedule', 4);
 	const expected = {
 		'rumble-plan': ['cron(12 * * * ? *)', '{"mode":"plan"}'],
 		'rumble-publish': ['cron(30 3,9,15,21 * * ? *)', '{"mode":"publish"}'],
-		'rumble-cleanup': ['cron(45 4 * * ? *)', '{"mode":"cleanup"}']
+		'rumble-cleanup': ['cron(45 4 * * ? *)', '{"mode":"cleanup"}'],
+		'rumble-sync': ['cron(15 5 * * ? *)', '{"mode":"sync"}']
 	};
 	for (const [name, [expression, input]] of Object.entries(expected)) {
 		prod.hasResourceProperties('AWS::Scheduler::Schedule', {
@@ -318,6 +319,20 @@ test('IAM: api cannot touch state outside config, plan and uploads, nor delete j
 		if (!actions.includes('s3:DeleteObject')) continue;
 		assert.doesNotMatch(JSON.stringify(statement.Resource), /jars|rec\//);
 	}
+});
+
+test('IAM: batch puts jars (sync), but no recordings', () => {
+	const forBatch = Object.values(prod.findResources('AWS::IAM::Policy'))
+		.filter((policy) => JSON.stringify(policy).includes('BatchServiceRole'))
+		.flatMap((policy) => policy.Properties.PolicyDocument.Statement);
+	const puts = forBatch.filter(
+		(statement: { Action: string | string[]; Resource: unknown }) =>
+			[statement.Action].flat().includes('s3:PutObject') &&
+			JSON.stringify(statement.Resource).includes('JarsBucket')
+	);
+	assert.equal(puts.length, 1);
+	assert.match(JSON.stringify(puts[0].Resource), /jars\/\*/);
+	assert.doesNotMatch(JSON.stringify(puts[0].Resource), /rec\//);
 });
 
 test('alarms: ALERT filters, throttles, and SNS only with alertEmail', () => {

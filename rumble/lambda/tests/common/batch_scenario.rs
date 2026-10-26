@@ -25,6 +25,7 @@ use rumble_lambda::batch::plan::{PlanReport, state_key};
 use rumble_lambda::batch::publish::PublishReport;
 use rumble_lambda::batch::{Batch, Mode, Services};
 use rumble_lambda::cloudfront::MemCdn;
+use rumble_lambda::fetch::MemFetcher;
 use rumble_lambda::s3::{Bucket, Fetched, IMMUTABLE, JAR_TYPE, Objects, TRACK_TYPE};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -41,6 +42,7 @@ pub struct World {
     pub store: Arc<dyn Store + Send + Sync>,
     pub objects: Arc<dyn Objects>,
     pub cdn: Arc<MemCdn>,
+    pub fetcher: Arc<MemFetcher>,
     pub clock: Arc<AtomicU64>,
     /// Milliseconds the clock moves on every reading (for the time budget).
     pub tick: Arc<AtomicU64>,
@@ -52,6 +54,7 @@ impl World {
             store,
             objects,
             cdn: Arc::new(MemCdn::new()),
+            fetcher: Arc::new(MemFetcher::new()),
             clock: Arc::new(AtomicU64::new(T0 * 1000)),
             tick: Arc::new(AtomicU64::new(0)),
         }
@@ -73,6 +76,7 @@ impl World {
             store: Box::new(self.store.clone()),
             objects: Box::new(self.objects.clone()),
             cdn: Box::new(self.cdn.clone()),
+            fetcher: Box::new(self.fetcher.clone()),
             clock: Box::new(move || clock.fetch_add(tick.load(Ordering::SeqCst), Ordering::SeqCst)),
             sleep: Box::new(|_| {}),
             random: Box::new(move || {
@@ -156,6 +160,7 @@ fn version(vid: u32, bot: u32, version: &str, state: VersionState) -> VersionIte
         retired: None,
         url: None,
         colors: None,
+        released: None,
     }
 }
 

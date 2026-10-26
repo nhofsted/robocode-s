@@ -117,6 +117,10 @@ pub struct BotDetails {
     /// `/data/v1/rec/<division>/<id>.json` where this is above 0. Absent: none (M6).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub recordings: BTreeMap<String, u32>,
+    /// `active`, `retired` or `delisted` (additive; absent in files written before it): a
+    /// delisted bot left the RoboWiki participants lists and is no longer in the rumble.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -145,6 +149,9 @@ pub struct BotVersion {
     /// The version's colours (additive; absent where unknown).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colors: Option<BotColors>,
+    /// The release date as well as it is known (additive; absent where unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released_at: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -231,10 +238,13 @@ pub struct ArchiveVersion {
     /// The jar is `/jars/<sha256>.jar`.
     pub sha256: String,
     pub size: u64,
-    /// `active`, `probation`, `retired` or `failed`.
+    /// `active`, `probation`, `retired`, `failed` or `delisted`.
     pub state: String,
     /// `YYYY-MM-DD`.
     pub added: String,
+    /// The release date, `YYYY-MM-DD` (additive; absent where unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<String>,
 }
 
 /// Days since 1970-01-01 of a `YYYY-MM-DD` date; `None` if it is not one.

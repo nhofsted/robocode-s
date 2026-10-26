@@ -379,6 +379,9 @@ fn version_item(version: &VersionItem) -> Item {
     if let Some(colors) = &version.colors {
         item.insert("col".into(), s(json(colors)));
     }
+    if let Some(released) = version.released {
+        item.insert("rd".into(), n(released));
+    }
     item
 }
 
@@ -419,6 +422,7 @@ fn version_from(item: &Item) -> StoreResult<VersionItem> {
         retired: opt_n(item, "ret")?,
         url: opt_s(item, "url")?,
         colors: opt_json(item, "col")?,
+        released: opt_n(item, "rd")?,
     })
 }
 
@@ -1377,7 +1381,7 @@ mod tests {
             divisions: vec![Division::OneVsOne, Division::Melee],
             versions: vec![3, 1],
             current: Some(1),
-            state: BotState::Active,
+            state: BotState::Delisted,
             created: 7,
             source: BotSource::Import,
         };
@@ -1399,11 +1403,24 @@ mod tests {
             retired: None,
             url: Some("https://x".into()),
             colors: None,
+            released: Some(1_792_843_200_123),
         };
         let item = version_item(&version);
         assert_eq!(item["sk"], s("V#rs"));
         assert!(!item.contains_key("col"));
+        assert_eq!(item["rd"], n(1_792_843_200_123u64));
         assert_eq!(version_from(&item).unwrap(), version);
+        let delisted = VersionItem {
+            state: VersionState::Delisted,
+            released: None,
+            ..version.clone()
+        };
+        let item = version_item(&delisted);
+        assert_eq!(
+            (item["st"].clone(), item.contains_key("rd")),
+            (s("delisted"), false)
+        );
+        assert_eq!(version_from(&item).unwrap(), delisted);
         let colored = VersionItem {
             colors: Some(BotColors {
                 body: Some("#000000".into()),

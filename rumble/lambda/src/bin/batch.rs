@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
 //! The `batch` Lambda (spec §14.2): invoked by EventBridge Scheduler with
-//! `{"mode": "plan" | "publish" | "cleanup"}`. Environment: `TABLE`, `JARS_BUCKET`,
+//! `{"mode": "plan" | "publish" | "cleanup" | "sync"}`. Environment: `TABLE`, `JARS_BUCKET`,
 //! `STATE_BUCKET`, `SITE_BUCKET`, `DISTRIBUTION_ID`. A failed run logs
 //! `ALERT batch-error <mode> ...` (the alarm's metric filter) and fails the invocation.
 
@@ -9,6 +9,7 @@ use lambda_runtime::{Error, LambdaEvent, service_fn};
 use rumble_lambda::batch::{Batch, Event, Services};
 use rumble_lambda::cloudfront::CloudFront;
 use rumble_lambda::dynamo::DynamoStore;
+use rumble_lambda::fetch::HttpFetcher;
 use rumble_lambda::s3::S3Objects;
 use rumble_lambda::{env, now_ms, random32};
 use serde_json::Value;
@@ -35,6 +36,7 @@ async fn main() -> Result<(), Error> {
             aws_sdk_cloudfront::Client::new(&config),
             &distribution,
         )),
+        fetcher: Box::new(HttpFetcher),
         clock: Box::new(now_ms),
         sleep: Box::new(std::thread::sleep),
         random: Box::new(random32),

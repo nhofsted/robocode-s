@@ -234,6 +234,8 @@ export class Rumble extends Construct {
 			keys(props.siteBucket, 'data/*')
 		);
 		allow(this.batch, ['s3:GetObject', 's3:DeleteObject'], keys(this.jarsBucket, 'jars/*', 'rec/*'));
+		// batch sync: the jars of new listed versions (§16.5).
+		allow(this.batch, ['s3:PutObject'], keys(this.jarsBucket, 'jars/*'));
 		allow(
 			this.batch,
 			['s3:ListBucket'],
@@ -308,7 +310,8 @@ export class Rumble extends Construct {
 		}
 
 		// UTC. Plan hourly at :12 (the hour that just ended is past its 10 minutes of grace, §10.5),
-		// publish every 6 hours (it plans first), cleanup daily.
+		// publish every 6 hours (it plans first), cleanup daily, then the LiteRumble sync (§16.5),
+		// whose changes the next plan picks up.
 		const schedule = (mode: string, minute: string, hour: string) =>
 			new Schedule(this, `${mode[0].toUpperCase()}${mode.slice(1)}Schedule`, {
 				scheduleName: `rumble${suffix}-${mode}`,
@@ -321,6 +324,7 @@ export class Rumble extends Construct {
 		schedule('plan', '12', '*');
 		schedule('publish', '30', '3,9,15,21');
 		schedule('cleanup', '45', '4');
+		schedule('sync', '15', '5');
 
 		// Alarms. The code logs `ALERT ...` lines for what the owner must look at (§11.4).
 		if (props.alertEmail) {

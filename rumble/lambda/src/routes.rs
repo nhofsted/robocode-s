@@ -1076,6 +1076,13 @@ impl App {
             return Err(bad_request("sha256: 64 lower-case hex digits"));
         }
         let uid = caller.user().uid.clone();
+        // A historic version needs its bot (§16.6): checked before its jar is published.
+        if body.historic && self.store().get_bot(&body.bot)?.is_none() {
+            return Err(ApiError::new(
+                ErrorCode::NotFound,
+                format!("no bot {}", body.bot),
+            ));
+        }
         // The server never trusts the client: the jar is validated again from S3 (§16.2).
         let in_jars = self
             .services

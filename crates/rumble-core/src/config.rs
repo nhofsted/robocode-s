@@ -33,6 +33,7 @@ pub struct Config {
     pub plan: PlanConfig,
     pub jar: JarConfig,
     pub submit: SubmitConfig,
+    pub sync: SyncConfig,
     /// GitHub numeric ids with the admin role.
     pub admins: Vec<u64>,
 }
@@ -292,6 +293,42 @@ impl Default for SubmitConfig {
     }
 }
 
+/// The daily LiteRumble sync (spec §16.5).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncConfig {
+    pub enabled: bool,
+    /// The participants pages (`action=raw`).
+    pub lists: PerDivision<String>,
+    /// URL template with `{id}` and `{version}`, tried after the list's URL; empty: none.
+    pub mirror: String,
+    /// A list that parses to fewer entries than this share of the last good sync's (or to
+    /// fewer than `minEntries`) is not trusted: nothing changes in its division.
+    pub min_list_share: f64,
+    pub min_entries: u32,
+    /// More versions to delist than this in one run: none are delisted (an alert instead).
+    pub max_delist_per_run: u32,
+    /// New versions downloaded per run; the rest wait for the next day.
+    pub max_imports_per_run: u32,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        SyncConfig {
+            enabled: true,
+            lists: PerDivision {
+                one_vs_one: crate::participants::LIST_1V1.to_string(),
+                melee: crate::participants::LIST_MELEE.to_string(),
+            },
+            mirror: crate::participants::DEFAULT_MIRROR.to_string(),
+            min_list_share: 0.9,
+            min_entries: 100,
+            max_delist_per_run: 50,
+            max_imports_per_run: 200,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -311,6 +348,7 @@ impl Default for Config {
             plan: PlanConfig::default(),
             jar: JarConfig::default(),
             submit: SubmitConfig::default(),
+            sync: SyncConfig::default(),
             admins: vec![4_036_752],
         }
     }
@@ -383,6 +421,12 @@ mod tests {
                          "minHourly": {"1v1": 200, "melee": 20}, "headroom": 1.5},
                 "jar": {"maxBytes": 5242880, "maxUnpacked": 20971520, "maxEntries": 5000},
                 "submit": {"maxBots": 5, "versionsPerDay": 5, "minAccountDays": 30},
+                "sync": {"enabled": true,
+                         "lists": {"1v1": "https://robowiki.net/w/index.php?title=RoboRumble/Participants&action=raw",
+                                   "melee": "https://robowiki.net/w/index.php?title=RoboRumble/Participants/Melee&action=raw"},
+                         "mirror": "https://robocode-archive.strangeautomata.com/robots/{id}_{version}.jar",
+                         "minListShare": 0.9, "minEntries": 100, "maxDelistPerRun": 50,
+                         "maxImportsPerRun": 200},
                 "admins": [4036752]
             })
         );

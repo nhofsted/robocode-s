@@ -124,7 +124,16 @@ export interface BotDetails {
 	 * `/data/v1/rec/<division>/<id>.json` exists (`Recordings1v1`, `RecordingsMelee`).
 	 */
 	recordings?: Record<string, number>;
+	/**
+	 * The bot's state (added within v1; absent in files written before): `delisted` when it left
+	 * the RoboWiki participants lists and is no longer in the rumble (its `rumbles` are its last
+	 * numbers), `retired` when its author retired it. Absent: treat as `active`.
+	 */
+	state?: BotState;
 }
+
+/** See `BotDetails.state`. */
+export type BotState = 'active' | 'retired' | 'delisted';
 
 export interface Author {
 	name: string;
@@ -148,6 +157,13 @@ export interface BotVersion {
 	retiredAt: string | null;
 	/** The version's colours (additive; absent where unknown). */
 	colors?: BotColors | null;
+	/**
+	 * When the version was released, as well as it is known (added within v1; absent where
+	 * unknown): the day the rumble first saw it on a participants list, or the archives' date
+	 * for older versions. `versions` lists the current version first, then the others by this
+	 * date (else `addedAt`), newest first.
+	 */
+	releasedAt?: string | null;
 }
 
 export interface BotRumble extends Metrics {
@@ -241,9 +257,12 @@ export interface ArchiveVersion {
 	sha256: string;
 	/** Size of the jar in bytes. */
 	size: number;
-	state: 'active' | 'probation' | 'retired' | 'failed';
+	/** `delisted` (added within v1): the bot left the participants lists; the jar stays. */
+	state: 'active' | 'probation' | 'retired' | 'failed' | 'delisted';
 	/** `YYYY-MM-DD`. */
 	added: string;
+	/** The release date, `YYYY-MM-DD`, where known (added within v1; see `BotVersion.releasedAt`). */
+	released?: string | null;
 }
 
 /** A bot version as the recordings index names it; the track URLs use `bot` and `sha16`. */

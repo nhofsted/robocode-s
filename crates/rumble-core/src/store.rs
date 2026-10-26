@@ -254,11 +254,15 @@ impl TokenItem {
 
 // ---- bots and versions ----
 
+/// A bot's state (`st`). `delisted` (owner, 2026-10-26): an unclaimed imported bot that left
+/// the RoboWiki participants lists; its current version is delisted too (`cur` still points to
+/// it), and it is active again when it is listed again (§16.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BotState {
     Active,
     Retired,
     Removed,
+    Delisted,
 }
 
 impl BotState {
@@ -267,6 +271,7 @@ impl BotState {
             BotState::Active => "active",
             BotState::Retired => "retired",
             BotState::Removed => "removed",
+            BotState::Delisted => "delisted",
         }
     }
 
@@ -275,6 +280,7 @@ impl BotState {
             "active" => Ok(BotState::Active),
             "retired" => Ok(BotState::Retired),
             "removed" => Ok(BotState::Removed),
+            "delisted" => Ok(BotState::Delisted),
             _ => Err(format!("unknown bot state {text:?}")),
         }
     }
@@ -323,6 +329,10 @@ pub struct BotItem {
     pub source: BotSource,
 }
 
+/// A version's state (`st`). `delisted` (§16.5): the version of an unclaimed imported bot
+/// that left the participants lists. Neither planned nor ranked, but not dead either: its
+/// pairings stay in the state (frozen), its recordings, slot items and jar stay, and it is
+/// active again, with those pairings, when the same version is listed again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VersionState {
     Probation,
@@ -330,15 +340,17 @@ pub enum VersionState {
     Failed,
     Retired,
     Removed,
+    Delisted,
 }
 
 impl VersionState {
-    pub const ALL: [VersionState; 5] = [
+    pub const ALL: [VersionState; 6] = [
         VersionState::Probation,
         VersionState::Active,
         VersionState::Failed,
         VersionState::Retired,
         VersionState::Removed,
+        VersionState::Delisted,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -348,6 +360,7 @@ impl VersionState {
             VersionState::Failed => "failed",
             VersionState::Retired => "retired",
             VersionState::Removed => "removed",
+            VersionState::Delisted => "delisted",
         }
     }
 
@@ -382,6 +395,10 @@ pub struct VersionItem {
     /// `col` (JSON): the colours the robot sets, once two runs of a battle agreed on them
     /// ([`Store::set_version_colors`]); `None` until then, and for robots that set none.
     pub colors: Option<BotColors>,
+    /// `rd` (new): the release date, **milliseconds** since the epoch, as well as it is known:
+    /// the daily sync's first sighting on a participants list, or the archives' date
+    /// (§16.5, §16.6). `None` for versions registered before.
+    pub released: Option<u64>,
 }
 
 // ---- results ----

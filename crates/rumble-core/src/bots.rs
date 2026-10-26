@@ -142,6 +142,7 @@ pub fn submit<S: Store + ?Sized>(
         retired: None,
         url: source_url.map(str::to_string),
         colors: None,
+        released: None,
     };
     let homepage = homepage.and_then(non_empty);
     let item = match &bot {
@@ -243,10 +244,104 @@ pub fn validate_import(
     })
 }
 
-/// `admin/bots/import` (§16.2) of the validated jar `info`: the jar's properties must match
-/// the entry. A new version is registered **active** (no probation) and the bot's previous
-/// current version retired; an existing version with the same jar is `exists`, or
-/// `divisionAdded` when the entry's division is new for it; with another jar 409.
+/// A version item of an imported jar (§16.2, §16.5, §16.6): no probation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn imported_version(
+    info: &JarInfo,
+    vid: u32,
+    divisions: Vec<Division>,
+    state: VersionState,
+    source_url: Option<String>,
+    released: Option<u64>,
+    now: u64,
+) -> VersionItem {
+    VersionItem {
+        vid,
+        bot: info.bot_id.clone(),
+        version: info.version.clone(),
+        sha256: info.sha256.clone(),
+        size: info.size,
+        codesize: Some(info.codesize),
+        class: info.weight_class,
+        divisions: sorted_divisions(divisions),
+        state,
+        probation_battles: 0,
+        probation_failures: 0,
+        class_name: info.main_class.clone(),
+        created: now,
+        retired: None,
+        url: source_url,
+        colors: None,
+        released,
+    }
+}
+
+/// A new imported bot (unclaimed, `src: import`) whose first version is `vid`, current.
+pub(crate) fn imported_bot(
+    info: &JarInfo,
+    author: Option<&str>,
+    divisions: Vec<Division>,
+    vid: u32,
+    now: u64,
+) -> BotItem {
+    let author = author
+        .and_then(non_empty)
+        .or_else(|| non_empty(&info.author))
+        .unwrap_or_else(|| {
+            info.bot_id
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        });
+    BotItem {
+        id: info.bot_id.clone(),
+        author,
+        owner: None,
+        homepage: non_empty(&info.webpage),
+        description: non_empty(&info.description),
+        divisions: sorted_divisions(divisions),
+        versions: vec![vid],
+        current: Some(vid),
+        state: BotState::Active,
+        created: now,
+        source: BotSource::Import,
+    }
+}
+
+/// Retires the version `vid` if it is active or delisted (a bot's previous current version
+/// when another one takes its place).
+pub(crate) fn retire_replaced<S: Store + ?Sized>(
+    store: &S,
+    vid: u32,
+    now: u64,
+) -> StoreResult<bool> {
+    let Some(mut old) = store.get_version(vid)? else {
+        return Ok(false);
+    };
+    let expected = old.state;
+    if !matches!(expected, VersionState::Active | VersionState::Delisted) {
+        return Ok(false);
+    }
+    old.state = VersionState::Retired;
+    old.retired = Some(now);
+    match store.update_version(&old, expected) {
+        Ok(()) => Ok(true),
+        Err(StoreError::ConditionFailed) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// `admin/bots/import` (§16.2, §16.6) of the validated jar `info`: the jar's properties must
+/// match the entry, and a taken-down bot stays down (403). A new version is registered
+/// **active** (no probation) and the bot's previous current version retired; an existing
+/// version with the same jar is `exists`, `divisionAdded` when the entry's division is new for
+/// it, or `updated` when only its release date changed; with another jar 409.
+///
+/// `historic`: the bot must exist (404). A new version is registered **retired** (`ret` = its
+/// release date, else now) with the request's division, appended to `vs` (behind the bot's
+/// other versions); `cur`, the bot and its other versions stay as they are. An existing
+/// version only gets the release date.
 pub fn import<S: Store + ?Sized>(
     store: &S,
     request: &ImportRequest,
@@ -261,6 +356,12 @@ pub fn import<S: Store + ?Sized>(
     }
     let division = request.division;
     let bot = store.get_bot(&info.bot_id)?;
+    if bot.as_ref().is_some_and(|b| b.state == BotState::Removed) {
+        return Err(forbidden(format!("{} was taken down", info.bot_id)));
+    }
+    if request.historic && bot.is_none() {
+        return Err(not_found(format!("no bot {}", info.bot_id)));
+    }
     let versions = match &bot {
         Some(bot) => bot_versions(store, bot)?,
         None => Vec::new(),
@@ -272,82 +373,85 @@ pub fn import<S: Store + ?Sized>(
                 info.bot_id, info.version
             )));
         }
-        let bot = bot.expect("versions come from the bot");
-        if existing.divisions.contains(&division) && bot.divisions.contains(&division) {
-            return Ok(ImportResponse {
-                vid: existing.vid,
-                result: ImportResult::Exists,
-            });
-        }
+        let mut bot = bot.expect("versions come from the bot");
         let mut version = existing.clone();
-        version.divisions = sorted_divisions(version.divisions.iter().copied().chain([division]));
-        store.put_version(&version)?;
-        let mut bot = bot;
-        bot.divisions = sorted_divisions(bot.divisions.iter().copied().chain([division]));
-        store.put_bot(&bot)?;
+        let mut result = ImportResult::Exists;
+        if !request.historic
+            && !(existing.divisions.contains(&division) && bot.divisions.contains(&division))
+        {
+            version.divisions =
+                sorted_divisions(version.divisions.iter().copied().chain([division]));
+            bot.divisions = sorted_divisions(bot.divisions.iter().copied().chain([division]));
+            store.put_bot(&bot)?;
+            result = ImportResult::DivisionAdded;
+        }
+        if let Some(released) = request.released
+            && version.released != Some(released)
+        {
+            version.released = Some(released);
+            if result == ImportResult::Exists {
+                result = ImportResult::Updated;
+            }
+        }
+        if version != *existing {
+            store.put_version(&version)?;
+        }
         return Ok(ImportResponse {
             vid: existing.vid,
-            result: ImportResult::DivisionAdded,
+            result,
         });
     }
 
     let vid = store.next_vid()?;
+    if request.historic {
+        let mut bot = bot.expect("checked above");
+        let mut version = imported_version(
+            info,
+            vid,
+            vec![division],
+            VersionState::Retired,
+            request.source_url.clone(),
+            request.released,
+            now,
+        );
+        version.retired = Some(request.released.map_or(now, |ms| ms / 1000));
+        let expected = bot.versions.clone();
+        bot.versions.push(vid);
+        return match store.register_version(&bot, Some(&expected), &version) {
+            Ok(()) => Ok(ImportResponse {
+                vid,
+                result: ImportResult::Created,
+            }),
+            Err(StoreError::ConditionFailed) => {
+                Err(conflict("a concurrent registration of this bot; retry"))
+            }
+            Err(e) => Err(e.into()),
+        };
+    }
+
     let divisions = sorted_divisions(
         bot.iter()
             .flat_map(|b| b.divisions.iter().copied())
             .chain([division]),
     );
-    let version = VersionItem {
+    let version = imported_version(
+        info,
         vid,
-        bot: info.bot_id.clone(),
-        version: info.version.clone(),
-        sha256: info.sha256.clone(),
-        size: info.size,
-        codesize: Some(info.codesize),
-        class: info.weight_class,
-        divisions: divisions.clone(),
-        state: VersionState::Active,
-        probation_battles: 0,
-        probation_failures: 0,
-        class_name: info.main_class.clone(),
-        created: now,
-        retired: None,
-        url: request.source_url.clone(),
-        colors: None,
-    };
-    let author = request
-        .author
-        .as_deref()
-        .and_then(non_empty)
-        .or_else(|| non_empty(&info.author))
-        .unwrap_or_else(|| {
-            info.bot_id
-                .split('.')
-                .next()
-                .unwrap_or_default()
-                .to_string()
-        });
+        divisions.clone(),
+        VersionState::Active,
+        request.source_url.clone(),
+        request.released,
+        now,
+    );
     let previous = bot.as_ref().and_then(|b| b.current);
     let item = match &bot {
-        None => BotItem {
-            id: info.bot_id.clone(),
-            author,
-            owner: None,
-            homepage: non_empty(&info.webpage),
-            description: non_empty(&info.description),
-            divisions,
-            versions: vec![vid],
-            current: Some(vid),
-            state: BotState::Active,
-            created: now,
-            source: BotSource::Import,
-        },
+        None => imported_bot(info, request.author.as_deref(), divisions, vid, now),
         Some(bot) => {
             let mut bot = bot.clone();
             bot.versions.insert(0, vid);
             bot.divisions = divisions;
             bot.current = Some(vid);
-            if bot.state == BotState::Retired {
+            if matches!(bot.state, BotState::Retired | BotState::Delisted) {
                 bot.state = BotState::Active;
             }
             bot
@@ -361,13 +465,8 @@ pub fn import<S: Store + ?Sized>(
         }
         Err(e) => return Err(e.into()),
     }
-    if let Some(old) = previous.filter(|&old| old != vid)
-        && let Some(mut old) = store.get_version(old)?
-        && old.state == VersionState::Active
-    {
-        old.state = VersionState::Retired;
-        old.retired = Some(now);
-        store.put_version(&old)?;
+    if let Some(old) = previous.filter(|&old| old != vid) {
+        retire_replaced(store, old, now)?;
     }
     Ok(ImportResponse {
         vid,
@@ -376,7 +475,7 @@ pub fn import<S: Store + ?Sized>(
 }
 
 /// `bots/retire` (§12.3): the owner (or an admin) retires the bot: the bot, its current
-/// version and any version on probation become `retired`.
+/// (also a delisted) version and any version on probation become `retired`.
 pub fn retire<S: Store + ?Sized>(
     store: &S,
     config: &Config,
@@ -396,7 +495,7 @@ pub fn retire<S: Store + ?Sized>(
     for mut version in bot_versions(store, &bot)? {
         if matches!(
             version.state,
-            VersionState::Active | VersionState::Probation
+            VersionState::Active | VersionState::Probation | VersionState::Delisted
         ) {
             version.state = VersionState::Retired;
             version.retired = Some(now);
@@ -820,6 +919,8 @@ mod tests {
             source_url: Some("http://x/y.jar".into()),
             source: Some("list".into()),
             version_from_list: false,
+            released: None,
+            historic: false,
         }
     }
 
@@ -911,6 +1012,192 @@ mod tests {
         assert_eq!(
             store.get_version(2).unwrap().unwrap().divisions,
             Division::ALL.to_vec()
+        );
+    }
+
+    #[test]
+    fn release_dates_and_historic_versions() {
+        let store = MemStore::new();
+        // Historic versions need the bot.
+        let historic = |version: &str, sha: char, released: Option<u64>| ImportRequest {
+            historic: true,
+            released,
+            ..import_request("jk.B", version, sha, Division::OneVsOne)
+        };
+        let err = import(
+            &store,
+            &historic("0.9", 'z', None),
+            &info("jk.B", "0.9", 'z'),
+            NOW,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::NotFound);
+
+        // A new version with a release date.
+        let mut current = import_request("jk.B", "2", 'b', Division::Melee);
+        current.released = Some(1_500_000_000_000);
+        assert_eq!(
+            import(&store, &current, &info("jk.B", "2", 'b'), NOW)
+                .unwrap()
+                .vid,
+            1
+        );
+        assert_eq!(
+            store.get_version(1).unwrap().unwrap().released,
+            Some(1_500_000_000_000)
+        );
+        // The same date again: exists; another one: updated.
+        assert_eq!(
+            import(&store, &current, &info("jk.B", "2", 'b'), NOW)
+                .unwrap()
+                .result,
+            ImportResult::Exists
+        );
+        current.released = Some(1_400_000_000_000);
+        assert_eq!(
+            import(&store, &current, &info("jk.B", "2", 'b'), NOW)
+                .unwrap()
+                .result,
+            ImportResult::Updated
+        );
+        assert_eq!(
+            store.get_version(1).unwrap().unwrap().released,
+            Some(1_400_000_000_000)
+        );
+
+        // A historic version: retired at its release date, behind the others; the bot, its
+        // current version and its divisions stay.
+        let before = store.get_bot("jk.B").unwrap().unwrap();
+        let old = import(
+            &store,
+            &historic("1", 'a', Some(1_200_000_000_000)),
+            &info("jk.B", "1", 'a'),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!((old.vid, old.result), (2, ImportResult::Created));
+        let v = store.get_version(2).unwrap().unwrap();
+        assert_eq!(
+            (v.state, v.retired, v.released, v.divisions.clone()),
+            (
+                VersionState::Retired,
+                Some(1_200_000_000),
+                Some(1_200_000_000_000),
+                vec![Division::OneVsOne]
+            )
+        );
+        let after = store.get_bot("jk.B").unwrap().unwrap();
+        assert_eq!(after.versions, vec![1, 2]);
+        assert_eq!(
+            (after.current, after.divisions.clone(), after.state),
+            (before.current, before.divisions, before.state)
+        );
+        assert_eq!(
+            store.get_version(1).unwrap().unwrap().state,
+            VersionState::Active
+        );
+        // Without a date it retires now. An existing version (the current one, too) only
+        // gets the date, never a division.
+        import(
+            &store,
+            &historic("0", 'c', None),
+            &info("jk.B", "0", 'c'),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(store.get_version(3).unwrap().unwrap().retired, Some(NOW));
+        let again = import(
+            &store,
+            &historic("2", 'b', Some(1_300_000_000_000)),
+            &info("jk.B", "2", 'b'),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!((again.vid, again.result), (1, ImportResult::Updated));
+        assert_eq!(
+            store.get_version(1).unwrap().unwrap().divisions,
+            [Division::Melee]
+        );
+        let err = import(
+            &store,
+            &historic("1", 'd', None),
+            &info("jk.B", "1", 'd'),
+            NOW,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Conflict);
+
+        // Takedowns stay down.
+        remove(&store, "jk.B", "asked", NOW * 1000).unwrap();
+        let err = import(
+            &store,
+            &import_request("jk.B", "3", 'e', Division::OneVsOne),
+            &info("jk.B", "3", 'e'),
+            NOW,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Forbidden);
+    }
+
+    #[test]
+    fn delisted_bots_get_new_versions_and_retire() {
+        let config = Config::default();
+        let store = store_with("g1", NOW - 400 * DAY);
+        import(
+            &store,
+            &import_request("jk.B", "1", 'a', Division::OneVsOne),
+            &info("jk.B", "1", 'a'),
+            NOW,
+        )
+        .unwrap();
+        let delist = |store: &MemStore| {
+            let mut v = store.get_version(1).unwrap().unwrap();
+            v.state = VersionState::Delisted;
+            store.put_version(&v).unwrap();
+            let mut bot = store.get_bot("jk.B").unwrap().unwrap();
+            bot.state = BotState::Delisted;
+            store.put_bot(&bot).unwrap();
+        };
+        delist(&store);
+        // A new version of a delisted bot: active, the delisted one retired.
+        import(
+            &store,
+            &import_request("jk.B", "2", 'b', Division::OneVsOne),
+            &info("jk.B", "2", 'b'),
+            NOW + 1,
+        )
+        .unwrap();
+        let bot = store.get_bot("jk.B").unwrap().unwrap();
+        assert_eq!((bot.state, bot.current), (BotState::Active, Some(2)));
+        let old = store.get_version(1).unwrap().unwrap();
+        assert_eq!(
+            (old.state, old.retired),
+            (VersionState::Retired, Some(NOW + 1))
+        );
+
+        // A claimed bot delisted before its claim: the owner sees the state and can retire it.
+        let store = store_with("g1", NOW - 400 * DAY);
+        import(
+            &store,
+            &import_request("jk.B", "1", 'a', Division::OneVsOne),
+            &info("jk.B", "1", 'a'),
+            NOW,
+        )
+        .unwrap();
+        delist(&store);
+        claim(&store, "jk.B", "g1").unwrap();
+        let listed = list_bots(&store, &user(&store, "g1")).unwrap();
+        assert_eq!(
+            (
+                listed[0].state.as_str(),
+                listed[0].versions[0].state.as_str()
+            ),
+            ("delisted", "delisted")
+        );
+        retire(&store, &config, &user(&store, "g1"), "jk.B", NOW + 2).unwrap();
+        assert_eq!(
+            store.get_version(1).unwrap().unwrap().state,
+            VersionState::Retired
         );
     }
 

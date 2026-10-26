@@ -136,6 +136,48 @@ impl Fetcher for HttpFetcher {
     }
 }
 
+/// URLs and their bodies, in memory (for tests); other URLs answer HTTP 404.
+#[derive(Default)]
+pub struct MemFetcher {
+    bodies: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl MemFetcher {
+    pub fn new() -> MemFetcher {
+        MemFetcher::default()
+    }
+
+    pub fn set(&self, url: &str, body: impl Into<Vec<u8>>) {
+        self.bodies
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), body.into());
+    }
+
+    pub fn remove(&self, url: &str) {
+        self.bodies.lock().unwrap().remove(url);
+    }
+
+    /// The URLs fetched so far, in order.
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl Fetcher for MemFetcher {
+    fn fetch(&self, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+        self.calls.lock().unwrap().push(url.to_string());
+        match self.bodies.lock().unwrap().get(url) {
+            Some(body) if body.len() as u64 > limit => {
+                Err(format!("too large: over {limit} bytes"))
+            }
+            Some(body) => Ok(body.clone()),
+            None => Err("download failed: HTTP 404".into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

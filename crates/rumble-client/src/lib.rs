@@ -8,6 +8,7 @@ pub mod backoff;
 pub mod battle;
 pub mod contributor;
 pub mod hash;
+pub mod history;
 pub mod http;
 pub mod import;
 pub mod jars;

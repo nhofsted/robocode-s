@@ -646,7 +646,7 @@ pub struct OkResponse {
 pub struct BotVersionInfo {
     pub vid: u32,
     pub version: String,
-    /// `probation`, `active`, `failed`, `retired`, `removed`.
+    /// `probation`, `active`, `failed`, `retired`, `removed`, `delisted`.
     pub state: String,
     pub sha256: String,
     pub size: u64,
@@ -663,7 +663,7 @@ pub struct BotVersionInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BotInfo {
     pub id: String,
-    /// `active`, `retired`, `removed`.
+    /// `active`, `retired`, `removed`, `delisted`.
     pub state: String,
     pub author: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -719,6 +719,14 @@ pub struct ImportRequest {
     /// (the server validates with `jar::validate_with_version`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub version_from_list: bool,
+    /// The release date, milliseconds since the epoch (§16.6): set on a new version, and on
+    /// an existing one whose date differs (`updated`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<u64>,
+    /// A version from the archives (§16.6): the bot must exist (404 otherwise); a new version
+    /// is registered `retired`, behind the bot's other versions, and nothing else changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub historic: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,6 +735,8 @@ pub enum ImportResult {
     Created,
     Exists,
     DivisionAdded,
+    /// The version existed with the same jar; only its release date changed.
+    Updated,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

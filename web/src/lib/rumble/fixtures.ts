@@ -295,7 +295,8 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 					sha256: v.sha256,
 					size: v.size,
 					state: v.retiredAt ? ('retired' as const) : ('active' as const),
-					added: v.addedAt.slice(0, 10)
+					added: v.addedAt.slice(0, 10),
+					released: v.releasedAt?.slice(0, 10) ?? null
 				}))
 			}))
 	});
@@ -430,7 +431,8 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 			sha256: sha256Like(`${id}@${major}.${minor}`),
 			size: jarSize(`${id}@${major}.${minor}`),
 			addedAt: added.toISOString(),
-			retiredAt: null
+			retiredAt: null,
+			releasedAt: added.toISOString()
 		});
 		const last = i === count - 2;
 		day = last && fresh ? Math.floor(rand() * 7) : Math.floor(day * (0.25 + 0.5 * rand()));

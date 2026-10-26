@@ -2,7 +2,8 @@
 
 //! `archive.json` (spec §15 step 7): every version of every bot that has not been taken down,
 //! with what the archive page needs to link its jar (`/jars/<sha256>.jar`). Probation, active,
-//! retired and failed versions are listed; removed versions and removed bots are not (a
+//! retired, failed and delisted versions are listed, with their release date where known
+//! (§16.5); removed versions and removed bots are not (a
 //! takedown deletes the jar). At about 1,500 bots with a few versions each, 100 bytes a
 //! version, the file is a few hundred KB uncompressed (about 600 KB at 4,000 versions),
 //! small enough for one file.
@@ -43,6 +44,7 @@ pub fn archive(
                         size: v.size,
                         state: v.state.as_str().to_string(),
                         added: date_of(v.created),
+                        released: v.released.map(|ms| date_of(ms / 1000)),
                     })
                     .collect(),
             })
@@ -79,6 +81,7 @@ mod tests {
             retired: None,
             url: None,
             colors: None,
+            released: None,
         }
     }
 
@@ -109,18 +112,30 @@ mod tests {
             version(6, "c.Gone", VersionState::Retired),
             version(7, "b.Two", VersionState::Failed),
             version(8, "d.NoItem", VersionState::Active),
+            VersionItem {
+                released: Some(1_000_000_000_000),
+                ..version(9, "e.Gone", VersionState::Delisted)
+            },
         ];
         let bots: BTreeMap<String, BotItem> = [
             bot("a.One", BotState::Active),
             bot("b.Two", BotState::Retired),
             bot("c.Gone", BotState::Removed),
+            bot("e.Gone", BotState::Delisted),
         ]
         .into_iter()
         .map(|b| (b.id.clone(), b))
         .collect();
         let a = archive(&versions, &bots, "2026-10-24T12:00:00Z");
         let ids: Vec<&str> = a.bots.iter().map(|b| b.id.as_str()).collect();
-        assert_eq!(ids, ["a.One", "b.Two"]);
+        assert_eq!(ids, ["a.One", "b.Two", "e.Gone"]);
+        // A delisted bot stays downloadable, with its release date.
+        let e = &a.bots[2].versions[0];
+        assert_eq!(
+            (e.state.as_str(), e.released.as_deref()),
+            ("delisted", Some("2001-09-09"))
+        );
+        assert_eq!(a.bots[0].versions[0].released, None);
         let one: Vec<(&str, &str)> = a.bots[0]
             .versions
             .iter()
