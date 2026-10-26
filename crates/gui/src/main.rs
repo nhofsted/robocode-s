@@ -56,8 +56,7 @@ next battle). ROBOCODES_ROBOT_JARS adds jars and class folders (a path list).
 The other paths come from
 ROBOCODES_JAVA, ROBOCODES_HOST_LIB, ROBOCODES_AGENT_JAR and ROBOCODES_DATA, as
 for `robocode-s battle`. ROBOCODES_OWN_FRAME=1 or 0 forces the app's own window
-frame on or off (default: on under WSLg, whose compositor crashes on the
-system's frame, and on Windows).
+frame on or off (default: on, except on macOS).
 It notes its start and exit, and a crash's message and backtrace, in
 logs/robocode-s.log in the user data folder (%LOCALAPPDATA%\\robocode-s on
 Windows, where stderr goes there too without a terminal; another file with

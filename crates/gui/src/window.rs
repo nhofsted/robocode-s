@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Our own window frame (title bar, buttons, resize edges): where the system's crashes,
-//! and on Windows, for a window like Steam's; and the window's minimum size (see
-//! [`keep_min_size`]).
+//! Our own window frame (title bar, buttons, resize edges), for a window like Steam's on
+//! Windows and Linux (and because the system's crashes under WSLg); and the window's
+//! minimum size (see [`keep_min_size`]).
+//!
+//! On Linux the moves and resizes go to the window manager or compositor
+//! (`_NET_WM_MOVERESIZE` on X11, `xdg_toplevel.move`/`resize` on Wayland), which then
+//! holds the pointer (see [`hand_over`]).
 //!
 //! On WSLg the compositor (Weston 9 with its pixman renderer) draws no decorations, so
 //! winit draws its own frame from a `wl_shm` pool that it grows as the window gets wider.
@@ -35,17 +39,13 @@ const BUTTON_WIDTH: f32 = 44.0;
 /// Height of the top bar: the title bar with our frame, the app's top bar without it.
 pub const BAR_HEIGHT: f32 = 40.0;
 
-/// Whether to draw our own frame: on Windows, and on WSLg under Wayland, unless
-/// `ROBOCODES_OWN_FRAME` says otherwise (`1` or `0`).
+/// Whether to draw our own frame: everywhere but on macOS (whose title bar keeps its
+/// traffic lights), unless `ROBOCODES_OWN_FRAME` says otherwise (`1` or `0`).
 pub fn wanted() -> bool {
     match std::env::var("ROBOCODES_OWN_FRAME").as_deref() {
         Ok("1") => true,
         Ok("0") => false,
-        _ => {
-            let wslg = std::env::var_os("WAYLAND_DISPLAY").is_some()
-                && std::path::Path::new("/mnt/wslg").is_dir();
-            cfg!(windows) || wslg
-        }
+        _ => !cfg!(target_os = "macos"),
     }
 }
 
