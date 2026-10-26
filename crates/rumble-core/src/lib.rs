@@ -12,6 +12,7 @@ pub mod cleanup;
 pub mod codesize;
 pub mod config;
 pub mod data;
+pub mod flags;
 pub mod ids;
 pub mod jar;
 pub mod metrics;

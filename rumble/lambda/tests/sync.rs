@@ -6,6 +6,7 @@
 mod common;
 
 use common::{jar, sha_hex};
+use rumble_core::flags::{FLAGS_KEY, FlagMap};
 use rumble_core::store::{BotItem, BotSource, BotState, DAY, MemStore, Store, VersionState};
 use rumble_core::sync::{SYNC_KEY, SyncState};
 use rumble_core::{Config, Division};
@@ -21,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const T0_MS: u64 = 1_792_843_200_000;
 const LIST_1V1: &str = "http://wiki/1v1";
 const LIST_MELEE: &str = "http://wiki/melee";
+const FLAGS: &str = "http://wiki/flags";
 
 struct Web {
     store: Arc<MemStore>,
@@ -37,7 +39,8 @@ impl Web {
             "mirror": "http://mirror/{id}_{version}.jar",
             "minEntries": 1,
             "minListShare": 0.0,
-            "maxDelistPerRun": 1
+            "maxDelistPerRun": 1,
+            "flags": FLAGS
         }});
         objects
             .put(
@@ -277,4 +280,40 @@ fn the_lists_drive_the_unclaimed_imported_bots() {
     assert!(!web.sync().enabled);
     assert_eq!(web.fetcher.calls().len(), calls);
     assert!(Config::default().sync.enabled);
+}
+
+#[test]
+fn the_flags_page_is_kept_in_the_state_bucket() {
+    let web = Web::new();
+    web.lists(&["a.A 1"], &[]);
+    web.serve("http://mirror/a.A_1.jar", "a.A", "1");
+    let flags = || -> FlagMap {
+        match web.objects.get(Bucket::State, FLAGS_KEY, None).unwrap() {
+            Fetched::Found { bytes, .. } => serde_json::from_slice(&bytes).unwrap(),
+            _ => FlagMap::default(),
+        }
+    };
+
+    // Not there: an alert, and the lists are synced all the same.
+    let report = web.sync();
+    assert!(!report.flags.unwrap().trusted);
+    assert!(report.log.iter().any(|l| l.starts_with("ALERT sync flags")));
+    assert_eq!(report.counts.imported, 1);
+    assert!(flags().packages.is_empty());
+
+    web.fetcher.set(
+        FLAGS,
+        "Flags\n<pre>\na,BEL\nb,NLD\nc,WIKI\nd,BLANK\n</pre>\n",
+    );
+    let report = web.sync();
+    assert_eq!(report.flags.unwrap().entries, 3);
+    let read = flags();
+    assert_eq!(read.of("a.A"), Some("be"));
+    assert_eq!(read.of("c.Sample"), Some("un"));
+    assert_eq!(read.at, T0_MS / 1000);
+
+    // A page without flags (vandalised, an error page) keeps the last ones.
+    web.fetcher.set(FLAGS, "<pre>\n</pre>\n");
+    assert!(!web.sync().flags.unwrap().trusted);
+    assert_eq!(flags(), read);
 }

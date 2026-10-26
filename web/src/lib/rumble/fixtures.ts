@@ -123,7 +123,7 @@ const NAME_SECOND = ['Viper', 'Comet', 'Tortoise', 'Mirage', 'Hornet', 'Bastion'
 const TEAM_SUFFIX = ['Team', 'Squad', 'Pack', 'Crew'];
 const AUTHOR_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night'];
 /** Authors' countries, weighted roughly like a programming community; '' is no flag. */
-const COUNTRIES = ['us', 'us', 'us', 'br', 'br', 'de', 'de', 'nl', 'be', 'gb', 'gb', 'fr', 'pl', 'cz', 'fi', 'se', 'ca', 'au', 'nz', 'jp', 'cn', 'kr', 'in', 'ru', 'ua', 'es', 'it', 'pt', 'ar', 'za', '', '', ''];
+const COUNTRIES = ['us', 'us', 'us', 'br', 'br', 'de', 'de', 'nl', 'be', 'gb', 'gb', 'fr', 'pl', 'cz', 'fi', 'se', 'ca', 'au', 'nz', 'jp', 'cn', 'kr', 'in', 'ru', 'ua', 'es', 'it', 'pt', 'ar', 'za', 'un', 'ancap', '', '', ''];
 const AUTHOR_SECOND = ['coder', 'gunner', 'wave', 'tank', 'robo', 'owl', 'fox', 'shark', 'surfer', 'smith'];
 
 export function createFixtures(options: FixtureOptions = {}): Fixtures {
