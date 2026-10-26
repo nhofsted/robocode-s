@@ -17,9 +17,9 @@
 	}
 	let { bot, rumble, rec, pairings }: Props = $props();
 
-	const SHOWN = 12;
+	// The filter appears once the list is long enough to scroll.
+	const FILTER_FROM = 12;
 	let query = $state('');
-	let all = $state(false);
 
 	const scores = $derived(new Map(pairings.map((p) => [p.opponent, p.score])));
 	// The index covers the whole division; only opponents met in this rumble have a pairing
@@ -36,7 +36,6 @@
 		const q = query.trim().toLowerCase();
 		return q ? opponents.filter((o) => o.opponent.toLowerCase().includes(q)) : opponents;
 	});
-	const rows = $derived(all || query.trim() ? matching : matching.slice(0, SHOWN));
 	const rounds = $derived(rec && 'rounds' in rec ? meleeRounds(rec) : []);
 	const groups = $derived([
 		{ title: 'Rounds won', list: rounds.filter((r) => r.won) },
@@ -55,14 +54,14 @@
 {:else if 'pairs' in rec}
 	<div class="table-tools">
 		<span class="muted">{formatCount(opponents.length)} opponents with recorded rounds</span>
-		{#if opponents.length > SHOWN}
+		{#if opponents.length > FILTER_FROM}
 			<label>
 				<span class="visually-hidden">Filter opponents with replays</span>
 				<input type="search" placeholder="Filter opponents" bind:value={query} />
 			</label>
 		{/if}
 	</div>
-	<div class="table-scroll">
+	<div class="table-scroll capped">
 		<table class="data">
 			<thead>
 				<tr>
@@ -74,7 +73,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each rows as o (o.opponent)}
+				{#each matching as o (o.opponent)}
 					<tr>
 						<td>
 							<a class="opp" href={resolve('/pairing/[rumble]/[a]/[b]', { rumble, a: bot, b: o.opponent }) + '#replays'}>
@@ -95,9 +94,6 @@
 			</tbody>
 		</table>
 	</div>
-	{#if !all && !query.trim() && matching.length > SHOWN}
-		<p><button type="button" class="secondary" onclick={() => (all = true)}>Show all {formatCount(matching.length)} opponents</button></p>
-	{/if}
 {:else}
 	<div class="groups">
 		{#each groups as g (g.title)}
@@ -131,6 +127,9 @@
 		flex-wrap: wrap;
 		margin-bottom: 0.6rem;
 		font-size: 0.85rem;
+	}
+	.capped {
+		max-height: 32rem;
 	}
 	.opp {
 		display: inline-flex;

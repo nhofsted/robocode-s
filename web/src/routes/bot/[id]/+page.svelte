@@ -355,7 +355,7 @@
 
 	<section>
 		<h2>Versions</h2>
-		<div class="table-scroll">
+		<div class="table-scroll versions">
 			<table class="data">
 				<thead>
 					<tr><th>Version</th><th>Released</th><th>Added</th><th>Retired</th><th class="num">Codesize</th><th class="num">Size</th><th>Download</th></tr>
@@ -538,7 +538,8 @@
 		margin-bottom: 0.6rem;
 		font-size: 0.85rem;
 	}
-	.pairings {
+	.pairings,
+	.versions {
 		max-height: 32rem;
 	}
 	.opp {
