@@ -38,7 +38,7 @@ use rumble_core::token::{self, Keys};
 use rumble_core::work::WorkServer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 
 /// The configuration is re-read at most this often (§3).
@@ -102,6 +102,8 @@ struct Inner {
     plans_checked: BTreeMap<Division, u64>,
     auth: HashMap<String, CachedAuth>,
     limiter: Limiter,
+    /// Versions known to have their colours (§11.3): verifiers' posts don't set them again.
+    colored: HashSet<u32>,
 }
 
 pub struct App {
@@ -228,6 +230,7 @@ impl App {
                 plans_checked: BTreeMap::new(),
                 auth: HashMap::new(),
                 limiter: Limiter::new(),
+                colored: HashSet::new(),
             }),
         }
     }
@@ -817,18 +820,24 @@ impl App {
             let mut inner = self.lock();
             self.refresh_plans(&mut inner, config.engine_version, &Division::ALL, now_ms);
             let work = &inner.work;
+            let known = &inner.colored;
             let top = |division: Division, vid: u32| work.is_top(division, vid);
             let slot_pair =
                 |division: Division, lo: u32, hi: u32| work.is_slot_pair(division, lo, hi);
+            let colored = |vid: u32| known.contains(&vid);
             let presigner = RecordingPresigner(self.services.objects.as_ref());
             let ctx = ResultsContext {
                 config,
                 keys: &self.keys,
                 top: &top,
                 slot_pair: &slot_pair,
+                colored: &colored,
                 presigner: &presigner,
             };
-            results::apply_results(self.store(), &ctx, caller.user(), &body, now_ms, &random)?
+            let outcome =
+                results::apply_results(self.store(), &ctx, caller.user(), &body, now_ms, &random)?;
+            inner.colored.extend(&outcome.colored);
+            outcome
         };
         for line in &outcome.log {
             println!("{line}");
