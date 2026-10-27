@@ -12,3 +12,10 @@ export const COUNTRIES: { code: string; name: string }[] = Object.keys(FILES)
 	.filter((code): code is string => !!code && code !== 'eu' && code !== 'un')
 	.map((code) => ({ code, name: names.of(code.toUpperCase()) ?? code.toUpperCase() }))
 	.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+
+// The RoboWiki's own flags (RoboRumble/Country_Flags), offered after the countries: `WIKI`
+// (the United Nations flag) and `MAN`.
+export const WIKI_FLAGS: { code: string; name: string }[] = [
+	{ code: 'un', name: 'United Nations (wiki bots)' },
+	{ code: 'ancap', name: 'Anarcho-capitalist' }
+];

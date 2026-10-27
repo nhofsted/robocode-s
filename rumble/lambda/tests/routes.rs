@@ -465,6 +465,16 @@ fn web_sign_in() {
     let token = h.user(5, 0);
     assert_eq!(h.post("me", &token, &json!({"country": "nl"})).status, 200);
     assert_eq!(h.post("me", &token, &json!({"country": "NLD"})).status, 400);
+    // The RoboWiki's own flags.
+    assert_eq!(h.post("me", &token, &json!({"country": "un"})).status, 200);
+    assert_eq!(
+        h.post("me", &token, &json!({"country": "ancap"})).status,
+        200
+    );
+    assert_eq!(
+        h.post("me", &token, &json!({"country": "ANCAP"})).status,
+        400
+    );
 
     // Logout: the session is gone, the cookie cleared.
     let out = h.send(with_cookie("POST", "auth/logout").header("Origin", SITE));
