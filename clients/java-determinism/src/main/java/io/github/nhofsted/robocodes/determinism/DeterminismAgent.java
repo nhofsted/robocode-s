@@ -39,8 +39,15 @@ import java.util.function.ToLongFunction;
  */
 public final class DeterminismAgent {
 
-    /** Hook in classic's {@code RobotThreadManager.waitForStop()} (a {@code Consumer<Thread>}). */
+    /**
+     * Hook in classic's {@code RobotThreadManager.waitForStop()} (a {@code Predicate<Thread>}:
+     * true when the robot's threads are stopped already, ADR 0023).
+     */
     static final String STOP_KEY = "robocodes.determinism.awaitStop";
+    /** Hooks in {@code java.lang.Thread}'s {@code start()}, {@code run()} and {@code exit()} (each a {@code Consumer<Object>}). */
+    static final String THREAD_START_KEY = "robocodes.determinism.threadStart";
+    static final String THREAD_RUN_KEY = "robocodes.determinism.threadRun";
+    static final String THREAD_EXIT_KEY = "robocodes.determinism.threadExit";
 
     /** How long a robot's thread may take to finish on its own at the end of a round. */
     static final long STOP_WAIT_MILLIS = 60_000;
@@ -52,9 +59,13 @@ public final class DeterminismAgent {
      * Classic gives a robot thread that is still running at the end of a round 3 seconds
      * of wall-clock time, then interrupts it, forces it to stop and punishes the robot.
      * Whether a robot that saves data in {@code onRoundEnded} finishes in time then
-     * depends on the machine's load. Here it may finish on its own first.
+     * depends on the machine's load. Here it may finish on its own first. Then the robot's
+     * other threads, if robot code started any, end the round deterministically
+     * ({@link RobotThreads#endRound}).
+     *
+     * @return whether classic's wait for the robot's other threads is to be skipped
      */
-    static void awaitRobotThread(Object thread) {
+    static boolean awaitRobotThread(Object thread) {
         if (thread instanceof Thread t && t.isAlive()) {
             try {
                 t.join(STOP_WAIT_MILLIS);
@@ -62,6 +73,30 @@ public final class DeterminismAgent {
                 Thread.currentThread().interrupt();
             }
         }
+        return thread instanceof Thread t && RobotThreads.endRound(t);
+    }
+
+    /** Robot code's thread calls ({@link ThreadCalls}): the call's name and arguments. */
+    static void threadCall(Object[] call) {
+        try {
+            switch ((String) call[0]) {
+                case "sleep" -> RobotThreads.sleep((Long) call[1], 0);
+                case "sleepNanos" -> RobotThreads.sleep((Long) call[1], (Integer) call[2]);
+                case "yield" -> RobotThreads.yieldNow();
+                case "join" -> RobotThreads.join((Thread) call[1], false, 0, 0);
+                case "joinMillis" -> RobotThreads.join((Thread) call[1], true, (Long) call[2], 0);
+                case "joinNanos" -> RobotThreads.join((Thread) call[1], true, (Long) call[2], (Integer) call[3]);
+                case "interrupt" -> RobotThreads.interrupt((Thread) call[1]);
+                default -> throw new IllegalArgumentException("unknown thread call " + call[0]);
+            }
+        } catch (InterruptedException e) {
+            throw DeterminismAgent.<RuntimeException>sneaky(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> T sneaky(Throwable t) throws T {
+        throw (T) t;
     }
 
     public static void premain(String args, Instrumentation instrumentation) throws Exception {
@@ -82,14 +117,21 @@ public final class DeterminismAgent {
         System.getProperties().put(RobotRandomness.TURN_KEY, (Runnable) RobotRandomness::turn);
         System.getProperties().put(RobotRandomness.API_TRACE_KEY,
                 (java.util.function.BiConsumer<Object, Object>) RobotRandomness::traceApi);
-        System.getProperties().put(STOP_KEY, (Consumer<Object>) DeterminismAgent::awaitRobotThread);
+        System.getProperties().put(STOP_KEY, (Predicate<Object>) DeterminismAgent::awaitRobotThread);
+        // Deterministic threads for robots (ADR 0023).
+        System.getProperties().put(ThreadCalls.CALL_KEY, (Consumer<Object[]>) DeterminismAgent::threadCall);
+        System.getProperties().put(ThreadCalls.LIMIT_KEY, (Consumer<Object>) RobotThreads::atLimit);
+        System.getProperties().put(ThreadCalls.ENTER_KEY, (Runnable) RobotThreads::entering);
+        System.getProperties().put(THREAD_START_KEY, (Consumer<Object>) RobotThreads::starting);
+        System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object>) t -> RobotThreads.entering());
+        System.getProperties().put(THREAD_EXIT_KEY, (Consumer<Object>) RobotThreads::exiting);
         // Skipped turns by counted work in classic (#15).
         System.getProperties().put(RobotRandomness.PEER_ROUND_KEY, (Consumer<Object>) RobotRandomness::peerRound);
         System.getProperties().put(RobotRandomness.PEER_EXECUTE_KEY, (Consumer<Object[]>) RobotRandomness::peerExecute);
         System.getProperties().put(RobotRandomness.PEER_ASLEEP_KEY, (Predicate<Object>) RobotRandomness::peerAsleep);
         System.getProperties().put(RobotRandomness.PEER_LOAD_KEY, (Consumer<Object[]>) RobotRandomness::peerLoad);
         instrumentation.addTransformer(new Transformer(), true);
-        instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class,
+        instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class, Thread.class,
                 java.util.HashMap.class, java.util.WeakHashMap.class, java.util.Hashtable.class,
                 java.util.concurrent.ConcurrentHashMap.class, java.util.Objects.class);
         RobotRandomness.markAgentInstalled();
@@ -170,7 +212,7 @@ public final class DeterminismAgent {
             System.err.println("robocode-s: could not give " + className + " identity hash codes: " + t);
         }
         try {
-            byte[] metered = WorkMeter.patchRobotClass(bytes);
+            byte[] metered = WorkMeter.patchRobotClass(bytes, loader);
             if (metered != null) {
                 bytes = metered;
             }
@@ -226,11 +268,16 @@ public final class DeterminismAgent {
         }
     }
 
-    /** {@code RobotThreadManager.waitForStop()} first awaits the robot's thread ({@link #awaitRobotThread}). */
+    /**
+     * {@code RobotThreadManager.waitForStop()} first awaits the robot's thread
+     * ({@link #awaitRobotThread}), and returns true right away if that also stopped the
+     * robot's other threads.
+     */
     private static byte[] patchStop(byte[] classfileBuffer) {
+        String manager = "net/sf/robocode/host/security/RobotThreadManager";
         try {
             ClassReader reader = new ClassReader(classfileBuffer);
-            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
             int[] patched = new int[1];
             reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
                 @Override
@@ -250,22 +297,89 @@ public final class DeterminismAgent {
                             mv.visitLdcInsn(STOP_KEY);
                             mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
                                     "(Ljava/lang/Object;)Ljava/lang/Object;", false);
-                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Consumer");
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Predicate");
                             mv.visitVarInsn(Opcodes.ALOAD, 0);
-                            mv.visitFieldInsn(Opcodes.GETFIELD, "net/sf/robocode/host/security/RobotThreadManager",
-                                    "runThread", "Ljava/lang/Thread;");
-                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Consumer", "accept",
-                                    "(Ljava/lang/Object;)V", true);
+                            mv.visitFieldInsn(Opcodes.GETFIELD, manager, "runThread", "Ljava/lang/Thread;");
+                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Predicate", "test",
+                                    "(Ljava/lang/Object;)Z", true);
+                            Label classic = new Label();
+                            mv.visitJumpInsn(Opcodes.IFEQ, classic);
+                            mv.visitInsn(Opcodes.ICONST_1);
+                            mv.visitInsn(Opcodes.IRETURN);
+                            mv.visitLabel(classic);
+                            // Frames are expanded (EXPAND_FRAMES): the method's initial frame.
+                            mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {manager}, 0, new Object[0]);
                         }
                     };
                 }
-            }, 0);
+            }, ClassReader.EXPAND_FRAMES);
             if (patched[0] != 1) {
                 throw new IllegalStateException("expected RobotThreadManager.waitForStop(), found " + patched[0]);
             }
             return writer.toByteArray();
         } catch (Throwable t) {
             System.err.println("DeterminismAgent: could not patch RobotThreadManager: " + t);
+            return null;
+        }
+    }
+
+    /**
+     * {@code java.lang.Thread}: {@code start()}, {@code run()} and {@code exit()} (which the JVM
+     * calls when a thread ends) first call their hook with {@code this}, if it is installed:
+     * {@code Object h = hook; if (h instanceof Consumer) ((Consumer) h).accept(this);}. The
+     * robot's scheduler (ADR 0023) learns of new robot threads, makes them wait for the CPU
+     * and hands it on when they end.
+     */
+    private static byte[] patchThread(byte[] classfileBuffer) {
+        try {
+            ClassReader reader = new ClassReader(classfileBuffer);
+            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            int[] patched = new int[1];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                        String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    String key = !descriptor.equals("()V") || (access & Opcodes.ACC_STATIC) != 0 ? null
+                            : name.equals("start") ? THREAD_START_KEY
+                            : name.equals("run") ? THREAD_RUN_KEY
+                            : name.equals("exit") ? THREAD_EXIT_KEY : null;
+                    if (key == null) {
+                        return mv;
+                    }
+                    patched[0]++;
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitCode() {
+                            super.visitCode();
+                            Label original = new Label();
+                            Label call = new Label();
+                            loadHook(mv, key);
+                            mv.visitInsn(Opcodes.DUP);
+                            mv.visitTypeInsn(Opcodes.INSTANCEOF, "java/util/function/Consumer");
+                            mv.visitJumpInsn(Opcodes.IFNE, call);
+                            mv.visitInsn(Opcodes.POP);
+                            mv.visitJumpInsn(Opcodes.GOTO, original);
+                            mv.visitLabel(call);
+                            // Frames are expanded (EXPAND_FRAMES).
+                            mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {"java/lang/Thread"}, 1,
+                                    new Object[] {"java/lang/Object"});
+                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Consumer");
+                            mv.visitVarInsn(Opcodes.ALOAD, 0);
+                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Consumer", "accept",
+                                    "(Ljava/lang/Object;)V", true);
+                            mv.visitLabel(original);
+                            mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {"java/lang/Thread"}, 0, new Object[0]);
+                        }
+                    };
+                }
+            }, ClassReader.EXPAND_FRAMES);
+            if (patched[0] != 3) {
+                throw new IllegalStateException("expected Thread.start, run and exit, found " + patched[0]);
+            }
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            System.err.println("DeterminismAgent: could not patch Thread: " + t);
             return null;
         }
     }
@@ -446,6 +560,9 @@ public final class DeterminismAgent {
             }
             if ("net/sf/robocode/host/security/RobotThreadManager".equals(className)) {
                 return patchStop(classfileBuffer);
+            }
+            if ("java/lang/Thread".equals(className)) {
+                return patchThread(classfileBuffer);
             }
             if ("net/sf/robocode/battle/peer/RobotPeer".equals(className)) {
                 return patchPeer(classfileBuffer);

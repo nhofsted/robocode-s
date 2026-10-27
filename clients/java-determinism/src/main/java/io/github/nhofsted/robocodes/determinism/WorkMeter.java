@@ -53,8 +53,11 @@ final class WorkMeter {
     private WorkMeter() {
     }
 
-    /** Adds work counting and the virtual clock to a robot class. Null: leave unchanged. */
-    static byte[] patchRobotClass(byte[] classfileBuffer) {
+    /**
+     * Adds work counting and the virtual clock to a robot class, and routes its thread calls
+     * through the robot's scheduler (ADR 0023). Null: leave unchanged.
+     */
+    static byte[] patchRobotClass(byte[] classfileBuffer, ClassLoader loader) {
         ClassReader reader = new ClassReader(classfileBuffer);
         if ((reader.getAccess() & (Opcodes.ACC_INTERFACE | Opcodes.ACC_MODULE)) != 0) {
             return null; // interfaces: default methods stay uncounted (rare in robots)
@@ -92,6 +95,7 @@ final class WorkMeter {
         }
         // After the counting: the helpers it adds aren't counted themselves.
         JdkCosts.charge(node, FIELD);
+        ThreadCalls.patch(node, loader, FIELD);
         if (clinit == null) {
             clinit = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
             clinit.instructions.add(new InsnNode(Opcodes.RETURN));
@@ -354,12 +358,16 @@ final class WorkMeter {
     }
 
     /**
-     * The same, then {@code fuel[1 + (int) (~fuel[1] >>> 63)]}: index 2, out of bounds, once
-     * the count reaches the limit. A load: storing at a computed index instead made tight
-     * loops slower still.
+     * The same, then {@code robocodes$limit(fuel)}, which asks the robot's scheduler once the
+     * count reaches the limit (a quantum's end for a robot with threads, ADR 0023; at the
+     * cutoff it changes nothing), then {@code fuel[1 + (int) (~fuel[1] >>> 63)]}: index 2,
+     * out of bounds, once the count still reaches the limit. A load: storing at a computed
+     * index instead made tight loops slower still.
      */
     private static InsnList countAndCheck(String className, long cost) {
         InsnList add = count(className, cost);
+        add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+        add.add(new MethodInsnNode(Opcodes.INVOKESTATIC, className, ThreadCalls.LIMIT_METHOD, "([J)V", false));
         add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
         add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
         add.add(new InsnNode(Opcodes.ICONST_1));

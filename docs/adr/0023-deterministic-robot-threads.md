@@ -1,0 +1,67 @@
+# 0023. Deterministic threads for robots: one virtual CPU per robot
+
+- Status: Proposed (prototype; open questions below)
+- Date: 2026-10-27
+
+## Context
+
+Deterministic mode counts each robot's work (ADR 0014) and decides skipped turns by it (ADR 0018), but threads that robot code starts run on the OS scheduler, and `Thread.sleep` and timeouts use real time (ADR 0014, "Not covered"). Robots with threads are therefore not reproducible: the same seeded battle ends differently from run to run and from machine to machine, and rumble verification penalized volunteers for it. The robot's work counter is shared by its threads and updated without synchronization, so concurrent threads even lose counts.
+
+Verified on 2026-10-27:
+- **ak.Fermat 2.0:** `DataWriter extends Thread`, started in `onDeath`, writes `<opponent>.txt`; later rounds read it back. A seeded melee (seed 5001203142733927833, ten robots) gave two different outcomes in 6 runs, first diverging in round 27.
+- **TNT.TNT 0.99.1, rapture.Rapture 2.13, techdude.forest.FlamingForest 1.1:** a `PatternAnalyzer` thread loops on `Thread.sleep(500)` and switches the gun's pattern.
+- **florent.test.Toad 0.14t:** a tree thread that polls a buffer forever, lowering its priority to 1 when the buffer is empty; rebuild and restore threads; the main thread busy-waits on their flags (`while (addingInProcess) {}`).
+
+A scan of the 1375 RoboRumble jars (ASM, robot classes only, bundled Kotlin left out) finds 8 that start threads from robot code: the five above, dam.MogBot 2.9 and jasolo.Sonda 0.55 (threads that save and load data files) and inonit.robocode.javascript.MyFirstRobot 1.1 (Rhino; its threads are in Rhino's debugger and shell). None uses `java.util.Timer`, executors or `java.util.concurrent` locks; only the Rhino robot has `synchronized`, `wait` and `notify` next to threads. The corpus difftest excludes TNT, Rapture and Toad as not reproducible in classic.
+
+Classic: a robot's threads run in its thread group, concurrently with its main thread (on a multi-core machine, in parallel); classic times only the main thread. At a round's end `RobotThreadManager.waitForStop` interrupts each of them every 100 ms for up to 3 s of wall time; with security on (as in the rumble) it then stops them with `Thread.stop`, which threw `ThreadDeath` in them up to Java 19 and does nothing on Java 20 and later, where such threads run on into the next rounds.
+
+## Decision
+
+In deterministic mode, the determinism agent gives each robot **one virtual CPU**: the robot's threads run one at a time, and the CPU changes hands only at points that depend on what the robot executes (`RobotThreads`, `ThreadCalls`).
+
+- **Which threads:** a thread that robot code starts on one of the robot's threads (the first caller of `Thread.start()` outside `java.lang.Thread` is a robot class; Kotlin's `thread {}` counts as robot code). The thread that starts the first one, the robot's main thread (classic's `runThread`), joins too. Threads the JDK starts for a robot (a `Timer`'s, an executor's) are left alone: their JDK code blocks in ways the scheduler doesn't see. Robots without threads of their own never get a scheduler.
+- **How:** the agent patches `java.lang.Thread`: `start()` registers the new thread before it exists; `run()` (and the `run()` of robot classes that extend `Thread`) waits for the CPU before robot code runs; `exit()` hands the CPU on. Robot code's `Thread.sleep`, `yield`, `join` and `interrupt` call synthetic helpers of the robot class that hand them to the scheduler; on a thread without a scheduler they do what the JDK does.
+- **Switch points:** a thread blocks (`sleep`, `join`) or ends; `yield`; the end of a **quantum**; the end of the main thread's turn. A new thread waits in line; the starting thread goes on.
+- **Quantum:** 100 µs of virtual time, 625 000 counted instructions. The count is already checked where robot code can repeat (loop starts and handlers, ADR 0018); that check now first calls the class's `robocodes$limit(fuel)`, which asks the scheduler only once the count reached the limit. The limit is the lowest of the robot's work cutoff (ADR 0018), the running thread's quantum end and the end of a slice (below). Busy-waiting on another thread therefore ends, at the same instruction everywhere. Below the limit the call does nothing; at the cutoff the check after it throws, as before.
+- **Next thread:** the first waiting thread of the highest Java priority, round-robin among equals. Classic caps a robot's thread group at its main thread's priority (`NORM_PRIORITY - 1`), so helpers can never outrank the main thread, only yield to it: Toad's idle tree thread (priority 1) then only runs when the main thread waits.
+- **The main thread's turn:** while it runs, the robot's other threads of its priority get their quanta in turn. Their work counts toward the turn, as decided in ADR 0018.
+- **The turn's end:** where classic's robot side executes (`BasicRobotProxy.executeImpl`, before the robot's commands go out; the same code in classic and in robocode-s), the other threads that wait for the CPU run until none can, or for at most what is left of the turn's budget less a quantum, and at most 1 ms (`TURN_NANOS`, the virtual clock's time between turns for waiting on the other robots, ADR 0014). This work counts toward the turn too, but it can't by itself make the main thread late (but for running past the slice's end to the next check). A round's first turn gives none: the work before the first execute is free and isn't measured.
+- **Time:** `Thread.sleep` and timed joins wait on the robot's virtual clock (turns and counted work, ADR 0014). A sleeper wakes at the first switch point after its deadline, earliest deadline first. When nothing else can run, a sleeper wakes early: the main thread if it sleeps, otherwise the earliest deadline. Virtual time never jumps: the clock stays turns plus work. `PatternAnalyzer`'s `sleep(500)` thus wakes about every 500 turns.
+- **Interrupts:** robot code's `interrupt()` sets the flag as usual; a sleeping or joining target gets in line and throws `InterruptedException` when it next runs.
+- **The round's end:** classic's `RobotThreadManager.waitForStop` first awaits the main thread (as before), then the scheduler, driven from the battle side: the other threads are interrupted 30 times (as classic does every 100 ms for 3 s), each time running until they all wait, for at most 1 ms of counted work; then they are stopped as classic did up to Java 19: a `ThreadDeath` where each next runs, with its limit at its count, so its loops throw too. A thread that still doesn't end never runs again. Classic's own wait (3 s of wall time per thread, with re-interrupts) is skipped for such robots. The next round starts without threads; the work cutoff applies to all of this.
+- **Not covered yet:** `synchronized` and `wait`/`notify` among a robot's threads, `java.util.concurrent` locks and `LockSupport`, `Timer` and executors, and JDK code that blocks while it holds the CPU (a robot thread preempted while it holds a monitor or initializes a class, which another of its threads then needs). Such a thread blocks for real while it holds the CPU and the robot hangs until the server's hard limit. No threaded corpus robot does this. The design for monitors: `DUP; hook; MONITORENTER` with ownership kept by the scheduler (the real monitor is then never contended among the robot's threads), `synchronized` methods wrapped likewise, and `wait`/`notify` as scheduler queues; `LockSupport.park`/`unpark` patched in `java.base` for the robot's threads covers `java.util.concurrent`.
+
+## Alternatives
+
+- **Run the other threads only at the turn's end, to quiescence, without preemption.** No quantum and no check helper, but a busy-waiting main thread (Toad's `while (addingInProcess) {}`) waits until its work cutoff and crashes, and a thread that never waits (Toad's tree thread) runs until the cutoff each turn. Busy-waiting needs preemption at counted points, so the quantum stays; a quiescence-only gap would also give helpers unlimited work outside the budget.
+- **Free helper work: the other threads use the time the robot waits for the others, uncounted** (after its `Execute` is sent, in `RemotePeer` and in classic's `RobotPeer`). Closest to classic on a multi-core machine, where helpers don't slow the main thread. It needs a hook in each peer and the gap's work subtracted from the counted work on both sides, and ADR 0018 decided that helper work counts. Kept as an open question.
+- **Plain round-robin, ignoring priorities** (Linux JVMs ignore them by default). Toad's idle tree thread would then take every other quantum of the main thread's turn and make it skip turns; with priorities it uses only the gap.
+- **No threads in deterministic mode** (`start()` throws, or runs the thread's code synchronously). Simple, but TNT's analyzer loops forever and would hang its robot, and the eight robots lose their behaviour.
+- **A per-thread work counter** (count the main thread only): rejected in ADR 0018 for its cost.
+- **Let unfinished threads run on into the next round**, as classic on Java 20 and later. Accumulates threads (TNT starts one per round) and makes the next round depend on leftovers; stopping them matches the rumble's classic clients up to Java 19.
+
+## Classic compatibility
+
+Each classic run interleaves threads differently, so no single deterministic order is "right"; the choices above aim at classic's typical behaviour. What deterministic mode loses against classic on a multi-core machine:
+- Helper work counts toward the robot's turn (ADR 0018); in classic it runs in parallel and only the main thread is timed. Helpers get at most 1 ms per turn outside the main thread's quanta.
+- `sleep` follows the virtual clock (about 1 ms per turn plus work); in classic it depends on how fast the battle runs.
+- Unfinished threads are stopped at the round's end, as by classic up to Java 19, not left running as on Java 20 and later.
+- Robot code's `Thread.stop()` throws `UnsupportedOperationException` on Java 21, in both.
+
+## Consequences
+
+- MEASUREMENTS
+- **Robots without threads are unchanged:** no scheduler, the same counts, the same results; their recordings are byte-identical to before (measured below). Their code runs one extra call per loop pass (inlined by the JIT), and their `sleep`/`join`/`yield`/`interrupt` calls go through a helper to the JDK's.
+- **Versions:** the outcome of battles with threaded robots changes (from irreproducible to reproducible), so by design §4.4 `ENGINE_VERSION` would be bumped, and `DETERMINISTIC_RULES` with `rulesVersion()`, so that a robot host without the scheduler is refused. Results of robots without threads don't change. Open question below.
+- **The classic oracle** runs the same agent, so its threaded robots are scheduled the same way (the hooks are in classic's robot side, `RobotThreadManager` and `java.lang.Thread`, which both share): TNT, Rapture and Toad can return to the corpus difftest.
+
+## Open questions
+
+1. **Does helper work count?** The prototype counts it, in the main thread's turn and at the turn's end (ADR 0018). The alternative gives helpers the time between turns for free, closer to classic on a multi-core machine.
+2. **How much may helpers do at a turn's end?** Prototype: the turn's spare budget less a quantum, at most 1 ms. More makes polling threads (Toad's) cost wall time; less starves helpers of a busy main thread.
+3. **Priorities:** honoured (prototype), or plain round-robin?
+4. **Quantum:** 100 µs of virtual time. Smaller interleaves more finely and switches more often (each switch costs a few µs of real time).
+5. **The round's end:** stop unfinished threads (prototype, classic up to Java 19), or keep them for the next round (classic on Java 20 and later)?
+6. **Versions:** bump `ENGINE_VERSION` and `DETERMINISTIC_RULES` (design §4.4: new rankings), or treat it as a fix for robots whose results never meant anything, bump only `DETERMINISTIC_RULES` so old hosts are refused, and keep the rankings?
+7. **Monitors, `wait`/`notify`, `java.util.concurrent`:** implement them now, or when a robot needs them, with a warning when a robot thread blocks outside the scheduler?

@@ -399,6 +399,12 @@ public final class RobotRandomness {
         return stream == null ? null : stream.utils;
     }
 
+    /** The stream of the robot whose thread this is, or null (no battle, not a robot thread). */
+    static Stream streamOfCurrentThread() {
+        RobotRandomness randomness = current;
+        return randomness == null ? null : randomness.currentStream();
+    }
+
     private Stream currentStream() {
         for (ThreadGroup group = Thread.currentThread().getThreadGroup(); group != null; group = group.getParent()) {
             String name = group.getName();
@@ -468,6 +474,9 @@ public final class RobotRandomness {
         Stream stream = randomness == null ? null : randomness.currentStream();
         if (stream != null) {
             stream.fuel = fuel;
+            if (stream.cutoffAt == 0) {
+                stream.cutoffAt = fuel[0];
+            }
         }
         return fuel;
     }
@@ -480,8 +489,9 @@ public final class RobotRandomness {
             stream.turn();
             long[] fuel = stream.fuel;
             if (fuel != null) {
-                // Classic's robot side, in robocode-s too: its work until the next turn.
-                limit(fuel, count(fuel) + CUTOFF_INSTRUCTIONS);
+                // Classic's robot side, in robocode-s too: its work until the next turn. A
+                // robot with threads of its own runs them now (ADR 0023).
+                RobotThreads.turn(stream, fuel);
             }
             if (CALIBRATE != null) {
                 stream.measureCpu();
@@ -671,7 +681,7 @@ public final class RobotRandomness {
     }
 
     /** One robot's streams. */
-    private static final class Stream {
+    static final class Stream {
         private final long base;
         private final Random math;
         final Random utils;
@@ -679,8 +689,14 @@ public final class RobotRandomness {
         private long hashed;
         private long turns;
         private long tabled;
-        /** The robot's work counter, for the trace and the calibration only. */
+        /** The robot's work counter: for its threads (ADR 0023), the trace and the calibration. */
         volatile long[] fuel;
+        /** Its threads' scheduler, once robot code started a thread (ADR 0023); reset each round. */
+        RobotThreads threads;
+        /** Count at which the robot's code throws (ADR 0018); its limit may be lower, for its threads. */
+        volatile long cutoffAt;
+        /** Count when its main thread's last turn ended, for the turn's spare budget (ADR 0023). */
+        long turnStart;
         /** Calibration: clock reads, and the CPU time of the robot's threads at its turns. */
         long clockReads;
         long cpuNanos;
