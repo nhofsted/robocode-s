@@ -53,6 +53,9 @@ pub struct ResultsContext<'a> {
     pub top: &'a dyn Fn(Division, u32) -> bool,
     /// Whether a 1v1 pairing (lower vid, higher vid) is in the plan's `slotPairs`.
     pub slot_pair: &'a dyn Fn(Division, u32, u32) -> bool,
+    /// Whether a version is known to have its colours (the Lambda's cache of
+    /// [`ResultsOutcome::colored`]): a verifier's post doesn't set them again.
+    pub colored: &'a dyn Fn(u32) -> bool,
     pub presigner: &'a dyn Presigner,
 }
 
@@ -61,6 +64,8 @@ pub struct ResultsContext<'a> {
 pub struct ResultsOutcome {
     pub response: ResultsResponse,
     pub log: Vec<String>,
+    /// Versions whose colours this post set or found set (§11.3), for the caller's cache.
+    pub colored: Vec<u32>,
 }
 
 /// A deterministic stream of random numbers from the caller's 32 random bytes: SHA-256 of
@@ -342,6 +347,8 @@ pub fn apply_results<S: Store + ?Sized>(
     let mut finished = Vec::new();
     let mut given_back = Vec::new();
     let mut slot_battles = Vec::new();
+    // A verifier's battles count unchecked, and so do the colours they report (§11.3).
+    let mut trusted_colors: BTreeMap<u32, BotColors> = BTreeMap::new();
     for &index in &accepted {
         let battle = by_index[&index];
         let assigned = &payload.b[index as usize];
@@ -400,6 +407,15 @@ pub fn apply_results<S: Store + ?Sized>(
                 seeds.push(assigned.seed);
                 if battle.status != BattleStatus::Ok {
                     continue;
+                }
+                if trusted {
+                    for (vid, colors) in assigned.vids.iter().zip(run_colors(battle)) {
+                        if let Some(colors) = colors
+                            && !(ctx.colored)(*vid)
+                        {
+                            trusted_colors.entry(*vid).or_insert(colors);
+                        }
+                    }
                 }
                 if held || (state == UserState::New && random.chance(rate)) {
                     checks.push(VerifyItem {
@@ -469,6 +485,11 @@ pub fn apply_results<S: Store + ?Sized>(
     }
 
     let mut log = Vec::new();
+    let mut colored = Vec::new();
+    for (vid, colors) in &trusted_colors {
+        ignore_existing(store.set_version_colors(*vid, colors))?;
+        colored.push(*vid);
+    }
     for item in &checks {
         ignore_existing(store.put_verify(item))?;
     }
@@ -531,6 +552,7 @@ pub fn apply_results<S: Store + ?Sized>(
             user: summary(user, counted, config),
         },
         log,
+        colored,
     })
 }
 
@@ -599,6 +621,7 @@ fn duplicate<S: Store + ?Sized>(
             user: summary(user, 0, ctx.config),
         },
         log: Vec::new(),
+        colored: Vec::new(),
     })
 }
 
@@ -839,6 +862,7 @@ mod tests {
             keys: &keys,
             top,
             slot_pair: &|_, _, _| false,
+            colored: &|vid| vid == 9,
             presigner: &FakePresigner,
         };
         apply_results(store, &ctx, user, request, now_ms, &[9; 32])
@@ -1371,5 +1395,48 @@ mod tests {
             ["1v1.5.9.a.0", "1v1.5.9.a.1", "1v1.5.9.a.2", "1v1.5.9.b.0"]
         );
         assert_eq!(ids(&b), ["1v1.5.9.b.1"]);
+    }
+
+    #[test]
+    fn a_verifiers_colours_count_unchecked() {
+        let colored = |body: &str| {
+            let mut battle = ok(0, 1);
+            for robot in battle.robots.as_mut().unwrap() {
+                robot.colors = Some(BotColors {
+                    body: Some(body.to_string()),
+                    ..BotColors::default()
+                });
+            }
+            battle
+        };
+        let colors_of = |store: &MemStore, vid: u32| {
+            store
+                .get_version(vid)
+                .unwrap()
+                .unwrap()
+                .colors
+                .and_then(|c| c.body)
+        };
+        let p = payload("g1", vec![assigned(BattleKind::Normal, 1, &[5, 9], None)]);
+
+        // A new user's colours wait for a second run.
+        let (store, user) = setup(0, UserState::New);
+        let outcome = post(&store, &user, &request(&p, vec![colored("#123456")])).unwrap();
+        assert!(outcome.colored.is_empty());
+        assert_eq!(colors_of(&store, 5), None);
+
+        // A verifier's are kept at once, except for versions known to have theirs (9).
+        let (store, user) = setup(60, UserState::New);
+        let outcome = post(&store, &user, &request(&p, vec![colored("#123456")])).unwrap();
+        assert_eq!(outcome.colored, [5]);
+        assert_eq!(colors_of(&store, 5).as_deref(), Some("#123456"));
+        assert_eq!(colors_of(&store, 9), None);
+
+        // The first colours stay.
+        let mut again = p.clone();
+        again.id = "b-2".into();
+        let outcome = post(&store, &user, &request(&again, vec![colored("#abcdef")])).unwrap();
+        assert_eq!(outcome.colored, [5]);
+        assert_eq!(colors_of(&store, 5).as_deref(), Some("#123456"));
     }
 }
