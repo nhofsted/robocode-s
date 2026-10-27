@@ -465,7 +465,8 @@ fn web_sign_in() {
     let token = h.user(5, 0);
     assert_eq!(h.post("me", &token, &json!({"country": "nl"})).status, 200);
     assert_eq!(h.post("me", &token, &json!({"country": "NLD"})).status, 400);
-    // The RoboWiki's own flags.
+    // The flags that are no country: the EU and the RoboWiki's own.
+    assert_eq!(h.post("me", &token, &json!({"country": "eu"})).status, 200);
     assert_eq!(h.post("me", &token, &json!({"country": "un"})).status, 200);
     assert_eq!(
         h.post("me", &token, &json!({"country": "ancap"})).status,

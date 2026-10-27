@@ -13,9 +13,10 @@ export const COUNTRIES: { code: string; name: string }[] = Object.keys(FILES)
 	.map((code) => ({ code, name: names.of(code.toUpperCase()) ?? code.toUpperCase() }))
 	.sort((a, b) => a.name.localeCompare(b.name, 'en'));
 
-// The RoboWiki's own flags (RoboRumble/Country_Flags), offered after the countries: `WIKI`
-// (the United Nations flag) and `MAN`.
-export const WIKI_FLAGS: { code: string; name: string }[] = [
+// The flags that are no country, offered after the countries: the European Union and the
+// RoboWiki's own (RoboRumble/Country_Flags): `WIKI` (the United Nations flag) and `MAN`.
+export const OTHER_FLAGS: { code: string; name: string }[] = [
+	{ code: 'eu', name: 'European Union' },
 	{ code: 'un', name: 'United Nations (wiki bots)' },
 	{ code: 'ancap', name: 'Anarcho-capitalist' }
 ];
