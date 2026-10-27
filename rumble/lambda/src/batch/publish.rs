@@ -8,7 +8,9 @@
 //! each, paced at [`READ_RATE`]). **Contributors without a users index:** the table has no
 //! GSI, so the users are listed from `state/users.json`, the uids the planner saw in the log
 //! (every user with battles has posted); each costs one eventually consistent GetItem
-//! (0.5 RCU): a few hundred contributors are a few hundred RCU per run, 4 runs a day.
+//! (0.5 RCU): a few hundred contributors are a few hundred RCU per run, 4 runs a day. Bots
+//! whose owner chose no country take the RoboWiki's flag of their package from
+//! `state/flags.json`, which the sync writes (§16.7).
 //!
 //! Bot files are written only when their bytes changed: the GET that reads the old file's
 //! history also returns its ETag, the MD5 of a single-part object, compared with the new
@@ -23,6 +25,7 @@ use crate::s3::{Bucket, Fetched, etag_matches};
 use rumble_core::Config;
 use rumble_core::batch::UserIndex;
 use rumble_core::data::BotDetails;
+use rumble_core::flags::{FLAGS_KEY, FlagMap};
 use rumble_core::ids::RumbleId;
 use rumble_core::publish::{
     Catalog, DATA_CACHE, DATA_PREFIX, RumbleRun, Snapshot, UserSnapshot, bot_details, bot_key,
@@ -92,10 +95,19 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
             owners.insert(uid, user);
         }
     }
+    // Flags are cosmetic: without the file, bots show their owners' countries only.
+    let flags: FlagMap = batch
+        .read_json(Bucket::State, FLAGS_KEY)
+        .unwrap_or_else(|e| {
+            println!("publish: flags not read: {e}");
+            None
+        })
+        .unwrap_or_default();
     let catalog = Catalog {
         versions: &versions,
         bots: &bots,
         owners: &owners,
+        flags: &flags,
     };
 
     // Rumbles and rankings.

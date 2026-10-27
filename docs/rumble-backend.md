@@ -93,6 +93,7 @@ All tunables are one struct, `rumble_core::Config`, with the defaults below in c
 | `sync.minEntries` | 100 | Nor one with fewer entries than this. |
 | `sync.maxDelistPerRun` | 50 | More delistings in one run: none (alert). |
 | `sync.maxImportsPerRun` | 200 | New versions downloaded per run; the rest the next day. |
+| `sync.flags` | the RoboWiki's `RoboRumble/Country_Flags` page (`action=raw`) | The bots' flags (§16.7); `""`: not read. |
 | `admins` | `[4036752]` (nhofsted) | GitHub numeric ids with the admin role. |
 
 ## 4. Identifiers
@@ -152,7 +153,7 @@ Auth column: `-` none, `T` upload token or session, `S` session cookie only (bro
 | `POST auth/logout` | S | Ends the session |
 | `POST auth/token` | - | Exchanges a GitHub device-flow token for an upload token |
 | `GET me` | T | Profile, reputation tier, counters |
-| `POST me` | T | `{"country"?, "hidden"?}`: change the country (ISO 3166-1 alpha-2 or `null`) and whether the user is hidden from the contributors list (§15) |
+| `POST me` | T | `{"country"?, "hidden"?}`: change the country (ISO 3166-1 alpha-2, the RoboWiki's `un` or `ancap` (§16.7), or `null`) and whether the user is hidden from the contributors list (§15) |
 | `GET me/tokens` | T | Upload tokens and sessions (id, label, created, last used) |
 | `POST me/tokens/revoke` | T | `{"id": "..."}`; `"current"` revokes the caller's own |
 | `GET me/bots` | T | The user's bots with versions and states |
@@ -746,6 +747,14 @@ The versions of the archives (strangeautomata's mirror and the archive.org dump 
 
 - **API:** `admin/bots/import` (§16.2) takes `released` (ms since the epoch), `historic` (bool) and, with `historic`, `retired` (ms: when the version left the rumble). `historic`: the bot must exist (404 `not_found`, checked before the jar is published) and not be removed (403); a new version is registered `retired` with `ret` = `retired`, else its release date, else now, `cr` = its release date (it entered the rumble then; it doesn't show as added today), the request's division, appended to `vs` (behind the bot's other versions); `cur`, the bot's state and divisions and its other versions stay as they are. An existing version with the same jar gets `rd` = `released` and, if it is retired, `cr` = `released` and `ret` = `retired` where they differ (`updated`), else `exists`; no division is added. `dateOnly` (bool, with `released`): set `rd` of the registered version of that name whatever its jar (no jar is read; 404 without such a version): a listed version whose archive jar is another build. Without `historic`, `released` is set on a new version and updated on an existing one (`updated`, or `divisionAdded` if the division was new too). Any import of a removed bot is now 403.
 - **Client:** `robocode-s rumble admin import --history <versions.json> [--dry-run] [--concurrency N] [--report FILE]` (`rumble_client::history`). The dataset (made by a separate job, e.g. `/mnt/g/robocodes-archive/dataset/versions.json`) is `{"versions": [{"id", "version", "author", "sha256", "size", "files": [paths], "wiki": {...} | null, "releaseDate": RFC 3339 | null, "dateSource", "confidence", "flags": []}]}`; the client is tolerant: it needs `id`, `version`, `sha256`, `files[0]` (absolute, or relative to the dataset's folder or its parent) and a `releaseDate` (RFC 3339 or `YYYY-MM-DD`), and takes the division from `division`, else `wiki.pages` (a melee participants page and no 1v1 one: melee), else the bot's other entries (all melee-only: melee), else 1v1. Entries without those are listed as unusable. Per entry: read the jar, check that its SHA-256 is the dataset's, validate it (§12.1, id and version must match, `robot.version` from the dataset if the jar has none), upload it unless the server has it, then import it: a version on today's participants lists (both are read first) is the bot's listed current version and only gets its date (`dateOnly`, no upload); every other version is `historic`, with `retired` = the first revision of the 1v1 or melee participants page that no longer lists it (`wiki.removedAt`), else its last listing (`wiki.lastListed`), else the release of the bot's next version in the dataset (never before its own release). Results per entry: `created`, `exists`, `updated`, `divisionAdded`, `valid` (dry run), `noBot` (404: a bot the rumble doesn't have) or `failed` (`read`, `invalid`, `mismatch`, `sha256`, `upload`, `conflict`, `api`). Paced like the import (10 calls a second); the report (default `history-<date>.json`) lists the rows and the unusable entries.
+
+### 16.7 Country flags (owner, 2026-10-27)
+
+LiteRumble shows each bot with its author's flag, from the RoboWiki page `RoboRumble/Country_Flags`: a `<pre>` list of `<package>,<code>` lines, one "main" package per author, codes ISO 3166-1 alpha-3 plus `WIKI` (wiki bots, the United Nations flag), `MAN` (anarcho-capitalist) and `BLANK` (no flag). The rumble does the same (`rumble_core::flags`):
+
+- **Sync:** the daily `sync` (§16.5) reads the page first (`sync.flags`, `action=raw`, 1 MiB) and writes `state/flags.json`, `{"packages": {"<package>": "<flag>"}, "at": <unix s>}`, with the codes as the site's flags: alpha-2 in lower case, `un` for `WIKI`, `ancap` for `MAN`; `BLANK` and unknown codes are left out (unknown lines are logged). A page that fails to load, lists no flags, or fewer than `sync.minListShare` of the last read's keeps the old file (`ALERT sync flags not used: ...`); the lists are synced either way.
+- **Publish:** a bot's `country` (ranking rows, `BotDetails.author`) is the country its owner chose (`POST me`), else the flag of its id's first segment (`jk` for `jk.mega.DrussGT`), matched exactly as LiteRumble does; else null. A missing or unreadable `state/flags.json` only leaves the wiki flags out. Contributors keep their own country only. The account page offers the flags that are no country after the countries ("Other flags": `eu`, and the two wiki flags `un` and `ancap`, so a claimed bot can keep one).
+- **Site:** `Flag.svelte` draws flag-icons' flags (`un` included) and `ancap` from its own SVG (black over yellow, as LiteRumble's).
 
 ## 17. Website changes (M4)
 

@@ -139,7 +139,11 @@ export interface Author {
 	name: string;
 	/** GitHub login, once the author has claimed the bot. */
 	github: string | null;
-	/** Country the author chose for their flag, ISO 3166-1 alpha-2 in lower case; null: none. */
+	/**
+	 * The author's flag: the country they chose, else the RoboWiki's flag of the bot's package
+	 * (RoboRumble/Country_Flags). ISO 3166-1 alpha-2 in lower case, or the wiki's own `un` (wiki
+	 * bots) and `ancap`; null: none.
+	 */
 	country: string | null;
 }
 

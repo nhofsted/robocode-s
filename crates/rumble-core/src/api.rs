@@ -597,7 +597,8 @@ pub struct SubmitResponse {
 // ---- POST me, GET me/tokens, POST me/tokens/revoke, GET me/bots ----
 
 /// `POST me`: the fields to change (absent ones stay). `country` is an ISO 3166-1 alpha-2
-/// code in lower case, or `""` to clear it; `hidden` hides the user from the contributors
+/// code in lower case, one of the RoboWiki's own flags (`un`, `ancap`, §16.7), or `""` to
+/// clear it; `hidden` hides the user from the contributors
 /// list (§15).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MeUpdate {

@@ -310,6 +310,8 @@ pub struct SyncConfig {
     pub max_delist_per_run: u32,
     /// New versions downloaded per run; the rest wait for the next day.
     pub max_imports_per_run: u32,
+    /// The country flags page (§16.7, `action=raw`); empty: not read.
+    pub flags: String,
 }
 
 impl Default for SyncConfig {
@@ -325,6 +327,7 @@ impl Default for SyncConfig {
             min_entries: 100,
             max_delist_per_run: 50,
             max_imports_per_run: 200,
+            flags: crate::flags::FLAGS_PAGE.to_string(),
         }
     }
 }
@@ -426,7 +429,8 @@ mod tests {
                                    "melee": "https://robowiki.net/w/index.php?title=RoboRumble/Participants/Melee&action=raw"},
                          "mirror": "https://robocode-archive.strangeautomata.com/robots/{id}_{version}.jar",
                          "minListShare": 0.9, "minEntries": 100, "maxDelistPerRun": 50,
-                         "maxImportsPerRun": 200},
+                         "maxImportsPerRun": 200,
+                         "flags": "https://robowiki.net/w/index.php?title=RoboRumble/Country_Flags&action=raw"},
                 "admins": [4036752]
             })
         );

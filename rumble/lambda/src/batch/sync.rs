@@ -8,6 +8,8 @@
 //! them in `jars/`; then plans and applies the changes with `rumble_core::sync`. Fetch
 //! failures are kept in `state/sync.json`; one that is a week old raises an `ALERT sync` once.
 //!
+//! First it reads the country flags page into `state/flags.json` (§16.7) for publish.
+//!
 //! New versions and changed divisions reach the plan of the next hour (:12).
 
 use super::{Batch, Pace, READ_RATE};
@@ -16,6 +18,7 @@ use crate::routes::jar_key;
 use crate::s3::{Bucket, IMMUTABLE, JAR_TYPE};
 use rumble_core::Config;
 use rumble_core::cleanup::CleanupState;
+use rumble_core::flags::{FLAGS_KEY, FlagMap, MAX_FLAGS_BYTES, parse_flags};
 use rumble_core::ids::Division;
 use rumble_core::participants::{
     MAX_JAR_BYTES, MAX_LIST_BYTES, ParsedList, check_entry, mirror_url, parse_list,
@@ -46,6 +49,8 @@ pub struct ListReport {
 pub struct SyncReport {
     pub enabled: bool,
     pub lists: BTreeMap<String, ListReport>,
+    /// The country flags page (packages with a flag); `None`: not read.
+    pub flags: Option<ListReport>,
     /// New listed versions, fetched (jar valid), failed, and left for the next run.
     pub wanted: usize,
     pub fetched: usize,
@@ -67,6 +72,58 @@ impl SyncReport {
     fn say(&mut self, line: String) {
         println!("{line}");
         self.log.push(line);
+    }
+}
+
+/// The country flags page into `state/flags.json` (§16.7). A page that fails to load, has no
+/// flags or fewer than `sync.minListShare` of the last read's keeps the old file (an alert).
+fn sync_flags(batch: &Batch, config: &Config, now: u64, report: &mut SyncReport) {
+    let url = &config.sync.flags;
+    if url.is_empty() {
+        return;
+    }
+    let checked = (|| {
+        let old: FlagMap = batch
+            .read_json(Bucket::State, FLAGS_KEY)?
+            .unwrap_or_default();
+        let bytes = batch.services.fetcher.fetch(url, MAX_FLAGS_BYTES)?;
+        let parsed = parse_flags(&String::from_utf8_lossy(&bytes));
+        let (entries, floor) = (
+            parsed.packages.len(),
+            old.packages.len() as f64 * config.sync.min_list_share,
+        );
+        if entries == 0 || (entries as f64) < floor {
+            return Err(format!(
+                "{entries} packages, the last read had {}",
+                old.packages.len()
+            ));
+        }
+        let flags = FlagMap {
+            packages: parsed.packages,
+            at: now,
+        };
+        batch.write_state_json(FLAGS_KEY, &flags)?;
+        Ok((entries, parsed.unknown))
+    })();
+    match checked {
+        Ok((entries, unknown)) => {
+            if !unknown.is_empty() {
+                println!("sync: flags: lines without a known flag: {unknown:?}");
+            }
+            report.flags = Some(ListReport {
+                entries,
+                trusted: true,
+                error: None,
+            });
+        }
+        Err(why) => {
+            report.say(format!("ALERT sync flags not used: {why} at {url}"));
+            report.flags = Some(ListReport {
+                entries: 0,
+                trusted: false,
+                error: Some(why),
+            });
+        }
     }
 }
 
@@ -132,6 +189,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<SyncReport, String> {
     if !config.sync.enabled {
         return Ok(report);
     }
+    sync_flags(batch, config, now, &mut report);
     let mut state: SyncState = batch
         .read_json(Bucket::State, SYNC_KEY)?
         .unwrap_or_default();
