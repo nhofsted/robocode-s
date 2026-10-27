@@ -146,6 +146,7 @@ pub fn ok_result(batch: &str, battle: &WorkBattle) -> BattleResult {
                     thirds: 0,
                     rank: i as u32 + 1,
                     colors: None,
+                    threads: false,
                 })
                 .collect(),
         ),
@@ -192,6 +193,8 @@ pub fn version(vid: u32) -> VersionItem {
         url: None,
         colors: None,
         released: None,
+        nondeterministic: None,
+        disagreements: 0,
     }
 }
 

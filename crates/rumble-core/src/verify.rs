@@ -5,6 +5,8 @@
 //! stage 1 (match or mismatch), stage 2 (majority of three), penalties (quarantine, ban),
 //! releases of held records, correction records and rechecks.
 
+use std::collections::HashMap;
+
 use crate::api::Tier;
 use crate::config::Config;
 use crate::ids::Division;
@@ -180,6 +182,7 @@ pub fn take_work_in<S: Store + ?Sized>(
         return Ok(taken);
     }
     let mut after: Option<String> = None;
+    let mut flags: HashMap<u32, bool> = HashMap::new();
     for _ in 0..QUEUE_PAGES {
         let page = store.query_verify(engine, after.as_deref(), QUEUE_PAGE)?;
         let last = page.len() < QUEUE_PAGE;
@@ -192,6 +195,14 @@ pub fn take_work_in<S: Store + ?Sized>(
                 || item.uids.iter().any(|u| u == uid)
                 || !item.claimable(now)
             {
+                continue;
+            }
+            // A bot was flagged after the item was queued: no verifier's work is spent on it
+            // (§11.5).
+            if item.kind != VerifyKind::Probation
+                && any_nondeterministic(store, &item.bots, &mut flags)?
+            {
+                settle_no_fault(store, &item, now * 1000)?;
                 continue;
             }
             match store.claim_verify(engine, &item.sort, uid, until, now) {
@@ -260,15 +271,23 @@ pub enum Outcome {
     /// Stage 2: two runs agreed. `penalized` is the third run's user (`None` for a
     /// recheck's original run, which is corrected but not penalized again); `corrected`
     /// tells whether correction records were written; `banned` whether the penalty banned.
+    ///
+    /// A `penalty` (or, without a penalty, `correction`) alert was stored; `log` is the line
+    /// the Lambda must log (§11.3).
     Majority {
         minority: String,
         penalized: Option<String>,
         corrected: bool,
         banned: bool,
+        log: String,
     },
     /// Stage 2: all three differ. An alert was stored; `log` is the line the Lambda must log
-    /// (a CloudWatch metric filter turns it into an alarm). Nobody is penalized.
-    Disagreement { log: String },
+    /// (a CloudWatch metric filter turns it into an alarm). Nobody is penalized. `flagged` are
+    /// the versions this disagreement made nondeterministic (§11.5).
+    Disagreement { log: String, flagged: Vec<u32> },
+    /// A bot of the item is flagged nondeterministic (§11.5): the item is deleted, a held
+    /// record released, nobody credited or penalized.
+    NoFault,
 }
 
 /// Resolves a verifier's run of the verification item `sort` (§11.3). `run.uid` is the
@@ -295,6 +314,14 @@ pub fn resolve<S: Store + ?Sized>(
         || item.runs.len() > 2
     {
         return Ok(Outcome::Ignored);
+    }
+    // §11.5: a flagged robot's battle can't be proven wrong, so nobody is judged by it.
+    if any_nondeterministic(store, &item.bots, &mut HashMap::new())? {
+        if !delete_claimed(store, engine, sort, &uid)? {
+            return Ok(Outcome::Ignored);
+        }
+        release_unproven(store, &item, now_ms)?;
+        return Ok(Outcome::NoFault);
     }
     if item.runs.len() == 1 {
         let original = item.runs[0].clone();
@@ -341,11 +368,23 @@ pub fn resolve<S: Store + ?Sized>(
                 release(store, &item, &original, origin, now_ms)?;
             }
             let banned = penalize_user(store, config, engine, &first.uid, None, origin, now_ms)?;
+            let log = penalty_alert(
+                store,
+                &item,
+                [&original, &first, &run],
+                &first.uid,
+                true,
+                false,
+                banned,
+                origin,
+                now_ms,
+            )?;
             Ok(Outcome::Majority {
                 penalized: Some(first.uid.clone()),
                 minority: first.uid,
                 corrected: false,
                 banned,
+                log,
             })
         }
         (false, true) => {
@@ -372,11 +411,23 @@ pub fn resolve<S: Store + ?Sized>(
                 )?;
                 (Some(original.uid.clone()), banned)
             };
+            let log = penalty_alert(
+                store,
+                &item,
+                [&original, &first, &run],
+                &original.uid,
+                penalized.is_some(),
+                corrected,
+                banned,
+                origin,
+                now_ms,
+            )?;
             Ok(Outcome::Majority {
                 minority: original.uid,
                 penalized,
                 corrected,
                 banned,
+                log,
             })
         }
         _ => {
@@ -385,7 +436,10 @@ pub fn resolve<S: Store + ?Sized>(
                 sort: format!("{now_ms:013}#{origin}"),
                 kind: "engine-mismatch".to_string(),
                 text: format!(
-                    "three runs of verification item {sort} disagree: {}, {}, {}",
+                    "three runs of verification item {sort} ({} seed {} bots {}) disagree: {}, {}, {}",
+                    item.division,
+                    item.seed,
+                    join_vids(&item.bots),
                     describe(&original),
                     describe(&first),
                     describe(&run)
@@ -394,11 +448,201 @@ pub fn resolve<S: Store + ?Sized>(
                 ttl: now + ALERT_TTL,
             };
             store.put_alert(&alert)?;
+            let flagged = count_disagreement(store, config, &item.bots, origin, now_ms)?;
             Ok(Outcome::Disagreement {
                 log: format!("ALERT engine-mismatch {sort}"),
+                flagged,
             })
         }
     }
+}
+
+fn join_vids(vids: &[u32]) -> String {
+    vids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Whether any of the versions `vids` is flagged nondeterministic (§11.5); `known` caches
+/// the answers of one call (versions that don't exist count as deterministic).
+pub fn any_nondeterministic<S: Store + ?Sized>(
+    store: &S,
+    vids: &[u32],
+    known: &mut HashMap<u32, bool>,
+) -> StoreResult<bool> {
+    let mut any = false;
+    for &vid in vids {
+        let flagged = match known.get(&vid) {
+            Some(&flagged) => flagged,
+            None => {
+                let flagged = store
+                    .get_version(vid)?
+                    .is_some_and(|v| v.nondeterministic.is_some());
+                known.insert(vid, flagged);
+                flagged
+            }
+        };
+        any |= flagged;
+    }
+    Ok(any)
+}
+
+/// Flags the version `vid` nondeterministic with `reason` (§11.5) unless it is flagged
+/// already, and stores a `nondeterministic` alert. Returns the log line, if it flagged.
+pub fn flag_nondeterministic<S: Store + ?Sized>(
+    store: &S,
+    vid: u32,
+    reason: &str,
+    origin: &str,
+    now_ms: u64,
+) -> StoreResult<Option<String>> {
+    let Some(version) = store.get_version(vid)? else {
+        return Ok(None);
+    };
+    if version.nondeterministic.is_some() {
+        return Ok(None);
+    }
+    match store.set_version_nondeterministic(vid, Some(reason)) {
+        Ok(()) => {}
+        Err(StoreError::ConditionFailed) => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let text = format!(
+        "{} {} (vid {vid}) flagged nondeterministic: {reason}",
+        version.bot, version.version
+    );
+    store.put_alert(&Alert {
+        sort: format!("{now_ms:013}#{origin}.nd{vid}"),
+        kind: "nondeterministic".to_string(),
+        text: text.clone(),
+        reference: vid.to_string(),
+        ttl: now_ms / 1000 + ALERT_TTL,
+    })?;
+    Ok(Some(format!("NONDETERMINISTIC {text}")))
+}
+
+/// Counts a three-way disagreement for each bot of the item and flags the bot that stands
+/// out (§11.5): at least `rep.ndDisagreements` and more than any other bot of the item, so a
+/// deterministic opponent of a nondeterministic robot isn't flagged with it. Returns the
+/// flagged vids.
+fn count_disagreement<S: Store + ?Sized>(
+    store: &S,
+    config: &Config,
+    bots: &[u32],
+    origin: &str,
+    now_ms: u64,
+) -> StoreResult<Vec<u32>> {
+    let mut counts = Vec::new();
+    for &vid in bots {
+        match store.add_version_disagreement(vid) {
+            Ok(count) => counts.push((vid, count)),
+            Err(StoreError::ConditionFailed) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let limit = config.rep.nd_disagreements;
+    let mut flagged = Vec::new();
+    if limit == 0 {
+        return Ok(flagged);
+    }
+    for &(vid, count) in &counts {
+        let stands_out = counts.iter().all(|&(other, c)| other == vid || c < count);
+        if count >= limit
+            && stands_out
+            && flag_nondeterministic(store, vid, "disagreements", origin, now_ms)?.is_some()
+        {
+            flagged.push(vid);
+        }
+    }
+    Ok(flagged)
+}
+
+/// Ends an item with a flagged bot (§11.5) without judging anyone, as when it is served.
+fn settle_no_fault<S: Store + ?Sized>(
+    store: &S,
+    item: &VerifyItem,
+    now_ms: u64,
+) -> StoreResult<()> {
+    match store.delete_verify(item.engine, &item.sort, None) {
+        Ok(()) => release_unproven(store, item, now_ms),
+        Err(StoreError::ConditionFailed) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// A held original record of a no-fault item is released all the same: it was never proven
+/// wrong.
+fn release_unproven<S: Store + ?Sized>(
+    store: &S,
+    item: &VerifyItem,
+    now_ms: u64,
+) -> StoreResult<()> {
+    match item.runs.first() {
+        Some(original) if original.held => {
+            release(store, item, original, &format!("nd{}", item.sort), now_ms)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The `penalty` alert of a stage 2 majority (§11.3), kept like the other alerts: the item is
+/// deleted by then, so this is what says which battle caused a penalty. Returns the log line.
+/// `penalized` tells whether `minority` was penalized (not for a recheck's original).
+#[allow(clippy::too_many_arguments)]
+fn penalty_alert<S: Store + ?Sized>(
+    store: &S,
+    item: &VerifyItem,
+    runs: [&Run; 3],
+    minority: &str,
+    penalized: bool,
+    corrected: bool,
+    banned: bool,
+    origin: &str,
+    now_ms: u64,
+) -> StoreResult<String> {
+    let describe = |r: &Run| {
+        format!(
+            "{}={}{}",
+            r.uid,
+            r.hash.as_deref().unwrap_or("-"),
+            if r.held { "(held)" } else { "" }
+        )
+    };
+    let mismatches = if penalized {
+        store
+            .get_user(minority)?
+            .map(|u| format!(" mm {}", u.reputation.mismatches))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let kind = if penalized { "penalty" } else { "correction" };
+    let text = format!(
+        "item {} {} seed {} bots {}: runs {}, {}, {}; {} {minority}{mismatches}{}{}",
+        item.sort,
+        item.division,
+        item.seed,
+        join_vids(&item.bots),
+        describe(runs[0]),
+        describe(runs[1]),
+        describe(runs[2]),
+        if penalized {
+            "penalized"
+        } else {
+            "outvoted, not penalized again:"
+        },
+        if corrected { ", record corrected" } else { "" },
+        if banned { ", banned" } else { "" },
+    );
+    store.put_alert(&Alert {
+        sort: format!("{now_ms:013}#{origin}.pen"),
+        kind: kind.to_string(),
+        text: text.clone(),
+        reference: item.sort.clone(),
+        ttl: now_ms / 1000 + ALERT_TTL,
+    })?;
+    Ok(format!("{} {text}", kind.to_uppercase()))
 }
 
 /// Keeps the colours two agreeing runs of a battle report alike for a robot as its version's
@@ -448,13 +692,25 @@ fn release<S: Store + ?Sized>(
     origin: &str,
     now_ms: u64,
 ) -> StoreResult<()> {
+    release_held(store, item.engine, item.seed, original, origin, now_ms)
+}
+
+/// [`release`] for a battle that is never verified (a flagged bot's, §11.5), without an item.
+pub fn release_held<S: Store + ?Sized>(
+    store: &S,
+    engine: u32,
+    seed: i64,
+    original: &Run,
+    origin: &str,
+    now_ms: u64,
+) -> StoreResult<()> {
     let log = LogItem {
-        engine: item.engine,
+        engine,
         hour: hour_key(now_ms / 1000),
         sort: format!("{now_ms:013}#{origin}.r"),
         uid: original.uid.clone(),
         records: original.record.clone(),
-        seeds: vec![item.seed],
+        seeds: vec![seed],
         battles: 1,
         held: false,
         ttl: now_ms / 1000 + LOG_TTL,
@@ -678,6 +934,26 @@ mod tests {
         }
     }
 
+    /// The outcome without the log line of a majority, which the tests of the alert read.
+    fn without_log(outcome: Outcome) -> Outcome {
+        match outcome {
+            Outcome::Majority {
+                minority,
+                penalized,
+                corrected,
+                banned,
+                ..
+            } => Outcome::Majority {
+                minority,
+                penalized,
+                corrected,
+                banned,
+                log: String::new(),
+            },
+            other => other,
+        }
+    }
+
     fn claim(store: &MemStore, uid: &str) {
         let taken = take_work(store, 1, uid, 5, NOW_MS / 1000 + 3600, NOW_MS / 1000).unwrap();
         assert_eq!(taken.len(), 1, "{uid} gets the item");
@@ -685,6 +961,10 @@ mod tests {
 
     fn resolve_as(store: &MemStore, uid: &str, hash: &str, score: f32) -> Outcome {
         claim(store, uid);
+        resolve_claimed(store, uid, hash, score)
+    }
+
+    fn resolve_claimed(store: &MemStore, uid: &str, hash: &str, score: f32) -> Outcome {
         resolve(
             store,
             &config(),
@@ -747,6 +1027,8 @@ mod tests {
                     url: None,
                     colors: None,
                     released: None,
+                    nondeterministic: None,
+                    disagreements: 0,
                 })
                 .unwrap();
         }
@@ -943,12 +1225,13 @@ mod tests {
 
         let outcome = resolve_as(&store, "g3", "good", 2000.0);
         assert_eq!(
-            outcome,
+            without_log(outcome),
             Outcome::Majority {
                 minority: "g1".to_string(),
                 penalized: Some("g1".to_string()),
                 corrected: true,
-                banned: false
+                banned: false,
+                log: String::new()
             }
         );
         let g1 = rep_of(&store, "g1");
@@ -984,12 +1267,13 @@ mod tests {
         assert_eq!(resolve_as(&store, "g2", "bad", 1.0), Outcome::TieBreak);
         let outcome = resolve_as(&store, "g3", "good", 2000.0);
         assert_eq!(
-            outcome,
+            without_log(outcome),
             Outcome::Majority {
                 minority: "g2".to_string(),
                 penalized: Some("g2".to_string()),
                 corrected: false,
-                banned: false
+                banned: false,
+                log: String::new()
             }
         );
         assert_eq!(rep_of(&store, "g1").rep, 31);
@@ -1012,7 +1296,8 @@ mod tests {
         assert_eq!(
             outcome,
             Outcome::Disagreement {
-                log: "ALERT engine-mismatch 0000000000001#b0.0".to_string()
+                log: "ALERT engine-mismatch 0000000000001#b0.0".to_string(),
+                flagged: Vec::new()
             }
         );
         let alerts = store.list_alerts().unwrap();
@@ -1220,12 +1505,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            outcome,
+            without_log(outcome),
             Outcome::Majority {
                 minority: "g1".to_string(),
                 penalized: None,
                 corrected: true,
-                banned: false
+                banned: false,
+                log: String::new()
             }
         );
         assert_eq!(rep_of(&store, "g1").mismatches, 1);
@@ -1299,6 +1585,217 @@ mod tests {
         assert_eq!(rep_of(&store, "g1").rep, 11);
         assert_eq!(
             update_reputation(&store, "nobody", |r| r.rep += 1).unwrap(),
+            None
+        );
+    }
+
+    fn flag(store: &MemStore, vid: u32, reason: Option<&str>) {
+        store.set_version_nondeterministic(vid, reason).unwrap();
+    }
+
+    #[test]
+    fn a_flagged_bots_item_resolves_without_fault_in_stage_one() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::Quarantined);
+        add_user(&store, "g2", 60, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "x", 2000.0, true)))
+            .unwrap();
+        // The verifier claimed it before the bot was flagged.
+        claim(&store, "g2");
+        flag(&store, 2, Some("threads"));
+        // The hashes differ, which would be a tie-break: nobody is judged.
+        assert_eq!(resolve_claimed(&store, "g2", "y", 1.0), Outcome::NoFault);
+        assert!(store.verify_items(1).is_empty());
+        for (uid, rep, state) in [
+            ("g1", 30, UserState::Quarantined),
+            ("g2", 60, UserState::New),
+        ] {
+            let r = rep_of(&store, uid);
+            assert_eq!((r.rep, r.state, r.mismatches), (rep, state, 0));
+            assert_eq!((r.verified_matches, r.quarantine_matches), (0, 0));
+        }
+        // The held record is released all the same.
+        let logs = store.log_items(1);
+        assert_eq!(logs.len(), 1);
+        assert_eq!((logs[0].uid.as_str(), logs[0].held), ("g1", false));
+        assert!(store.list_alerts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_bot_flagged_while_an_item_waits_for_the_tie_break() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        add_user(&store, "g3", 70, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "x", 2000.0, false)))
+            .unwrap();
+        assert_eq!(resolve_as(&store, "g2", "y", 1.0), Outcome::TieBreak);
+        // The majority would have penalized g1 (g3 agrees with g2) ...
+        claim(&store, "g3");
+        flag(&store, 1, Some("threads"));
+        // ... but the flag came first.
+        assert_eq!(resolve_claimed(&store, "g3", "y", 1.0), Outcome::NoFault);
+        assert!(store.verify_items(1).is_empty());
+        assert!(store.log_items(1).is_empty(), "nothing is corrected");
+        for (uid, rep) in [("g1", 30), ("g2", 60), ("g3", 70)] {
+            let r = rep_of(&store, uid);
+            assert_eq!((r.rep, r.state, r.mismatches), (rep, UserState::New, 0));
+        }
+    }
+
+    #[test]
+    fn serving_work_settles_the_items_of_flagged_bots() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::Quarantined);
+        let mut flagged = check_item(run("g1", "x", 2000.0, true));
+        flagged.sort = "0000000000001#b0.0".to_string();
+        let mut other = check_item(run("g1", "x", 2000.0, false));
+        other.sort = "0000000000002#b0.0".to_string();
+        other.bots = vec![3, 4];
+        store.put_verify(&flagged).unwrap();
+        store.put_verify(&other).unwrap();
+        flag(&store, 1, Some("admin"));
+        let taken = take_work(&store, 1, "g2", 5, 100, 0).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].sort, other.sort);
+        let items = store.verify_items(1);
+        assert_eq!(items.len(), 1, "the flagged item is gone");
+        assert_eq!(store.log_items(1).len(), 1, "its held record is released");
+    }
+
+    #[test]
+    fn a_majority_leaves_a_penalty_alert() {
+        let store = MemStore::new();
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        add_user(&store, "g3", 70, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "bad", 9999.0, false)))
+            .unwrap();
+        resolve_as(&store, "g2", "good", 2000.0);
+        let Outcome::Majority { log, .. } = resolve_as(&store, "g3", "good", 2000.0) else {
+            panic!("a majority");
+        };
+        let alerts = store.list_alerts().unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, "penalty");
+        assert_eq!(alerts[0].reference, "0000000000001#b0.0");
+        for part in [
+            "0000000000001#b0.0",
+            "seed 77",
+            "bots 1,2",
+            "g1=bad",
+            "g2=good",
+            "g3=good",
+            "penalized g1 mm 1",
+            "record corrected",
+        ] {
+            assert!(alerts[0].text.contains(part), "{part}: {}", alerts[0].text);
+        }
+        assert_eq!(log, format!("PENALTY {}", alerts[0].text));
+    }
+
+    #[test]
+    fn repeated_disagreements_flag_the_bot_that_stands_out() {
+        let store = MemStore::new();
+        add_versions(&store);
+        store
+            .put_version(&crate::store::VersionItem {
+                vid: 3,
+                bot: "a.Bot3".into(),
+                version: "1".into(),
+                ..store.get_version(1).unwrap().unwrap()
+            })
+            .unwrap();
+        for uid in ["g1", "g2", "g3"] {
+            add_user(&store, uid, 60, UserState::New);
+        }
+        let mut flagged = Vec::new();
+        // Bot 1 is in every disagreement, its opponents change.
+        for (i, opponent) in [2, 3, 2].into_iter().enumerate() {
+            let mut item = check_item(run("g1", "x", 2000.0, false));
+            item.sort = format!("000000000000{i}#b0.0");
+            item.bots = vec![1, opponent];
+            store.put_verify(&item).unwrap();
+            for (uid, hash) in [("g2", "y"), ("g3", "z")] {
+                claim_sort(&store, uid, &item.sort);
+                let outcome = resolve(
+                    &store,
+                    &config(),
+                    1,
+                    &item.sort,
+                    run(uid, hash, 2000.0, false),
+                    &format!("o{i}.{uid}"),
+                    NOW_MS,
+                )
+                .unwrap();
+                if let Outcome::Disagreement { flagged: f, .. } = outcome {
+                    flagged.push(f);
+                }
+            }
+        }
+        assert_eq!(flagged, [vec![], vec![], vec![1]]);
+        let v = |vid| store.get_version(vid).unwrap().unwrap();
+        assert_eq!(v(1).nondeterministic.as_deref(), Some("disagreements"));
+        assert_eq!((v(1).disagreements, v(2).disagreements), (3, 2));
+        assert_eq!(v(2).nondeterministic, None, "the opponent isn't flagged");
+        assert_eq!(v(3).nondeterministic, None);
+        let kinds: Vec<_> = store
+            .list_alerts()
+            .unwrap()
+            .into_iter()
+            .map(|a| a.kind)
+            .collect();
+        assert_eq!(kinds.iter().filter(|k| *k == "nondeterministic").count(), 1);
+        for uid in ["g1", "g2", "g3"] {
+            assert_eq!(rep_of(&store, uid).mismatches, 0);
+        }
+    }
+
+    #[test]
+    fn flagging_is_once_and_the_automatic_flag_can_be_off() {
+        let store = MemStore::new();
+        add_versions(&store);
+        let first = flag_nondeterministic(&store, 1, "threads", "o", NOW_MS).unwrap();
+        assert!(
+            first
+                .unwrap()
+                .starts_with("NONDETERMINISTIC a.Bot1 1 (vid 1)")
+        );
+        assert_eq!(
+            flag_nondeterministic(&store, 1, "admin", "o", NOW_MS).unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .get_version(1)
+                .unwrap()
+                .unwrap()
+                .nondeterministic
+                .as_deref(),
+            Some("threads")
+        );
+        assert_eq!(
+            flag_nondeterministic(&store, 99, "threads", "o", NOW_MS).unwrap(),
+            None
+        );
+        let mut off = config();
+        off.rep.nd_disagreements = 0;
+        for i in 0..4 {
+            assert!(
+                count_disagreement(&store, &off, &[2], &format!("o{i}"), NOW_MS)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert_eq!(store.get_version(2).unwrap().unwrap().disagreements, 4);
+        assert_eq!(
+            store.get_version(2).unwrap().unwrap().nondeterministic,
             None
         );
     }

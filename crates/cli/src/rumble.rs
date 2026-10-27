@@ -15,7 +15,9 @@ use rumble_client::http::Api;
 use rumble_client::import::{self, HttpFetcher};
 use rumble_client::login::{DeviceCode, DeviceFlow, GITHUB};
 use rumble_client::tokenfile::{self, Credentials, TokenFile};
-use rumble_core::api::{AlertsResponse, BattleStatus, UserUpdateRequest};
+use rumble_core::api::{
+    AlertsResponse, BattleStatus, Me, NondeterministicRequest, Tier, UserUpdateRequest,
+};
 use rumble_core::ids::Division;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -92,12 +94,23 @@ Admin commands (an admin account; they print the server's answer):
                          versions on today's participants lists only get their date
                          (default report history-<date>.json)
   admin user UID [--rep N] [--state new|quar|ban] [--admin true|false]
-               [--trusted true|false]
-                         change a user (UID as g<GitHub id>)
+               [--trusted true|false] [--mm N] [--clear-mmt]
+                         change a user (UID as g<GitHub id>); --mm sets the count of
+                         confirmed mismatches, --clear-mmt empties their times
+  admin repair UID... [--rep N] [--apply]
+                         undo wrongly confirmed mismatches (docs/rumble-backend.md 11.5):
+                         shows what would change (state new, mismatches 0, times
+                         cleared, reputation N if given) and changes nothing without
+                         --apply
   admin bot claim <id> <github login>
                          give a bot to the GitHub user who claimed it
   admin bot remove <id> --reason TEXT
                          take a bot down
+  admin bot nd           the versions flagged nondeterministic or seen in three-way
+                         disagreements
+  admin bot nd <id> <version> on [--reason TEXT] | off
+                         flag a version as not reproducible (its battles are never
+                         verified, nobody is penalized by them) or clear the flag
   admin alerts           the open alerts (verification mismatches and the like)
   admin config get       print the configuration overrides
   admin config set FILE  replace them with the JSON in FILE
@@ -119,8 +132,21 @@ pub enum Command {
     Run(Box<RunOptions>),
     Import(ImportOptions),
     User(UserUpdateRequest),
-    BotClaim { bot: String, github: String },
-    BotRemove { bot: String, reason: String },
+    BotClaim {
+        bot: String,
+        github: String,
+    },
+    BotRemove {
+        bot: String,
+        reason: String,
+    },
+    /// `admin bot nd`: the list (`None`) or a flag change.
+    BotNd(Option<NondeterministicRequest>),
+    Repair {
+        uids: Vec<String>,
+        rep: Option<u32>,
+        apply: bool,
+    },
     Alerts,
     ConfigGet,
     ConfigSet(PathBuf),
@@ -299,9 +325,10 @@ impl RunOptions {
 
 fn parse_admin(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
-        None => Err("admin: import, user, bot, alerts or config?".into()),
+        None => Err("admin: import, user, repair, bot, alerts or config?".into()),
         Some("import") => ImportOptions::parse(&args[1..]).map(Command::Import),
         Some("user") => parse_user(&args[1..]),
+        Some("repair") => parse_repair(&args[1..]),
         Some("bot") => parse_bot(&args[1..]),
         Some("alerts") => {
             no_more(&args[1..], "admin alerts")?;
@@ -407,6 +434,8 @@ fn parse_user(args: &[String]) -> Result<Command, String> {
             }
             "--admin" => request.admin = Some(boolean(arg, value()?)?),
             "--trusted" => request.trusted = Some(boolean(arg, value()?)?),
+            "--mm" => request.mismatches = Some(number(arg, value()?)?),
+            "--clear-mmt" => request.clear_mismatch_times = true,
             a if a.starts_with("--") => return Err(format!("admin user: unknown option {a}")),
             uid if request.uid.is_empty() => request.uid = uid.to_string(),
             a => return Err(format!("admin user: unexpected argument {a}")),
@@ -419,14 +448,66 @@ fn parse_user(args: &[String]) -> Result<Command, String> {
         && request.state.is_none()
         && request.admin.is_none()
         && request.trusted.is_none()
+        && request.mismatches.is_none()
+        && !request.clear_mismatch_times
     {
-        return Err("admin user: nothing to change (--rep, --state, --admin, --trusted)".into());
+        return Err(
+            "admin user: nothing to change (--rep, --state, --admin, --trusted, --mm, --clear-mmt)"
+                .into(),
+        );
     }
     Ok(Command::User(request))
 }
 
+fn parse_repair(args: &[String]) -> Result<Command, String> {
+    let mut uids = Vec::new();
+    let mut rep = None;
+    let mut apply = false;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--rep" => {
+                rep = Some(number(
+                    arg,
+                    args.next().ok_or("--rep needs a value")?.clone(),
+                )?);
+            }
+            "--apply" => apply = true,
+            a if a.starts_with("--") => return Err(format!("admin repair: unknown option {a}")),
+            uid => uids.push(uid.to_string()),
+        }
+    }
+    if uids.is_empty() {
+        return Err("admin repair needs user ids (g<GitHub id>)".into());
+    }
+    Ok(Command::Repair { uids, rep, apply })
+}
+
 fn parse_bot(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
+        Some("nd") => match &args[1..] {
+            [] => Ok(Command::BotNd(None)),
+            [bot, version, switch, rest @ ..] if !bot.starts_with("--") => {
+                let reason = match rest {
+                    [] => None,
+                    [flag, text] if flag == "--reason" && !text.trim().is_empty() => {
+                        Some(text.clone())
+                    }
+                    _ => return Err("admin bot nd <id> <version> on [--reason TEXT] | off".into()),
+                };
+                let reason = match (switch.as_str(), reason) {
+                    ("on", reason) => Some(reason.unwrap_or_else(|| "admin".to_string())),
+                    ("off", None) => None,
+                    _ => return Err("admin bot nd <id> <version> on [--reason TEXT] | off".into()),
+                };
+                Ok(Command::BotNd(Some(NondeterministicRequest {
+                    bot: bot.clone(),
+                    version: version.clone(),
+                    reason,
+                })))
+            }
+            _ => Err("admin bot nd [<id> <version> on [--reason TEXT] | off]".into()),
+        },
         Some("claim") => match &args[1..] {
             [bot, github] if !bot.starts_with("--") && !github.starts_with("--") => {
                 Ok(Command::BotClaim {
@@ -459,7 +540,7 @@ fn parse_bot(args: &[String]) -> Result<Command, String> {
                 _ => Err("admin bot remove <id> --reason TEXT".into()),
             }
         }
-        _ => Err("admin bot: claim <id> <github login>, or remove <id> --reason TEXT?".into()),
+        _ => Err("admin bot: claim <id> <github login>, remove <id> --reason TEXT, or nd?".into()),
     }
 }
 
@@ -487,6 +568,14 @@ pub fn main(args: &[String]) -> Result<(), String> {
             let (api, _) = signed_in(&parsed)?;
             print_json(api.admin_remove(bot, reason))
         }
+        Command::BotNd(request) => {
+            let (api, _) = signed_in(&parsed)?;
+            match request {
+                None => print_json(api.get_json("admin/bots/nd")),
+                Some(request) => print_json(api.admin_nondeterministic(request)),
+            }
+        }
+        Command::Repair { uids, rep, apply } => repair(&parsed, uids, *rep, *apply),
         Command::Alerts => alerts(&parsed),
         Command::ConfigGet => {
             let (api, _) = signed_in(&parsed)?;
@@ -701,6 +790,60 @@ fn status(parsed: &Parsed) -> Result<(), String> {
     } else {
         Err("this robocode-s doesn't fit the rumble".into())
     }
+}
+
+/// What `admin repair` changes for a user as `me` shows them (§11.5): a wrongly confirmed
+/// mismatch left `rep` 0, the state quarantined (or banned), `mm` and `mmt` raised. The
+/// request that undoes it, and the lines that say what it changes. The reputation from before
+/// isn't recorded for old penalties, so it is `rep` if given and else left as it is.
+fn repair_plan(me: &Me, rep: Option<u32>) -> (UserUpdateRequest, Vec<String>) {
+    let request = UserUpdateRequest {
+        uid: me.uid.clone(),
+        rep,
+        state: Some("new".into()),
+        mismatches: Some(0),
+        clear_mismatch_times: true,
+        ..UserUpdateRequest::default()
+    };
+    let mut lines = vec![format!(
+        "{} ({}): tier {:?}, rep {}, mm {}",
+        me.uid, me.login, me.tier, me.reputation, me.mismatches
+    )];
+    lines.push(match rep {
+        Some(rep) => format!("  rep {} -> {rep}", me.reputation),
+        None => format!("  rep stays {} (give --rep N to restore it)", me.reputation),
+    });
+    lines.push(format!("  state -> new (tier now {:?})", me.tier));
+    lines.push(format!("  mm {} -> 0, mmt cleared", me.mismatches));
+    if me.tier == Tier::Banned {
+        lines.push("  banned: the user must sign in again (their tokens were deleted)".into());
+    }
+    (request, lines)
+}
+
+/// `admin repair`: the dry run reads each user through an update that changes nothing.
+fn repair(parsed: &Parsed, uids: &[String], rep: Option<u32>, apply: bool) -> Result<(), String> {
+    let (api, _) = signed_in(parsed)?;
+    for uid in uids {
+        let current = api
+            .admin_users_update(&serde_json::json!({ "uid": uid }))
+            .map_err(|e| format!("{uid}: {e}"))?;
+        let me: Me = serde_json::from_value(current).map_err(|e| format!("{uid}: {e}"))?;
+        let (request, lines) = repair_plan(&me, rep);
+        for line in lines {
+            println!("{line}");
+        }
+        if apply {
+            let body = serde_json::to_value(&request).map_err(|e| e.to_string())?;
+            api.admin_users_update(&body)
+                .map_err(|e| format!("{uid}: {e}"))?;
+            println!("  applied");
+        }
+    }
+    if !apply {
+        println!("Dry run: nothing changed. Add --apply to do it.");
+    }
+    Ok(())
 }
 
 fn alerts(parsed: &Parsed) -> Result<(), String> {
@@ -1114,6 +1257,89 @@ mod tests {
         assert!(parse("admin import --history v.json --division 1v1").is_err());
         assert!(parse("admin import --history v.json --mirror none").is_err());
         assert!(parse("admin import --history").is_err());
+    }
+
+    #[test]
+    fn parses_nondeterministic_and_repair_commands() {
+        assert_eq!(parse("admin bot nd").unwrap().command, Command::BotNd(None));
+        let nd = |s: &str| match parse(s).unwrap().command {
+            Command::BotNd(Some(r)) => (r.bot, r.version, r.reason),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            nd("admin bot nd a.B 1.0 on"),
+            ("a.B".into(), "1.0".into(), Some("admin".into()))
+        );
+        assert_eq!(
+            nd("admin bot nd a.B 1.0 on --reason helper"),
+            ("a.B".into(), "1.0".into(), Some("helper".into()))
+        );
+        assert_eq!(
+            nd("admin bot nd a.B 1.0 off"),
+            ("a.B".into(), "1.0".into(), None)
+        );
+        assert!(parse("admin bot nd a.B").is_err());
+        assert!(parse("admin bot nd a.B 1.0 maybe").is_err());
+        assert!(parse("admin bot nd a.B 1.0 off --reason x").is_err());
+
+        let Command::User(u) = parse("admin user g1 --mm 0 --clear-mmt").unwrap().command else {
+            panic!("a user update");
+        };
+        assert_eq!((u.mismatches, u.clear_mismatch_times), (Some(0), true));
+        assert_eq!(
+            parse("admin repair g1 g2 --rep 80").unwrap().command,
+            Command::Repair {
+                uids: vec!["g1".into(), "g2".into()],
+                rep: Some(80),
+                apply: false
+            }
+        );
+        assert_eq!(
+            parse("admin repair g1 --apply").unwrap().command,
+            Command::Repair {
+                uids: vec!["g1".into()],
+                rep: None,
+                apply: true
+            }
+        );
+        assert!(parse("admin repair").is_err());
+        assert!(parse("admin repair --apply").is_err());
+        assert!(parse("admin repair g1 --frobnicate").is_err());
+    }
+
+    #[test]
+    fn the_repair_plan_says_what_it_changes() {
+        let me = Me {
+            uid: "g1".into(),
+            login: "ann".into(),
+            name: String::new(),
+            country: String::new(),
+            reputation: 3,
+            tier: Tier::Quarantined,
+            verify_rate: 0.2,
+            battles: 10,
+            verified_matches: 5,
+            mismatches: 2,
+            admin: false,
+            since: String::new(),
+        };
+        let (request, lines) = repair_plan(&me, Some(80));
+        assert_eq!(
+            (
+                request.rep,
+                request.state.as_deref(),
+                request.mismatches,
+                request.clear_mismatch_times
+            ),
+            (Some(80), Some("new"), Some(0), true)
+        );
+        let text = lines.join("\n");
+        for part in ["rep 3 -> 80", "mm 2 -> 0", "mmt cleared", "-> new"] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        let (request, lines) = repair_plan(&me, None);
+        assert_eq!(request.rep, None);
+        assert!(lines.join("\n").contains("rep stays 3"));
     }
 
     #[test]

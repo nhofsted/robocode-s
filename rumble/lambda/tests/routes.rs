@@ -967,3 +967,125 @@ fn config_reload_and_cache() {
     h.advance(5 * 60_000);
     assert_eq!(info().status, 200);
 }
+
+#[test]
+fn nondeterministic_flag_and_repair_routes() {
+    let h = work_harness();
+    let user = h.user(1, 60);
+    let admin = h.user(ADMIN_ID, 0);
+    for (method, path) in [("GET", "admin/bots/nd"), ("POST", "admin/bots/nd")] {
+        let response = if method == "GET" {
+            h.get(path, &user)
+        } else {
+            h.post(path, &user, &json!({"bot": "t.Bot1", "version": "1.0"}))
+        };
+        assert_eq!(response.status, 403, "{path}");
+    }
+    assert_eq!(
+        h.get("admin/bots/nd", &admin).value()["versions"],
+        json!([])
+    );
+    assert_eq!(
+        h.post(
+            "admin/bots/nd",
+            &admin,
+            &json!({"bot": "t.Nobody", "version": "1.0", "reason": "x"})
+        )
+        .status,
+        404
+    );
+
+    // A verification item of bot 1 is queued; an admin flags the bot; the item is not served.
+    let queued = |sort: &str, bots: Vec<u32>| VerifyItem {
+        engine: 1,
+        sort: sort.into(),
+        division: Division::OneVsOne,
+        seed: 42,
+        bots,
+        rounds: 3,
+        runs: vec![Run {
+            uid: "g9".into(),
+            hash: Some("a".repeat(64)),
+            record: vec![],
+            held: false,
+            colors: Vec::new(),
+        }],
+        uids: vec!["g9".into()],
+        stage: 1,
+        claimant: None,
+        claim_until: None,
+        kind: VerifyKind::Check,
+        ttl: h.now() + VERIFY_TTL,
+    };
+    h.store
+        .put_verify(&queued("0000#b-x.0", vec![2, 1]))
+        .unwrap();
+    h.store
+        .put_verify(&queued("0001#b-x.1", vec![2, 3]))
+        .unwrap();
+    let flagged = h.post(
+        "admin/bots/nd",
+        &admin,
+        &json!({"bot": "t.Bot1", "version": "1.0", "reason": "Thread.sleep loop"}),
+    );
+    assert_eq!(flagged.status, 200, "{:?}", flagged.value());
+    assert_eq!(
+        flagged.value()["versions"][0]["reason"],
+        "Thread.sleep loop"
+    );
+    assert_eq!(
+        h.get("admin/bots/nd", &admin).value()["versions"][0]["vid"],
+        1
+    );
+    let batch = work(&h, &user, 4);
+    let verify = batch
+        .battles
+        .iter()
+        .filter(|b| b.kind == BattleKind::Verify)
+        .count();
+    assert_eq!(verify, 1, "only the item without the flagged bot");
+    assert!(h.store.get_verify(1, "0000#b-x.0").unwrap().is_none());
+
+    // Clearing the flag (no reason).
+    let cleared = h.post(
+        "admin/bots/nd",
+        &admin,
+        &json!({"bot": "t.Bot1", "version": "1.0"}),
+    );
+    assert_eq!(cleared.status, 200);
+    assert_eq!(
+        h.get("admin/bots/nd", &admin).value()["versions"],
+        json!([])
+    );
+
+    // Repair of a wrongly penalized user: mismatches and their times are reset.
+    let victim = h.user(5, 0);
+    rumble_core::verify::update_reputation(&*h.store, "g5", |r| {
+        r.rep = 0;
+        r.state = rumble_core::store::UserState::Quarantined;
+        r.mismatches = 2;
+        r.mismatch_times = vec![10, 20];
+    })
+    .unwrap();
+    assert_eq!(h.get("me", &victim).value()["mismatches"], 2);
+    let repaired = h.post(
+        "admin/users/update",
+        &admin,
+        &json!({"uid": "g5", "rep": 61, "state": "new", "mismatches": 0,
+                "clearMismatchTimes": true}),
+    );
+    assert_eq!(repaired.status, 200, "{:?}", repaired.value());
+    let user = h.store.get_user("g5").unwrap().unwrap();
+    assert_eq!(
+        (
+            user.reputation.rep,
+            user.reputation.state,
+            user.reputation.mismatches,
+            user.reputation.mismatch_times
+        ),
+        (61, rumble_core::store::UserState::New, 0, vec![])
+    );
+    // An update with only the uid changes nothing (the dry run of `admin repair` reads so).
+    let same = h.post("admin/users/update", &admin, &json!({"uid": "g5"}));
+    assert_eq!(same.value()["reputation"], 61);
+}

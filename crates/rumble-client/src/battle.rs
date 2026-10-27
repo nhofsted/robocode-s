@@ -443,6 +443,7 @@ fn robot_result(r: &v1::Results) -> RobotResult {
         thirds: r.thirds.max(0) as u32,
         rank: r.rank.max(0) as u32,
         colors: None,
+        threads: false,
     }
 }
 

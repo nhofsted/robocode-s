@@ -177,6 +177,8 @@ mod tests {
             url: None,
             colors: None,
             released: None,
+            nondeterministic: None,
+            disagreements: 0,
         }
     }
 
