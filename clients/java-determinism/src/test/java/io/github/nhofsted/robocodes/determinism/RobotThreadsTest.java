@@ -169,7 +169,22 @@ class RobotThreadsTest {
         }
     }
 
-    private static final Set<String> ROBOT_CLASSES = Set.of(Busy.class.getName(), Worker.class.getName(),
+    /** Robot code: sleeps with nanoseconds out of range (as mn.nano.SkippedTurns does). */
+    public static final class BadSleep implements Function<Object, Object> {
+        @Override
+        public Object apply(Object ignored) {
+            try {
+                Thread.sleep(0, 2_000_000);
+            } catch (IllegalArgumentException e) {
+                return e;
+            } catch (InterruptedException e) {
+                return null;
+            }
+            return null;
+        }
+    }
+
+    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Busy.class.getName(), Worker.class.getName(),
             Interleave.class.getName(), Setter.class.getName(), Spinner.class.getName(), Sleeper.class.getName(),
             Starter.class.getName(), Interrupter.class.getName(), Stubborn.class.getName());
 
@@ -328,6 +343,16 @@ class RobotThreadsTest {
         helper.join(10_000);
         assertFalse(helper.isAlive(), "stopped");
         assertEquals(RobotThreads.END_PULSES, stubborn[0].getClass().getDeclaredField("interrupts").get(stubborn[0]));
+    }
+
+    @Test
+    void robotsWithoutThreadsSleepAsBeforeWithTheSameStackTrace() throws Exception {
+        AtomicReference<Object> thrown = new AtomicReference<>();
+        onRobotThread("sample.Fire (120)", () -> thrown.set(new Robot().code(BadSleep.class).apply(null)));
+        StackTraceElement[] stack = ((Throwable) thrown.get()).getStackTrace();
+        assertEquals("java.lang.Thread", stack[0].getClassName());
+        assertEquals("sleep", stack[0].getMethodName());
+        assertEquals(BadSleep.class.getName(), stack[1].getClassName(), "no frames of the agent");
     }
 
     @Test

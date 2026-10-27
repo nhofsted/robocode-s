@@ -247,18 +247,20 @@ final class RobotThreads {
         checkKilled(me);
     }
 
-    /** {@code Thread.sleep(millis, nanos)} in robot code. */
-    static void sleep(long millis, int nanos) throws InterruptedException {
+    /**
+     * {@code Thread.sleep(millis, nanos)}: robot code on one of a robot's scheduled threads
+     * sleeps on the virtual clock. Otherwise false: the JDK sleeps.
+     */
+    static boolean sleep(long millis, int nanos) throws InterruptedException {
+        Task me = task(Thread.currentThread());
+        if (me == null || !calledFromRobotCode()) {
+            return false;
+        }
         if (millis < 0) {
             throw new IllegalArgumentException("timeout value is negative");
         }
         if (nanos < 0 || nanos > 999_999) {
             throw new IllegalArgumentException("nanosecond timeout value out of range");
-        }
-        Task me = task(Thread.currentThread());
-        if (me == null) {
-            Thread.sleep(millis, nanos);
-            return;
         }
         if (Thread.interrupted()) {
             throw new InterruptedException("sleep interrupted");
@@ -280,6 +282,7 @@ final class RobotThreads {
         if (Thread.interrupted()) {
             throw new InterruptedException("sleep interrupted");
         }
+        return true;
     }
 
     /** {@code Thread.yield()} in robot code. */
@@ -296,23 +299,19 @@ final class RobotThreads {
         checkKilled(me);
     }
 
-    /** {@code t.join(millis, nanos)} in robot code; {@code timed} false: {@code join()}. */
-    static void join(Thread t, boolean timed, long millis, int nanos) throws InterruptedException {
-        if (millis < 0) {
-            throw new IllegalArgumentException("timeout value is negative");
-        }
-        if (nanos < 0 || nanos > 999_999) {
-            throw new IllegalArgumentException("nanosecond timeout value out of range");
-        }
+    /**
+     * {@code t.join(millis)} (0: without end; {@code join()} and {@code join(millis, nanos)}
+     * come here too): robot code on one of a robot's scheduled threads joins another of them.
+     * Otherwise false: the JDK joins.
+     */
+    static boolean join(Thread t, long millis) throws InterruptedException {
         Task me = task(Thread.currentThread());
         Task target = task(t);
-        if (me == null || target == null || target.cpu != me.cpu || target == me) {
-            if (timed) {
-                t.join(millis, nanos);
-            } else {
-                t.join();
-            }
-            return;
+        if (me == null || target == null || target.cpu != me.cpu || target == me || !calledFromRobotCode()) {
+            return false;
+        }
+        if (millis < 0) {
+            throw new IllegalArgumentException("timeout value is negative");
         }
         if (Thread.interrupted()) {
             throw new InterruptedException();
@@ -320,9 +319,9 @@ final class RobotThreads {
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
             if (target.state != State.DONE) {
-                boolean forever = !timed || (millis == 0 && nanos == 0);
-                long duration = millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : millis * 1_000_000 + nanos;
-                me.deadline = forever ? Long.MAX_VALUE : saturatedAdd(cpu.now(), duration);
+                me.deadline = millis == 0 ? Long.MAX_VALUE
+                        : saturatedAdd(cpu.now(), millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE
+                                : millis * 1_000_000);
                 me.joining = target;
                 me.state = State.JOINING;
                 cpu.dispatch();
@@ -335,19 +334,25 @@ final class RobotThreads {
         if (Thread.interrupted()) {
             throw new InterruptedException();
         }
+        return true;
     }
 
-    /** {@code t.interrupt()} in robot code: a sleeping or joining robot thread gets the CPU in line. */
-    static void interrupt(Thread t) {
-        t.interrupt();
-        Task target = task(t);
+    /**
+     * {@code t.interrupt()}, before it sets the flag: one of a robot's threads interrupts
+     * another that sleeps or joins, which then gets the CPU in line (and throws when it runs).
+     */
+    static void interrupting(Object o) {
+        if (!any) {
+            return;
+        }
+        Task target = task((Thread) o);
         Task me = task(Thread.currentThread());
         if (target == null || me == null || target.cpu != me.cpu) {
             return;
         }
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
-            if (target.state == State.SLEEPING || target.state == State.JOINING) {
+            if (cpu.running == me && (target.state == State.SLEEPING || target.state == State.JOINING)) {
                 cpu.makeReady(target);
             }
         }

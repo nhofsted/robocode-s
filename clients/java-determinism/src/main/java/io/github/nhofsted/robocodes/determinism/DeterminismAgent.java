@@ -9,10 +9,13 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
@@ -48,6 +51,10 @@ public final class DeterminismAgent {
     static final String THREAD_START_KEY = "robocodes.determinism.threadStart";
     static final String THREAD_RUN_KEY = "robocodes.determinism.threadRun";
     static final String THREAD_EXIT_KEY = "robocodes.determinism.threadExit";
+    static final String THREAD_INTERRUPT_KEY = "robocodes.determinism.threadInterrupt";
+    /** Hooks in {@code Thread.sleep} and {@code Thread.join(long)} (each a {@code Predicate<Object[]>}: whether it did the call). */
+    static final String THREAD_SLEEP_KEY = "robocodes.determinism.threadSleep";
+    static final String THREAD_JOIN_KEY = "robocodes.determinism.threadJoin";
 
     /** How long a robot's thread may take to finish on its own at the end of a round. */
     static final long STOP_WAIT_MILLIS = 60_000;
@@ -78,17 +85,25 @@ public final class DeterminismAgent {
 
     /** Robot code's thread calls ({@link ThreadCalls}): the call's name and arguments. */
     static void threadCall(Object[] call) {
+        if (!"yield".equals(call[0])) {
+            throw new IllegalArgumentException("unknown thread call " + call[0]);
+        }
+        RobotThreads.yieldNow();
+    }
+
+    /** {@code Thread.sleep(millis[, nanos])}: whether the robot's scheduler did it. */
+    private static boolean sleep(Object[] args) {
         try {
-            switch ((String) call[0]) {
-                case "sleep" -> RobotThreads.sleep((Long) call[1], 0);
-                case "sleepNanos" -> RobotThreads.sleep((Long) call[1], (Integer) call[2]);
-                case "yield" -> RobotThreads.yieldNow();
-                case "join" -> RobotThreads.join((Thread) call[1], false, 0, 0);
-                case "joinMillis" -> RobotThreads.join((Thread) call[1], true, (Long) call[2], 0);
-                case "joinNanos" -> RobotThreads.join((Thread) call[1], true, (Long) call[2], (Integer) call[3]);
-                case "interrupt" -> RobotThreads.interrupt((Thread) call[1]);
-                default -> throw new IllegalArgumentException("unknown thread call " + call[0]);
-            }
+            return RobotThreads.sleep((Long) args[0], args.length > 1 ? (Integer) args[1] : 0);
+        } catch (InterruptedException e) {
+            throw DeterminismAgent.<RuntimeException>sneaky(e);
+        }
+    }
+
+    /** {@code thread.join(millis)}: whether the robot's scheduler did it. */
+    private static boolean join(Object[] args) {
+        try {
+            return RobotThreads.join((Thread) args[0], (Long) args[1]);
         } catch (InterruptedException e) {
             throw DeterminismAgent.<RuntimeException>sneaky(e);
         }
@@ -122,9 +137,12 @@ public final class DeterminismAgent {
         System.getProperties().put(ThreadCalls.CALL_KEY, (Consumer<Object[]>) DeterminismAgent::threadCall);
         System.getProperties().put(ThreadCalls.LIMIT_KEY, (Consumer<Object>) RobotThreads::atLimit);
         System.getProperties().put(ThreadCalls.ENTER_KEY, (Runnable) RobotThreads::entering);
-        System.getProperties().put(THREAD_START_KEY, (Consumer<Object>) RobotThreads::starting);
-        System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object>) t -> RobotThreads.entering());
-        System.getProperties().put(THREAD_EXIT_KEY, (Consumer<Object>) RobotThreads::exiting);
+        System.getProperties().put(THREAD_START_KEY, (Consumer<Object[]>) a -> RobotThreads.starting(a[0]));
+        System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object[]>) a -> RobotThreads.entering());
+        System.getProperties().put(THREAD_EXIT_KEY, (Consumer<Object[]>) a -> RobotThreads.exiting(a[0]));
+        System.getProperties().put(THREAD_INTERRUPT_KEY, (Consumer<Object[]>) a -> RobotThreads.interrupting(a[0]));
+        System.getProperties().put(THREAD_SLEEP_KEY, (Predicate<Object[]>) DeterminismAgent::sleep);
+        System.getProperties().put(THREAD_JOIN_KEY, (Predicate<Object[]>) DeterminismAgent::join);
         // Skipped turns by counted work in classic (#15).
         System.getProperties().put(RobotRandomness.PEER_ROUND_KEY, (Consumer<Object>) RobotRandomness::peerRound);
         System.getProperties().put(RobotRandomness.PEER_EXECUTE_KEY, (Consumer<Object[]>) RobotRandomness::peerExecute);
@@ -323,12 +341,28 @@ public final class DeterminismAgent {
         }
     }
 
+    /** A hook in {@code java.lang.Thread}: the method, its key, and whether it may take over the call. */
+    private record ThreadHook(String name, String descriptor, String key, boolean predicate) {
+    }
+
+    private static final List<ThreadHook> THREAD_HOOKS = List.of(
+            new ThreadHook("start", "()V", THREAD_START_KEY, false),
+            new ThreadHook("run", "()V", THREAD_RUN_KEY, false),
+            new ThreadHook("exit", "()V", THREAD_EXIT_KEY, false),
+            new ThreadHook("interrupt", "()V", THREAD_INTERRUPT_KEY, false),
+            new ThreadHook("sleep", "(J)V", THREAD_SLEEP_KEY, true),
+            new ThreadHook("sleep", "(JI)V", THREAD_SLEEP_KEY, true),
+            new ThreadHook("join", "(J)V", THREAD_JOIN_KEY, true));
+
     /**
-     * {@code java.lang.Thread}: {@code start()}, {@code run()} and {@code exit()} (which the JVM
-     * calls when a thread ends) first call their hook with {@code this}, if it is installed:
-     * {@code Object h = hook; if (h instanceof Consumer) ((Consumer) h).accept(this);}. The
-     * robot's scheduler (ADR 0023) learns of new robot threads, makes them wait for the CPU
-     * and hands it on when they end.
+     * {@code java.lang.Thread}: these methods first call their hook, if it is installed, with
+     * {@code new Object[] {this (unless static), args...}}: {@code start()}, {@code run()},
+     * {@code exit()} (which the JVM calls when a thread ends) and {@code interrupt()} a
+     * {@code Consumer}; {@code sleep(long)}, {@code sleep(long, int)} and {@code join(long)}
+     * (which {@code join()} and {@code join(long, int)} call) a {@code Predicate} that returns
+     * true when it did the call itself. The robot's scheduler (ADR 0023) learns of new robot
+     * threads, makes them wait for the CPU, hands it on when they end, and takes over robot
+     * code's sleeps and joins. For other threads nothing changes, not even their stack traces.
      */
     private static byte[] patchThread(byte[] classfileBuffer) {
         try {
@@ -340,11 +374,12 @@ public final class DeterminismAgent {
                 public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
                         String[] exceptions) {
                     MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-                    String key = !descriptor.equals("()V") || (access & Opcodes.ACC_STATIC) != 0 ? null
-                            : name.equals("start") ? THREAD_START_KEY
-                            : name.equals("run") ? THREAD_RUN_KEY
-                            : name.equals("exit") ? THREAD_EXIT_KEY : null;
-                    if (key == null) {
+                    boolean isStatic = (access & Opcodes.ACC_STATIC) != 0;
+                    ThreadHook hook = THREAD_HOOKS.stream()
+                            .filter(h -> h.name().equals(name) && h.descriptor().equals(descriptor)
+                                    && isStatic == h.name().equals("sleep"))
+                            .findFirst().orElse(null);
+                    if (hook == null) {
                         return mv;
                     }
                     patched[0]++;
@@ -352,36 +387,80 @@ public final class DeterminismAgent {
                         @Override
                         public void visitCode() {
                             super.visitCode();
-                            Label original = new Label();
-                            Label call = new Label();
-                            loadHook(mv, key);
-                            mv.visitInsn(Opcodes.DUP);
-                            mv.visitTypeInsn(Opcodes.INSTANCEOF, "java/util/function/Consumer");
-                            mv.visitJumpInsn(Opcodes.IFNE, call);
-                            mv.visitInsn(Opcodes.POP);
-                            mv.visitJumpInsn(Opcodes.GOTO, original);
-                            mv.visitLabel(call);
-                            // Frames are expanded (EXPAND_FRAMES).
-                            mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {"java/lang/Thread"}, 1,
-                                    new Object[] {"java/lang/Object"});
-                            mv.visitTypeInsn(Opcodes.CHECKCAST, "java/util/function/Consumer");
-                            mv.visitVarInsn(Opcodes.ALOAD, 0);
-                            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/function/Consumer", "accept",
-                                    "(Ljava/lang/Object;)V", true);
-                            mv.visitLabel(original);
-                            mv.visitFrame(Opcodes.F_NEW, 1, new Object[] {"java/lang/Thread"}, 0, new Object[0]);
+                            emitThreadHook(mv, hook, isStatic);
                         }
                     };
                 }
             }, ClassReader.EXPAND_FRAMES);
-            if (patched[0] != 3) {
-                throw new IllegalStateException("expected Thread.start, run and exit, found " + patched[0]);
+            if (patched[0] != THREAD_HOOKS.size()) {
+                throw new IllegalStateException("expected " + THREAD_HOOKS + ", found " + patched[0]);
             }
             return writer.toByteArray();
         } catch (Throwable t) {
             System.err.println("DeterminismAgent: could not patch Thread: " + t);
             return null;
         }
+    }
+
+    /**
+     * {@code Object h = hook; if (h instanceof F) { if (h.test/accept(new Object[] {...})) return; }}
+     * followed by the original body. Frames are expanded (EXPAND_FRAMES).
+     */
+    private static void emitThreadHook(MethodVisitor mv, ThreadHook hook, boolean isStatic) {
+        String type = hook.predicate() ? "java/util/function/Predicate" : "java/util/function/Consumer";
+        Type[] args = Type.getArgumentTypes(hook.descriptor());
+        List<Object> locals = new ArrayList<>();
+        if (!isStatic) {
+            locals.add("java/lang/Thread");
+        }
+        for (Type a : args) {
+            locals.add(a.getSort() == Type.LONG ? Opcodes.LONG : Opcodes.INTEGER);
+        }
+        Object[] frame = locals.toArray();
+        Label call = new Label();
+        Label original = new Label();
+        loadHook(mv, hook.key());
+        mv.visitInsn(Opcodes.DUP);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, type);
+        mv.visitJumpInsn(Opcodes.IFNE, call);
+        mv.visitInsn(Opcodes.POP);
+        mv.visitJumpInsn(Opcodes.GOTO, original);
+        mv.visitLabel(call);
+        mv.visitFrame(Opcodes.F_NEW, frame.length, frame, 1, new Object[] {"java/lang/Object"});
+        mv.visitTypeInsn(Opcodes.CHECKCAST, type);
+        int values = (isStatic ? 0 : 1) + args.length;
+        mv.visitLdcInsn(values);
+        mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
+        int slot = 0;
+        int index = 0;
+        if (!isStatic) {
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitLdcInsn(index++);
+            mv.visitVarInsn(Opcodes.ALOAD, slot++);
+            mv.visitInsn(Opcodes.AASTORE);
+        }
+        for (Type a : args) {
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitLdcInsn(index++);
+            mv.visitVarInsn(a.getOpcode(Opcodes.ILOAD), slot);
+            if (a.getSort() == Type.LONG) {
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf", "(J)Ljava/lang/Long;", false);
+            } else {
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;",
+                        false);
+            }
+            mv.visitInsn(Opcodes.AASTORE);
+            slot += a.getSize();
+        }
+        if (hook.predicate()) {
+            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, type, "test", "(Ljava/lang/Object;)Z", true);
+            mv.visitJumpInsn(Opcodes.IFEQ, original);
+            mv.visitInsn(Opcodes.RETURN);
+        } else {
+            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, type, "accept", "(Ljava/lang/Object;)V", true);
+        }
+        mv.visitLabel(original);
+        mv.visitFrame(Opcodes.F_NEW, frame.length, frame, 0, new Object[0]);
     }
 
     /**

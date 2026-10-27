@@ -30,9 +30,8 @@ import java.util.WeakHashMap;
 
 /**
  * Robot code's thread calls go through the robot's deterministic scheduler
- * ({@link RobotThreads}, ADR 0023): {@code Thread.sleep}, {@code yield}, {@code join} and
- * {@code interrupt} call synthetic helpers of the robot class that hand them to the
- * scheduler, robot classes that extend {@code Thread} wait for the CPU when their
+ * ({@link RobotThreads}, ADR 0023): {@code Thread.yield} calls a synthetic helper of the
+ * robot class that hands it to the scheduler, robot classes that extend {@code Thread} wait for the CPU when their
  * {@code run()} starts, and where robot code checks its work limit (ADR 0018) it first
  * asks the scheduler once the limit is reached ({@code robocodes$limit}). Applied after the
  * counting: the count stays the same.
@@ -58,14 +57,14 @@ final class ThreadCalls {
     private record Call(int opcode, String name, String desc, String kind) {
     }
 
+    /**
+     * {@code Thread.yield()} is native, so robot code's calls are rewritten. {@code sleep},
+     * {@code join} and {@code interrupt} are hooked in {@code java.lang.Thread} itself
+     * ({@code DeterminismAgent.patchThread}): a helper here would show in the stack traces
+     * of robots without threads.
+     */
     private static final List<Call> CALLS = List.of(
-            new Call(Opcodes.INVOKESTATIC, "sleep", "(J)V", "sleep"),
-            new Call(Opcodes.INVOKESTATIC, "sleep", "(JI)V", "sleepNanos"),
-            new Call(Opcodes.INVOKESTATIC, "yield", "()V", "yield"),
-            new Call(Opcodes.INVOKEVIRTUAL, "join", "()V", "join"),
-            new Call(Opcodes.INVOKEVIRTUAL, "join", "(J)V", "joinMillis"),
-            new Call(Opcodes.INVOKEVIRTUAL, "join", "(JI)V", "joinNanos"),
-            new Call(Opcodes.INVOKEVIRTUAL, "interrupt", "()V", "interrupt"));
+            new Call(Opcodes.INVOKESTATIC, "yield", "()V", "yield"));
 
     /** Rewrites the class's thread calls and adds the helpers. */
     static void patch(ClassNode node, ClassLoader loader, String fuelField) {
