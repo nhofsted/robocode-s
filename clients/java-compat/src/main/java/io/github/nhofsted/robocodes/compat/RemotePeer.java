@@ -70,6 +70,27 @@ final class RemotePeer implements IRobotPeer {
 
     RemotePeer(OutputStream out) {
         this.out = out;
+        // Reported as soon as it happens: the robot may start its threads when the server
+        // doesn't expect an Execute (in onRoundEnded), or never executes again.
+        RobotRandomness.onThreadStarted(this::reportThreads);
+    }
+
+    /**
+     * Robot code started a thread of its own (determinism agent): tell the server now, in an
+     * {@code Execute} that answers no turn ({@code turn} -1). Every later {@code Execute}
+     * carries it too ({@link #send}).
+     */
+    private void reportThreads() {
+        try {
+            synchronized (out) {
+                ClientMessage.newBuilder()
+                        .setExecute(Execute.newBuilder().setTurn(-1).setThreads(true))
+                        .build().writeDelimitedTo(out);
+                out.flush();
+            }
+        } catch (IOException e) {
+            // The connection is gone; the battle is over for this robot.
+        }
     }
 
     /** Main thread: a new round starts. */
@@ -263,6 +284,9 @@ final class RemotePeer implements IRobotPeer {
     }
 
     private void send(Execute.Builder execute) {
+        if (RobotRandomness.startedThreads()) {
+            execute.setThreads(true);
+        }
         try {
             synchronized (out) {
                 ClientMessage.newBuilder().setExecute(execute).build().writeDelimitedTo(out);

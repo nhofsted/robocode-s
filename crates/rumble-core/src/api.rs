@@ -366,6 +366,9 @@ pub struct RobotResult {
     /// set any. Absent where it set none, and from clients (or robot hosts) that don't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colors: Option<BotColors>,
+    /// The robot started threads of its own: its battles aren't reproducible (ADR 0014).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub threads: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

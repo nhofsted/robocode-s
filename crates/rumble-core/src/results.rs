@@ -743,6 +743,7 @@ mod tests {
             thirds: 0,
             rank: 1,
             colors: None,
+            threads: false,
         }
     }
 

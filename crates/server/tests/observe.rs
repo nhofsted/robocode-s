@@ -18,6 +18,7 @@ use std::time::Duration;
 fn watched(outcome: BattleOutcome) -> BattleOutcome {
     BattleOutcome {
         connections: Vec::new(),
+        threads: Vec::new(),
         ..outcome
     }
 }

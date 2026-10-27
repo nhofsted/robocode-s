@@ -172,6 +172,10 @@ pub struct BattleOutcome {
     /// Per robot, by robot index: whether it was connected to the end. Empty where that
     /// isn't known (a battle watched from elsewhere, [`watch`]).
     pub connections: Vec<Connection>,
+    /// Per robot, by robot index: whether its code started a thread of its own
+    /// (`Execute.threads`), which makes its battles not reproducible (ADR 0024). Empty
+    /// where that isn't known (a battle watched from elsewhere, [`watch`]).
+    pub threads: Vec<bool>,
 }
 
 /// What became of a robot's connection in a battle.
@@ -296,6 +300,8 @@ struct Link {
     answered_late: Option<i64>,
     /// A robot from an IDE ([`RobotEntry::debug`]): never timed.
     debug: bool,
+    /// The robot said it started threads of its own (`Execute.threads`).
+    threads: bool,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -864,6 +870,7 @@ impl<'a> BattleLoop<'a> {
                 (true, false) => Connection::Lost,
             })
             .collect();
+        let threads = self.links.iter().map(|l| l.threads).collect();
         self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
             aborted,
             rounds,
@@ -891,6 +898,7 @@ impl<'a> BattleLoop<'a> {
             rounds,
             aborted,
             connections,
+            threads,
         })
     }
 
@@ -1144,6 +1152,8 @@ impl<'a> BattleLoop<'a> {
             }
             Incoming::Message { robot, message } => {
                 if let client_message::Msg::Execute(execute) = *message {
+                    // From any Execute, also one that is no answer: threads start at any time.
+                    self.links[robot].threads |= execute.threads;
                     self.on_execute(robot, execute);
                 }
             }
@@ -1503,6 +1513,12 @@ impl<'a> BattleLoop<'a> {
 
     /// An observer's control or connection now, anything else with the next turn.
     fn take(&mut self, incoming: Incoming) {
+        // Threads may start after the last turn, when no held message is handled anymore.
+        if let Incoming::Message { robot, message } = &incoming
+            && let client_message::Msg::Execute(execute) = &**message
+        {
+            self.links[*robot].threads |= execute.threads;
+        }
         match incoming {
             Incoming::Control(_)
             | Incoming::ObserverConnected { .. }

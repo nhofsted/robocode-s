@@ -278,6 +278,12 @@ message Execute {
   bool disable = 8;
   // Debug properties the robot set since the last Execute (setDebugProperty), in order.
   repeated DebugProperty debug_properties = 9;
+  // The robot's code started a thread of its own (also through Timer or an executor). Such
+  // threads run in real time, outside the work meter and the virtual clock: the robot's
+  // battles are not reproducible (ADR 0014, ADR 0024). Sticky: once true, true on every
+  // later Execute. It may also come alone, on an Execute whose turn is -1 (never an answer
+  // to a Tick), when the thread starts. The server takes it from any Execute.
+  bool threads = 10;
 }
 
 // A robot's debug property (classic's setDebugProperty): shown in its console. An empty
