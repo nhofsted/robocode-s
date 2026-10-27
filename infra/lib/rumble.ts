@@ -206,12 +206,10 @@ export class Rumble extends Construct {
 			'dynamodb:BatchGetItem'
 		);
 
-		// api: the configuration and the plan (read), browser uploads (read, presign, delete).
-		allow(
-			this.api,
-			['s3:GetObject'],
-			keys(this.stateBucket, 'state/config.json', 'state/*/plan.json.gz')
-		);
+		// api: the configuration (read, and written by `admin config set`), the plan (read),
+		// browser uploads (read, presign, delete).
+		allow(this.api, ['s3:GetObject', 's3:PutObject'], keys(this.stateBucket, 'state/config.json'));
+		allow(this.api, ['s3:GetObject'], keys(this.stateBucket, 'state/*/plan.json.gz'));
 		allow(
 			this.api,
 			['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
