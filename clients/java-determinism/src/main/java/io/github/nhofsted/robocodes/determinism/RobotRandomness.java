@@ -81,6 +81,8 @@ public final class RobotRandomness {
     static final String CLOCK_MILLIS_KEY = "robocodes.determinism.clockMillis";
     /** Called by classic's robot side on every turn of a robot thread (a {@code Runnable}). */
     static final String TURN_KEY = "robocodes.determinism.turn";
+    /** {@code Thread.start()} of every thread: a hook that notes robot code starting threads (a {@code Consumer<Thread>}). */
+    static final String THREAD_START_KEY = "robocodes.determinism.threadStart";
     /** Classic's {@code RobotPeer.startRound()}: a new round for the peer (a {@code Consumer<Object>}). */
     static final String PEER_ROUND_KEY = "robocodes.determinism.peerRound";
     /**
@@ -288,6 +290,7 @@ public final class RobotRandomness {
             throw new IllegalStateException("robocode-s determinism agent is not installed (-javaagent)");
         }
         RobotRandomness randomness = new RobotRandomness(battleSeed, robotNames);
+        THREAD_STARTERS.clear();
         System.getProperties().put(MATH_RANDOM_KEY, (DoubleSupplier) randomness::mathRandom);
         System.getProperties().put(RANDOM_SEED_KEY, (Supplier<Long>) randomness::nextSeed);
         System.getProperties().put(UTILS_RANDOM_KEY, (Supplier<Random>) randomness::utilsRandom);
@@ -470,6 +473,81 @@ public final class RobotRandomness {
             stream.fuel = fuel;
         }
         return fuel;
+    }
+
+    /** Robots (by thread group name) whose code started a thread of its own. */
+    private static final java.util.Set<String> THREAD_STARTERS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static volatile Runnable threadListener;
+
+    /**
+     * Robot code started a thread of its own (also through {@code Timer} and executors): the
+     * thread runs in real time, outside the work meter and the virtual clock, so the robot's
+     * battles are not reproducible (ADR 0014, ADR 0024). Called from {@code Thread.start()}
+     * on the starting thread; classic's own threads are started from outside the robot's group.
+     */
+    static void threadStart(Object thread) {
+        try {
+            RobotRandomness randomness = current;
+            if (randomness == null) {
+                return;
+            }
+            for (ThreadGroup group = Thread.currentThread().getThreadGroup(); group != null;
+                    group = group.getParent()) {
+                String name = group.getName();
+                if (randomness.isRobot(name)) {
+                    if (startedByRobotCode() && THREAD_STARTERS.add(name)) {
+                        Runnable listener = threadListener;
+                        if (listener != null) {
+                            listener.run();
+                        }
+                    }
+                    return;
+                }
+            }
+        } catch (Throwable t) {
+            // Never break Thread.start().
+        }
+    }
+
+    /**
+     * Whether the robot's own code asked for the thread being started: the innermost frame
+     * that is neither {@code Thread} nor one of the JDK's thread-starting facilities
+     * ({@code Timer}, executors) is a class of a robot class loader. The JDK starts threads
+     * as a side effect of other calls (Java2D's disposer when a robot paints, say), and the
+     * robot host and classic do on robot threads: those aren't the robot's.
+     */
+    @SuppressWarnings("removal")
+    private static boolean startedByRobotCode() {
+        // Privileged: the walker needs a permission that the robot's frames below don't have.
+        return java.security.AccessController.doPrivileged((java.security.PrivilegedAction<Boolean>) () ->
+                StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk(frames -> frames
+                        .map(StackWalker.StackFrame::getDeclaringClass)
+                        .filter(c -> c != RobotRandomness.class && !isThreadStarter(c.getName()))
+                        .findFirst()
+                        .map(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
+                        .orElse(false)));
+    }
+
+    private static boolean isThreadStarter(String className) {
+        return className.equals("java.lang.Thread") || className.startsWith("java.lang.System$")
+                || className.equals("java.security.AccessController") || className.equals("java.util.Timer")
+                || className.startsWith("java.util.Timer$") || className.startsWith("java.util.concurrent.")
+                || className.startsWith("jdk.internal.vm.");
+    }
+
+    /** Whether robot code started a thread of its own in this JVM since the battle was configured. */
+    public static boolean startedThreads() {
+        return !THREAD_STARTERS.isEmpty();
+    }
+
+    /** Names (thread group names) of the robots whose code started threads. */
+    public static java.util.Set<String> robotsWithThreads() {
+        return new java.util.TreeSet<>(THREAD_STARTERS);
+    }
+
+    /** Called (on the starting thread) the first time a robot starts a thread. */
+    public static void onThreadStarted(Runnable listener) {
+        threadListener = listener;
     }
 
     /** One more turn for the robot of the current thread. */

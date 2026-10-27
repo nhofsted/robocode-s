@@ -359,6 +359,7 @@ impl Runner {
             .enumerate()
             .map(|(i, r)| RobotResult {
                 colors: observer.colors.get(i).cloned().flatten(),
+                threads: ran.outcome.threads.get(i).copied().unwrap_or(false),
                 ..robot_result(r)
             })
             .collect();

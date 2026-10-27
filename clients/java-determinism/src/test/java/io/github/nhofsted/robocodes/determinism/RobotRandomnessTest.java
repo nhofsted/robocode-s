@@ -3,11 +3,13 @@
  */
 package io.github.nhofsted.robocodes.determinism;
 
+import net.sf.robocode.host.security.RobotClassLoader;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -60,6 +62,81 @@ class RobotRandomnessTest {
         });
         Random expected = new Random(RobotRandomness.mathRandomSeed(RobotRandomness.baseSeed(SEED, "sample.Fire (2)")));
         assertEquals(expected.nextDouble(), fromChild[0]);
+    }
+
+    /** Robot code (loaded by the robot class loader) that starts threads in the ways robots do. */
+    public static final class StartsThread implements Supplier<Object> {
+        public Object get() {
+            Thread t = new Thread(() -> { });
+            t.start();
+            join(t);
+            return null;
+        }
+    }
+
+    public static final class ExtendsThread implements Supplier<Object> {
+        public static final class Writer extends Thread {
+        }
+
+        public Object get() {
+            Writer w = new Writer();
+            w.start();
+            join(w);
+            return null;
+        }
+    }
+
+    public static final class StartsTimer implements Supplier<Object> {
+        public Object get() {
+            new java.util.Timer(true).cancel();
+            return null;
+        }
+    }
+
+    public static final class StartsExecutor implements Supplier<Object> {
+        public Object get() {
+            var pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                return pool.submit(() -> 1).get();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            } finally {
+                pool.shutdown();
+            }
+        }
+    }
+
+    /** Runs {@code code} in a robot's thread, as robot code (loaded by a robot class loader) or not. */
+    @SuppressWarnings("unchecked")
+    private static boolean startedIn(String robot, Class<? extends Supplier<Object>> code, boolean asRobot)
+            throws Exception {
+        Supplier<Object> body;
+        if (asRobot) {
+            ClassLoader loader = new RobotClassLoader(RobotRandomnessTest.class.getClassLoader(),
+                    Set.of(code.getName(), code.getName() + "$Writer"));
+            body = (Supplier<Object>) loader.loadClass(code.getName()).getDeclaredConstructor().newInstance();
+        } else {
+            body = code.getDeclaredConstructor().newInstance();
+        }
+        inRobot(robot, body);
+        return RobotRandomness.robotsWithThreads().contains(robot);
+    }
+
+    @Test
+    void threadsStartedByRobotCodeAreReported() throws Exception {
+        assertFalse(RobotRandomness.startedThreads());
+        // A robot's thread starting a thread for code that isn't the robot's (Java2D's disposer
+        // when it paints, classic's helpers) isn't reported; neither is any other thread group.
+        assertFalse(startedIn("sample.Fire", StartsThread.class, false));
+        inGroup("Battle", () -> new StartsThread().get());
+        assertFalse(RobotRandomness.startedThreads());
+        // The robot's code: directly, a subclass of Thread, a Timer, an executor.
+        assertTrue(startedIn("sample.Fire", StartsThread.class, true));
+        assertTrue(startedIn("jk.mega.DrussGT 3.1.16", ExtendsThread.class, true));
+        assertTrue(startedIn("sample.Fire (2)", StartsTimer.class, true));
+        assertTrue(startedIn("sample.Fire (3)", StartsExecutor.class, true));
+        assertTrue(RobotRandomness.startedThreads());
+        assertFalse(RobotRandomness.robotsWithThreads().contains("Battle"));
     }
 
     @Test

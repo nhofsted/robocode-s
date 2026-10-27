@@ -520,6 +520,13 @@ pub fn run(o: &Options) -> Result<(), String> {
     }
 
     let rows = results::contestants(&statics, &local.outcome.results);
+    // Robots whose code started threads of their own: their battles aren't reproducible.
+    let threads: Vec<&str> = statics
+        .iter()
+        .zip(&local.outcome.threads)
+        .filter(|(_, started)| **started)
+        .map(|(s, _)| s.name.as_str())
+        .collect();
     if o.json {
         let out = serde_json::json!({
             "seed": seed,
@@ -530,6 +537,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "sandbox": host.sandbox.report(),
             "agents": placements,
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            "threads": threads,
             "results": results::json(&rows),
         });
         println!("{out}");
@@ -558,6 +566,12 @@ pub fn run(o: &Options) -> Result<(), String> {
             println!();
         }
         print!("{}", results::table(&rows));
+        if !threads.is_empty() {
+            println!(
+                "\nStarted threads of their own, so this battle isn't reproducible: {}",
+                threads.join(", ")
+            );
+        }
     }
     if keep && !noisy.is_empty() {
         let names: Vec<&str> = noisy.iter().map(|(name, _)| name.as_str()).collect();
