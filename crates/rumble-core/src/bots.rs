@@ -6,7 +6,8 @@
 
 use crate::api::{
     ApiError, BotInfo, BotVersionInfo, ErrorCode, ImportRequest, ImportResponse, ImportResult,
-    SubmitResponse, UserUpdateRequest,
+    NondeterministicRequest, NondeterministicResponse, NondeterministicVersion, SubmitResponse,
+    UserUpdateRequest,
 };
 use crate::auth::{Submission, check_submission, is_admin};
 use crate::config::Config;
@@ -143,6 +144,8 @@ pub fn submit<S: Store + ?Sized>(
         url: source_url.map(str::to_string),
         colors: None,
         released: None,
+        nondeterministic: None,
+        disagreements: 0,
     };
     let homepage = homepage.and_then(non_empty);
     let item = match &bot {
@@ -273,6 +276,8 @@ pub(crate) fn imported_version(
         url: source_url,
         colors: None,
         released,
+        nondeterministic: None,
+        disagreements: 0,
     }
 }
 
@@ -694,10 +699,20 @@ pub fn update_user<S: Store + ?Sized>(
     if state == Some(UserState::Banned) && before.reputation.state != UserState::Banned {
         store.put_alert(&ban_alert(&request.uid, "banned by an admin", now_ms))?;
     }
-    if request.rep.is_some() || state.is_some() {
+    if request.rep.is_some()
+        || state.is_some()
+        || request.mismatches.is_some()
+        || request.clear_mismatch_times
+    {
         update_reputation(store, &request.uid, |reputation| {
             if let Some(rep) = request.rep {
                 reputation.rep = rep;
+            }
+            if let Some(mismatches) = request.mismatches {
+                reputation.mismatches = mismatches;
+            }
+            if request.clear_mismatch_times {
+                reputation.mismatch_times.clear();
             }
             if let Some(state) = state {
                 if state != reputation.state {
@@ -718,6 +733,75 @@ pub fn update_user<S: Store + ?Sized>(
     store
         .get_user(&request.uid)?
         .ok_or_else(|| not_found(format!("no user {}", request.uid)))
+}
+
+fn nd_version(v: &VersionItem) -> NondeterministicVersion {
+    NondeterministicVersion {
+        vid: v.vid,
+        bot: v.bot.clone(),
+        version: v.version.clone(),
+        reason: v.nondeterministic.clone(),
+        disagreements: v.disagreements,
+    }
+}
+
+/// `GET admin/bots/nd` (§11.5): the versions that are flagged nondeterministic or were in a
+/// three-way disagreement, flagged ones first.
+pub fn list_nondeterministic<S: Store + ?Sized>(
+    store: &S,
+) -> Result<NondeterministicResponse, ApiError> {
+    let mut versions: Vec<NondeterministicVersion> = store
+        .list_versions()?
+        .iter()
+        .filter(|v| v.nondeterministic.is_some() || v.disagreements > 0)
+        .map(nd_version)
+        .collect();
+    versions.sort_by_key(|v| {
+        (
+            v.reason.is_none(),
+            std::cmp::Reverse(v.disagreements),
+            v.vid,
+        )
+    });
+    Ok(NondeterministicResponse { versions })
+}
+
+/// `POST admin/bots/nd` (§11.5): flags the version with the reason (an empty one is
+/// `admin`) or, without a reason, clears the flag and the disagreement count's effect.
+pub fn set_nondeterministic<S: Store + ?Sized>(
+    store: &S,
+    request: &NondeterministicRequest,
+) -> Result<NondeterministicResponse, ApiError> {
+    let Some(version) = store
+        .list_versions()?
+        .into_iter()
+        .find(|v| v.bot == request.bot && v.version == request.version)
+    else {
+        return Err(not_found(format!(
+            "no version {} {}",
+            request.bot, request.version
+        )));
+    };
+    let reason = request
+        .reason
+        .as_deref()
+        .map(|r| non_empty(r).unwrap_or_else(|| "admin".to_string()));
+    match store.set_version_nondeterministic(version.vid, reason.as_deref()) {
+        Ok(()) => {}
+        Err(StoreError::ConditionFailed) => {
+            return Err(not_found(format!(
+                "no version {} {}",
+                request.bot, request.version
+            )));
+        }
+        Err(e) => return Err(e.into()),
+    }
+    let version = store
+        .get_version(version.vid)?
+        .ok_or_else(|| not_found(format!("no version {} {}", request.bot, request.version)))?;
+    Ok(NondeterministicResponse {
+        versions: vec![nd_version(&version)],
+    })
 }
 
 #[cfg(test)]
@@ -1423,6 +1507,78 @@ mod tests {
     }
 
     #[test]
+    fn the_nondeterministic_flag_is_set_listed_and_cleared() {
+        let store = MemStore::new();
+        import(
+            &store,
+            &import_request("jk.B", "1", 'a', Division::OneVsOne),
+            &info("jk.B", "1", 'a'),
+            NOW,
+        )
+        .unwrap();
+        let request = |reason: Option<&str>| NondeterministicRequest {
+            bot: "jk.B".into(),
+            version: "1".into(),
+            reason: reason.map(String::from),
+        };
+        assert!(list_nondeterministic(&store).unwrap().versions.is_empty());
+        let set = set_nondeterministic(&store, &request(Some("  "))).unwrap();
+        assert_eq!(set.versions[0].reason.as_deref(), Some("admin"));
+        assert_eq!(list_nondeterministic(&store).unwrap().versions.len(), 1);
+        // A version only counted in disagreements is listed after the flagged ones.
+        assert_eq!(store.add_version_disagreement(1).unwrap(), 1);
+        assert_eq!(
+            list_nondeterministic(&store).unwrap().versions[0].disagreements,
+            1
+        );
+        let cleared = set_nondeterministic(&store, &request(None)).unwrap();
+        assert_eq!(cleared.versions[0].reason, None);
+        let listed = list_nondeterministic(&store).unwrap().versions;
+        assert_eq!((listed.len(), listed[0].reason.clone()), (1, None));
+        let missing = NondeterministicRequest {
+            version: "9".into(),
+            ..request(None)
+        };
+        assert_eq!(
+            set_nondeterministic(&store, &missing).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        assert_eq!(
+            store.add_version_disagreement(99),
+            Err(StoreError::ConditionFailed)
+        );
+    }
+
+    #[test]
+    fn user_updates_can_reset_mismatches() {
+        let store = store_with("g1", NOW);
+        update_reputation(&store, "g1", |r| {
+            r.state = UserState::Quarantined;
+            r.mismatches = 2;
+            r.mismatch_times = vec![5, 6];
+        })
+        .unwrap();
+        let reset = UserUpdateRequest {
+            uid: "g1".into(),
+            rep: Some(70),
+            state: Some("new".into()),
+            mismatches: Some(0),
+            clear_mismatch_times: true,
+            ..UserUpdateRequest::default()
+        };
+        let after = update_user(&store, &reset, NOW * 1000).unwrap().reputation;
+        assert_eq!(
+            (
+                after.rep,
+                after.state,
+                after.mismatches,
+                after.mismatch_times
+            ),
+            (70, UserState::New, 0, vec![])
+        );
+    }
+
+    #[test]
     fn user_updates() {
         let store = store_with("g1", NOW);
         store
@@ -1444,6 +1600,7 @@ mod tests {
                 state: Some("new".into()),
                 admin: Some(true),
                 trusted: Some(true),
+                ..UserUpdateRequest::default()
             },
             NOW * 1000,
         )

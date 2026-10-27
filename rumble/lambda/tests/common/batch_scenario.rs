@@ -161,6 +161,8 @@ fn version(vid: u32, bot: u32, version: &str, state: VersionState) -> VersionIte
         url: None,
         colors: None,
         released: None,
+        nondeterministic: None,
+        disagreements: 0,
     }
 }
 

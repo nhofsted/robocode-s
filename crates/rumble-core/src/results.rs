@@ -21,7 +21,7 @@ use crate::store::{
 use crate::token::{self, BatchBattle, BatchPayload, Keys, TokenError};
 use crate::verify::{self, Outcome, is_verifier, tier, verify_rate};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The `error` of a rejected battle.
 pub const INVALID: &str = "invalid";
@@ -347,12 +347,25 @@ pub fn apply_results<S: Store + ?Sized>(
     let mut finished = Vec::new();
     let mut given_back = Vec::new();
     let mut slot_battles = Vec::new();
+    // Robots that report threads of their own (ADR 0014) are flagged, and their battles are
+    // not verified (§11.5): `flags` caches which versions are flagged.
+    let mut threads: BTreeSet<u32> = BTreeSet::new();
+    let mut flags: HashMap<u32, bool> = HashMap::new();
+    let mut unheld = Vec::new();
     // A verifier's battles count unchecked, and so do the colours they report (§11.3).
     let mut trusted_colors: BTreeMap<u32, BotColors> = BTreeMap::new();
     for &index in &accepted {
         let battle = by_index[&index];
         let assigned = &payload.b[index as usize];
         let ran = matches!(battle.status, BattleStatus::Ok | BattleStatus::RobotFailed);
+        if ran {
+            for (vid, robot) in assigned.vids.iter().zip(battle.robots.iter().flatten()) {
+                if robot.threads {
+                    threads.insert(*vid);
+                    flags.insert(*vid, true);
+                }
+            }
+        }
         let record = || {
             Record::from_battle(
                 assigned.division,
@@ -417,7 +430,13 @@ pub fn apply_results<S: Store + ?Sized>(
                         }
                     }
                 }
-                if held || (state == UserState::New && random.chance(rate)) {
+                let wanted = held || (state == UserState::New && random.chance(rate));
+                if wanted && verify::any_nondeterministic(store, &assigned.vids, &mut flags)? {
+                    // Nobody can be proven wrong by it: a held record is released at once.
+                    if held {
+                        unheld.push((index, assigned.seed, record.to_bytes()));
+                    }
+                } else if wanted {
                     checks.push(VerifyItem {
                         engine,
                         sort: format!("{now_ms:013}#{}.{index}", payload.id),
@@ -490,6 +509,23 @@ pub fn apply_results<S: Store + ?Sized>(
         ignore_existing(store.set_version_colors(*vid, colors))?;
         colored.push(*vid);
     }
+    for vid in &threads {
+        let origin = payload.id.as_str();
+        log.extend(verify::flag_nondeterministic(
+            store, *vid, "threads", origin, now_ms,
+        )?);
+    }
+    for (index, seed, record) in unheld {
+        let original = Run {
+            uid: user.uid.clone(),
+            hash: None,
+            record,
+            held: true,
+            colors: Vec::new(),
+        };
+        let origin = format!("{}.{index}", payload.id);
+        verify::release_held(store, engine, seed, &original, &origin, now_ms)?;
+    }
     for item in &checks {
         ignore_existing(store.put_verify(item))?;
     }
@@ -501,10 +537,11 @@ pub fn apply_results<S: Store + ?Sized>(
     }
     for (index, sort, run) in runs {
         let origin = format!("{}.{index}", payload.id);
-        if let Outcome::Disagreement { log: line } =
-            verify::resolve(store, config, engine, &sort, run, &origin, now_ms)?
-        {
-            log.push(line);
+        match verify::resolve(store, config, engine, &sort, run, &origin, now_ms)? {
+            Outcome::Disagreement { log: line, .. } | Outcome::Majority { log: line, .. } => {
+                log.push(line)
+            }
+            _ => {}
         }
     }
 
@@ -843,6 +880,8 @@ mod tests {
                     url: None,
                     colors: None,
                     released: None,
+                    nondeterministic: None,
+                    disagreements: 0,
                 })
                 .unwrap();
         }
@@ -1175,6 +1214,81 @@ mod tests {
         let mut random = Random::new(&[1; 32]);
         let hits = (0..10_000).filter(|_| random.chance(0.2)).count();
         assert!((1_800..2_200).contains(&hits), "{hits}");
+    }
+
+    #[test]
+    fn threads_flag_a_version_and_its_battles_are_not_verified() {
+        let mut always = config();
+        always.rep.start_rate = 1.0;
+        always.rep.floor_rate = 1.0;
+        let p = payload(
+            "g1",
+            vec![assigned(BattleKind::Normal, 1, &[5, 9], None); 2],
+        );
+        // Robot 0 (vid 5) says it started threads in battle 0.
+        let mut threaded = ok(0, 1);
+        threaded.robots.as_mut().unwrap()[0].threads = true;
+        let r = request(&p, vec![threaded, ok(1, 2)]);
+        let (store, user) = setup(0, UserState::New);
+        let out = post_with(&store, &user, &always, &|_, _| false, &r, NOW_MS).unwrap();
+        let version = store.get_version(5).unwrap().unwrap();
+        assert_eq!(version.nondeterministic.as_deref(), Some("threads"));
+        assert_eq!(
+            store.get_version(9).unwrap().unwrap().nondeterministic,
+            None
+        );
+        // Both battles have vid 5: neither is checked, though the rate is 1.
+        assert!(store.verify_items(1).is_empty());
+        assert_eq!(store.log_items(1)[0].battles, 2, "they still count");
+        assert!(out.log.iter().any(|l| l.starts_with("NONDETERMINISTIC ")));
+        let alerts = store.list_alerts().unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(
+            (alerts[0].kind.as_str(), alerts[0].reference.as_str()),
+            ("nondeterministic", "5")
+        );
+        // Already flagged: no second alert, no verification, whatever the robot reports.
+        let p = payload("g1", vec![assigned(BattleKind::Normal, 7, &[5, 9], None)]);
+        let mut again = ok(0, 3);
+        again.robots.as_mut().unwrap()[0].threads = true;
+        let out = post_with(
+            &store,
+            &user,
+            &always,
+            &|_, _| false,
+            &request(&p, vec![again]),
+            NOW_MS + 1000,
+        )
+        .unwrap();
+        assert!(out.log.is_empty());
+        assert_eq!(store.list_alerts().unwrap().len(), 1);
+        assert!(store.verify_items(1).is_empty());
+    }
+
+    #[test]
+    fn a_quarantined_users_flagged_battles_are_released_at_once() {
+        let (store, user) = setup(0, UserState::Quarantined);
+        store
+            .set_version_nondeterministic(9, Some("admin"))
+            .unwrap();
+        let p = payload("g1", vec![assigned(BattleKind::Normal, 1, &[5, 9], None)]);
+        post_with(
+            &store,
+            &user,
+            &config(),
+            &|_, _| false,
+            &request(&p, vec![ok(0, 1)]),
+            NOW_MS,
+        )
+        .unwrap();
+        assert!(store.verify_items(1).is_empty(), "nothing to verify");
+        let logs = store.log_items(1);
+        assert_eq!(logs.len(), 2);
+        assert!(
+            logs[0].held && !logs[1].held,
+            "the held record has a released copy"
+        );
+        assert_eq!((logs[1].uid.as_str(), logs[1].battles), ("g1", 1));
     }
 
     #[test]

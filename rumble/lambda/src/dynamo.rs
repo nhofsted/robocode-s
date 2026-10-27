@@ -382,6 +382,12 @@ fn version_item(version: &VersionItem) -> Item {
     if let Some(released) = version.released {
         item.insert("rd".into(), n(released));
     }
+    if let Some(reason) = &version.nondeterministic {
+        item.insert("nd".into(), s(reason));
+    }
+    if version.disagreements > 0 {
+        item.insert("ndn".into(), n(version.disagreements));
+    }
     item
 }
 
@@ -423,6 +429,8 @@ fn version_from(item: &Item) -> StoreResult<VersionItem> {
         url: opt_s(item, "url")?,
         colors: opt_json(item, "col")?,
         released: opt_n(item, "rd")?,
+        nondeterministic: opt_s(item, "nd")?,
+        disagreements: n_or(item, "ndn", 0)?,
     })
 }
 
@@ -1088,6 +1096,43 @@ impl Store for DynamoStore {
         .map_err(map_err)
     }
 
+    fn set_version_nondeterministic(&self, vid: u32, reason: Option<&str>) -> StoreResult<()> {
+        let update = self
+            .client
+            .update_item()
+            .table_name(&self.table)
+            .set_key(Some(version_key(vid)))
+            .condition_expression("attribute_exists(pk)");
+        let update = match reason {
+            Some(reason) => update
+                .update_expression("SET nd = :nd")
+                .expression_attribute_values(":nd", s(reason)),
+            None => update.update_expression("REMOVE nd"),
+        };
+        block_on(update.send()).map(|_| ()).map_err(map_err)
+    }
+
+    fn add_version_disagreement(&self, vid: u32) -> StoreResult<u32> {
+        let output = block_on(
+            self.client
+                .update_item()
+                .table_name(&self.table)
+                .set_key(Some(version_key(vid)))
+                .update_expression("ADD ndn :one")
+                .condition_expression("attribute_exists(pk)")
+                .expression_attribute_values(":one", n(1))
+                .return_values(ReturnValue::UpdatedNew)
+                .send(),
+        )
+        .map_err(map_err)?;
+        output
+            .attributes
+            .as_ref()
+            .map(|item| get_n(item, "ndn"))
+            .transpose()?
+            .ok_or_else(|| bad("ndn"))
+    }
+
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         self.get(marker_key(batch_id))?
             .as_ref()
@@ -1404,6 +1449,8 @@ mod tests {
             url: Some("https://x".into()),
             colors: None,
             released: Some(1_792_843_200_123),
+            nondeterministic: Some("threads".into()),
+            disagreements: 2,
         };
         let item = version_item(&version);
         assert_eq!(item["sk"], s("V#rs"));
@@ -1413,6 +1460,8 @@ mod tests {
         let delisted = VersionItem {
             state: VersionState::Delisted,
             released: None,
+            nondeterministic: None,
+            disagreements: 0,
             ..version.clone()
         };
         let item = version_item(&delisted);
