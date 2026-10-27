@@ -176,6 +176,7 @@ mod tests {
             retired: None,
             url: None,
             colors: None,
+            released: None,
         }
     }
 
@@ -225,6 +226,7 @@ mod tests {
                 store: Box::new(self.store.clone()),
                 objects: Box::new(self.objects.clone()),
                 cdn: Box::new(Arc::new(MemCdn::new())),
+                fetcher: Box::new(crate::fetch::MemFetcher::new()),
                 clock: Box::new(move || clock.fetch_add(tick, Ordering::SeqCst)),
                 sleep: Box::new(|_| {}),
                 random: Box::new(|| [0; 32]),

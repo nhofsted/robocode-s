@@ -597,7 +597,8 @@ pub struct SubmitResponse {
 // ---- POST me, GET me/tokens, POST me/tokens/revoke, GET me/bots ----
 
 /// `POST me`: the fields to change (absent ones stay). `country` is an ISO 3166-1 alpha-2
-/// code in lower case, or `""` to clear it; `hidden` hides the user from the contributors
+/// code in lower case, one of the RoboWiki's own flags (`un`, `ancap`, §16.7), or `""` to
+/// clear it; `hidden` hides the user from the contributors
 /// list (§15).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MeUpdate {
@@ -646,7 +647,7 @@ pub struct OkResponse {
 pub struct BotVersionInfo {
     pub vid: u32,
     pub version: String,
-    /// `probation`, `active`, `failed`, `retired`, `removed`.
+    /// `probation`, `active`, `failed`, `retired`, `removed`, `delisted`.
     pub state: String,
     pub sha256: String,
     pub size: u64,
@@ -663,7 +664,7 @@ pub struct BotVersionInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BotInfo {
     pub id: String,
-    /// `active`, `retired`, `removed`.
+    /// `active`, `retired`, `removed`, `delisted`.
     pub state: String,
     pub author: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -719,6 +720,24 @@ pub struct ImportRequest {
     /// (the server validates with `jar::validate_with_version`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub version_from_list: bool,
+    /// The release date, milliseconds since the epoch (§16.6): set on a new version, and on
+    /// an existing one whose date differs (`updated`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<u64>,
+    /// A version from the archives (§16.6): the bot must exist (404 otherwise); a new version
+    /// is registered `retired`, behind the bot's other versions, and nothing else changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub historic: bool,
+    /// With `historic`: when the version left the rumble, milliseconds since the epoch; set
+    /// as `ret` on a new historic version (else its release date), and on an existing retired
+    /// one whose `ret` differs (`updated`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired: Option<u64>,
+    /// Only set the release date `released` of the registered version of this name
+    /// (§16.6), whatever its jar: no jar is read or registered; 404 if there is no such
+    /// version. For a listed version, whose jar the archives may have in another build.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub date_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,6 +746,8 @@ pub enum ImportResult {
     Created,
     Exists,
     DivisionAdded,
+    /// The version existed with the same jar; only its release date changed.
+    Updated,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

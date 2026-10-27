@@ -36,7 +36,8 @@ export interface TokenInfo {
 	current?: boolean;
 }
 
-export type VersionState = 'probation' | 'active' | 'failed' | 'retired' | 'removed';
+/** `delisted`: an imported bot that left the RoboWiki participants lists; not ranked or battled. */
+export type VersionState = 'probation' | 'active' | 'failed' | 'retired' | 'removed' | 'delisted';
 
 export interface BotVersionInfo {
 	version: string;

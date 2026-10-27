@@ -10,7 +10,7 @@
 		type TokenInfo,
 		type Tier
 	} from '#lib/api.ts';
-	import { COUNTRIES } from '#lib/countries.ts';
+	import { COUNTRIES, OTHER_FLAGS } from '#lib/countries.ts';
 	import { formatCount, formatDate } from '#lib/rumble/format.ts';
 	import { session } from '#lib/session.svelte.ts';
 
@@ -103,6 +103,11 @@
 							{#each COUNTRIES as c (c.code)}
 								<option value={c.code}>{c.name}</option>
 							{/each}
+							<optgroup label="Other flags">
+								{#each OTHER_FLAGS as c (c.code)}
+									<option value={c.code}>{c.name}</option>
+								{/each}
+							</optgroup>
 						</select>
 					</label>
 					{#if me.country}<Flag code={me.country} height={14} />{/if}

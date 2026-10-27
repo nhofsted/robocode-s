@@ -123,7 +123,7 @@ const NAME_SECOND = ['Viper', 'Comet', 'Tortoise', 'Mirage', 'Hornet', 'Bastion'
 const TEAM_SUFFIX = ['Team', 'Squad', 'Pack', 'Crew'];
 const AUTHOR_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night'];
 /** Authors' countries, weighted roughly like a programming community; '' is no flag. */
-const COUNTRIES = ['us', 'us', 'us', 'br', 'br', 'de', 'de', 'nl', 'be', 'gb', 'gb', 'fr', 'pl', 'cz', 'fi', 'se', 'ca', 'au', 'nz', 'jp', 'cn', 'kr', 'in', 'ru', 'ua', 'es', 'it', 'pt', 'ar', 'za', '', '', ''];
+const COUNTRIES = ['us', 'us', 'us', 'br', 'br', 'de', 'de', 'nl', 'be', 'gb', 'gb', 'fr', 'pl', 'cz', 'fi', 'se', 'ca', 'au', 'nz', 'jp', 'cn', 'kr', 'in', 'ru', 'ua', 'es', 'it', 'pt', 'ar', 'za', 'un', 'ancap', '', '', ''];
 const AUTHOR_SECOND = ['coder', 'gunner', 'wave', 'tank', 'robo', 'owl', 'fox', 'shark', 'surfer', 'smith'];
 
 export function createFixtures(options: FixtureOptions = {}): Fixtures {
@@ -295,7 +295,8 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 					sha256: v.sha256,
 					size: v.size,
 					state: v.retiredAt ? ('retired' as const) : ('active' as const),
-					added: v.addedAt.slice(0, 10)
+					added: v.addedAt.slice(0, 10),
+					released: v.releasedAt?.slice(0, 10) ?? null
 				}))
 			}))
 	});
@@ -430,7 +431,8 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 			sha256: sha256Like(`${id}@${major}.${minor}`),
 			size: jarSize(`${id}@${major}.${minor}`),
 			addedAt: added.toISOString(),
-			retiredAt: null
+			retiredAt: null,
+			releasedAt: added.toISOString()
 		});
 		const last = i === count - 2;
 		day = last && fresh ? Math.floor(rand() * 7) : Math.floor(day * (0.25 + 0.5 * rand()));

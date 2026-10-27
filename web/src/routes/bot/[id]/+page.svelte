@@ -91,6 +91,8 @@
 	const historyPoints = $derived(
 		entry.history.map((h) => ({ date: h.date, value: h[historyKey], version: h.version }))
 	);
+	const released = (v: { releasedAt?: string | null }) => (v.releasedAt ? formatDate(v.releasedAt) : '–');
+
 	const releases = $derived(bot.versions.map((v) => ({ date: v.addedAt, label: `v${v.version}` })));
 
 	type SortKey = 'opponentRank' | 'opponent' | 'score' | 'survival' | 'normalized' | 'pbi' | 'battles';
@@ -151,6 +153,15 @@
 	</header>
 
 	<SampleNotice />
+
+	{#if bot.state === 'delisted'}
+		<p class="notice">
+			<strong>No longer listed.</strong> {shortName(bot.id)} is not on the RoboWiki participant
+			list (the <a href="https://rumble.robowiki.net/" rel="external">LiteRumble</a>), so it isn't
+			ranked or battled. These are its last numbers; if it is listed again, it returns to the
+			rankings with them.
+		</p>
+	{/if}
 
 	{#if data.joined.length > 1}
 		<nav class="tabs" aria-label="Rumble">
@@ -344,17 +355,18 @@
 
 	<section>
 		<h2>Versions</h2>
-		<div class="table-scroll">
+		<div class="table-scroll versions">
 			<table class="data">
 				<thead>
-					<tr><th>Version</th><th>Added</th><th>Retired</th><th class="num">Codesize</th><th class="num">Size</th><th>Download</th></tr>
+					<tr><th>Version</th><th>Released</th><th>Added</th><th>Retired</th><th class="num">Codesize</th><th class="num">Size</th><th>Download</th></tr>
 				</thead>
 				<tbody>
 					{#each bot.versions as v (v.version)}
 						<tr>
 							<td class="mono">{v.version}</td>
+							<td>{released(v)}</td>
 							<td>{formatDate(v.addedAt)}</td>
-							<td>{v.retiredAt ? formatDate(v.retiredAt) : 'current'}</td>
+							<td>{v.retiredAt ? formatDate(v.retiredAt) : bot.state === 'delisted' ? 'delisted' : 'current'}</td>
 							<td class="num">{v.codesize === null ? '–' : formatCount(v.codesize)}</td>
 							<td class="num">{formatBytes(v.size)}</td>
 							<td>
@@ -526,7 +538,8 @@
 		margin-bottom: 0.6rem;
 		font-size: 0.85rem;
 	}
-	.pairings {
+	.pairings,
+	.versions {
 		max-height: 32rem;
 	}
 	.opp {

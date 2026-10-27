@@ -7,7 +7,9 @@
 //! - `publish` (every 6 hours): `plan`, then the data files, snapshots and contributors
 //!   ([`publish`]);
 //! - `cleanup` (daily): recordings, slot items and jars of dead versions, ban removals
-//!   ([`cleanup`]).
+//!   ([`cleanup`]);
+//! - `sync` (daily): the unclaimed imported bots follow the RoboWiki participants lists
+//!   ([`sync`]).
 //!
 //! Reserved concurrency 1 makes it the only writer of the state files. Like the `api`, it
 //! runs on a blocking thread and drives the SDK with [`crate::block_on`].
@@ -18,8 +20,10 @@ pub mod plan;
 pub mod publish;
 pub mod recordings;
 pub mod slot_pairs;
+pub mod sync;
 
 use crate::cloudfront::Cdn;
+use crate::fetch::Fetcher;
 use crate::routes::{CONFIG_KEY, config_from};
 use crate::s3::{Bucket, Fetched, Objects};
 use rumble_core::Config;
@@ -42,9 +46,10 @@ pub enum Mode {
     Plan,
     Publish,
     Cleanup,
+    Sync,
 }
 
-/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup"}`.
+/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup" | "sync"}`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Event {
     pub mode: Mode,
@@ -54,6 +59,8 @@ pub struct Services {
     pub store: Box<dyn Store + Send + Sync>,
     pub objects: Box<dyn Objects>,
     pub cdn: Box<dyn Cdn>,
+    /// Downloads (`sync`: the participants lists and jars).
+    pub fetcher: Box<dyn Fetcher>,
     /// Milliseconds since the epoch.
     pub clock: Box<dyn Fn() -> u64 + Send + Sync>,
     pub sleep: Box<dyn Fn(Duration) + Send + Sync>,
@@ -136,6 +143,7 @@ impl Batch {
             Mode::Plan => plan::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Publish => publish::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Cleanup => cleanup::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
+            Mode::Sync => sync::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
         }
     }
 }

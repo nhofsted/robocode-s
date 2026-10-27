@@ -174,3 +174,76 @@ fn rate_limits_are_retried() {
     assert_eq!(report.counts["created"], 1, "{:?}", report.entries);
     assert_eq!(*limited.lock().unwrap(), 3);
 }
+
+#[test]
+fn history_imports_historic_versions_with_their_dates() {
+    use rumble_client::history::{self, HistoryOptions, Listed};
+    let server = Server::start(move |req| {
+        let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        match (req.method.as_str(), req.path.as_str()) {
+            ("POST", "/api/v1/admin/jars/upload-url") => Resp::json(200, &json!({"exists": true})),
+            ("POST", "/api/v1/admin/bots/import") if body["bot"] == "sample.Crazy" => Resp::json(
+                404,
+                &json!({"error": "not_found", "message": "no bot sample.Crazy"}),
+            ),
+            ("POST", "/api/v1/admin/bots/import") if body["historic"] == true => {
+                Resp::json(200, &json!({"vid": 7, "result": "created"}))
+            }
+            ("POST", "/api/v1/admin/bots/import") => {
+                Resp::json(200, &json!({"vid": 3, "result": "updated"}))
+            }
+            _ => Resp::status(404),
+        }
+    });
+    let dir = std::env::temp_dir().join(format!("rumble-history-api-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("first.jar"), SAMPLE_JAR).unwrap();
+    std::fs::write(dir.join("crazy.jar"), OTHER_JAR).unwrap();
+    let text = json!({"versions": [
+        {"id": "sample.MyFirstRobot", "version": "1.0", "sha256": sha(SAMPLE_JAR),
+         "files": ["first.jar"], "releaseDate": "2001-02-03T04:05:06Z"},
+        {"id": "sample.MyFirstRobot", "version": "0.9", "sha256": sha(SAMPLE_JAR),
+         "files": ["first.jar"], "releaseDate": "2000-01-01",
+         "wiki": {"pages": ["RoboRumble/Participants/Melee"]}},
+        {"id": "sample.Crazy", "version": "1.0", "sha256": sha(OTHER_JAR),
+         "files": ["crazy.jar"], "releaseDate": "2001-01-01"}
+    ]})
+    .to_string();
+    let dataset = history::parse_dataset(&text, &dir).unwrap();
+    // 1.0 is on the 1v1 list today: its date only; 0.9 is historic.
+    let listed: Listed = [(
+        ("sample.MyFirstRobot".to_string(), "1.0".to_string()),
+        Division::OneVsOne,
+    )]
+    .into();
+    let api = Api::new(&server.url("/api/v1"), Some("rsu_admin".into()), 1);
+    let options = HistoryOptions {
+        concurrency: 1,
+        dry_run: false,
+        config: rumble_core::Config::default(),
+    };
+    let report = history::run(&dataset, &listed, &options, Some(&api), &|_, _, _| {});
+    let results: Vec<&str> = report.entries.iter().map(|e| e.result.as_str()).collect();
+    assert_eq!(results, ["updated", "created", "noBot"]);
+
+    let imports: Vec<Value> = server
+        .requests()
+        .iter()
+        .filter(|r| r.path == "/api/v1/admin/bots/import")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(imports[0]["released"], 981_173_106_000u64);
+    assert!(imports[0].get("historic").is_none());
+    assert_eq!(imports[0]["division"], "1v1");
+    // The sample jar has no robot.version: the dataset's is used, like the list's.
+    assert_eq!(
+        (
+            &imports[1]["historic"],
+            &imports[1]["division"],
+            &imports[1]["versionFromList"]
+        ),
+        (&json!(true), &json!("melee"), &json!(true))
+    );
+    assert_eq!(imports[1]["version"], "0.9");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

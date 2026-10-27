@@ -4,138 +4,28 @@
 //! finds a valid jar for every entry (local folder, the list's URL, the archive mirror),
 //! validates it with the server's own code and registers it through the admin endpoints.
 //!
-//! Library part only; `robocode-s rumble admin import` wraps [`run`].
+//! Library part only; `robocode-s rumble admin import` wraps [`run`], and
+//! `admin import --history` wraps [`crate::history`]. The list itself is parsed by
+//! `rumble_core::participants`, as the daily sync of the server parses it (§16.5).
 
 use crate::backoff;
 use crate::http::{Api, Error as ApiError};
 use rumble_core::Config;
 use rumble_core::api::{UploadUrlRequest, UploadUrlResponse};
 use rumble_core::ids::Division;
-use rumble_core::jar::{JarInfo, validate_named};
+use rumble_core::jar::JarInfo;
+pub use rumble_core::participants::{
+    DEFAULT_MIRROR, Entry, LIST_1V1, LIST_MELEE, MAX_JAR_BYTES, ParsedList, Problem, default_list,
+    mirror_url, parse_list,
+};
+use rumble_core::participants::{MAX_LIST_BYTES, check_entry};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-
-/// RoboWiki's 1v1 participants page, raw.
-pub const LIST_1V1: &str =
-    "https://robowiki.net/w/index.php?title=RoboRumble/Participants&action=raw";
-/// RoboWiki's melee participants page, raw.
-pub const LIST_MELEE: &str =
-    "https://robowiki.net/w/index.php?title=RoboRumble/Participants/Melee&action=raw";
-/// The archive the classic rumble clients fall back on.
-pub const DEFAULT_MIRROR: &str =
-    "https://robocode-archive.strangeautomata.com/robots/{id}_{version}.jar";
-
-/// Download limit per jar (§16.1).
-pub const MAX_JAR_BYTES: u64 = 5 << 20;
-/// The page itself.
-const MAX_LIST_BYTES: u64 = 16 << 20;
-
-/// The list URL of a division.
-pub fn default_list(division: Division) -> &'static str {
-    match division {
-        Division::OneVsOne => LIST_1V1,
-        Division::Melee => LIST_MELEE,
-    }
-}
-
-// ---- the list ----
-
-/// One line of the list: `<id> <version>,<url>`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Entry {
-    pub id: String,
-    pub version: String,
-    pub url: String,
-    /// 1-based line in the page.
-    pub line: usize,
-}
-
-/// A line that is not an entry, or a repeated one.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Problem {
-    pub line: usize,
-    pub text: String,
-}
-
-/// What a participants page holds.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct ParsedList {
-    pub entries: Vec<Entry>,
-    /// Lines repeating an earlier `id version`; the first one counts.
-    pub duplicates: Vec<Problem>,
-    pub malformed: Vec<Problem>,
-}
-
-/// Parses a page in `action=raw` form. Entries are the lines between `<pre>` and `</pre>`
-/// (all lines if there is no `<pre>`, for plain files). Each is `<id> <version>,<url>`: the id
-/// ends at the first space, the version at the first comma after it (versions may hold
-/// spaces, never commas; the URL may hold anything). Blank and `#` lines are skipped.
-pub fn parse_list(text: &str) -> ParsedList {
-    let mut out = ParsedList::default();
-    let mut seen = HashSet::new();
-    let mut inside = !text.contains("<pre>");
-    for (index, raw) in text.lines().enumerate() {
-        let line = index + 1;
-        let mut raw = raw;
-        if !inside {
-            match raw.find("<pre>") {
-                Some(at) => {
-                    inside = true;
-                    raw = &raw[at + 5..];
-                }
-                None => continue,
-            }
-        }
-        let mut done = false;
-        if let Some(at) = raw.find("</pre>") {
-            raw = &raw[..at];
-            done = true;
-        }
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('#') {
-            match parse_entry(trimmed, line) {
-                Some(entry) => {
-                    if seen.insert((entry.id.clone(), entry.version.clone())) {
-                        out.entries.push(entry);
-                    } else {
-                        out.duplicates.push(Problem {
-                            line,
-                            text: trimmed.to_string(),
-                        });
-                    }
-                }
-                None => out.malformed.push(Problem {
-                    line,
-                    text: trimmed.to_string(),
-                }),
-            }
-        }
-        if done {
-            break;
-        }
-    }
-    out
-}
-
-fn parse_entry(text: &str, line: usize) -> Option<Entry> {
-    let (id, rest) = text.split_once(' ')?;
-    let (version, url) = rest.split_once(',')?;
-    let (version, url) = (version.trim(), url.trim());
-    if id.is_empty() || version.is_empty() || url.is_empty() || id.contains(',') {
-        return None;
-    }
-    Some(Entry {
-        id: id.to_string(),
-        version: version.to_string(),
-        url: url.to_string(),
-        line,
-    })
-}
 
 // ---- fetching ----
 
@@ -284,46 +174,13 @@ pub struct Found {
     pub source_url: String,
 }
 
-/// The `{id}_{version}.jar` URL of the mirror template (version percent-encoded).
-pub fn mirror_url(template: &str, id: &str, version: &str) -> String {
-    template
-        .replace("{id}", id)
-        .replace("{version}", &percent_encode(version))
-}
-
-fn percent_encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
-/// The jar must be valid and say it is this entry. A missing `robot.version` takes the
-/// list's (classic's list is authoritative); a different one is a mismatch.
-fn check(bytes: &[u8], entry: &Entry, config: &Config) -> Result<(JarInfo, bool), String> {
-    let (info, from_list) = validate_named(bytes, config, Some(&entry.version), &entry.id)
-        .map_err(|messages| format!("invalid ({})", messages.join("; ")))?;
-    if info.bot_id != entry.id || info.version != entry.version {
-        return Err(format!(
-            "mismatch (properties say {} {})",
-            info.bot_id, info.version
-        ));
-    }
-    Ok((info, from_list))
-}
-
 /// The first source that yields a valid jar for `entry`: local, list URL, mirror. When none
 /// does, the error is the most telling one: the first `invalid`/`mismatch`, else the last
 /// download failure.
 pub fn resolve(entry: &Entry, options: &Options, fetcher: &dyn Fetcher) -> Result<Found, String> {
     let mut errors: Vec<String> = Vec::new();
     let mut found = |bytes: Vec<u8>, source: Source, url: &str| -> Option<Found> {
-        match check(&bytes, entry, &options.config) {
+        match check_entry(&bytes, &entry.id, &entry.version, &options.config) {
             Ok((info, version_from_list)) => Some(Found {
                 bytes,
                 info,
@@ -587,17 +444,11 @@ fn retrying<T>(
     }
 }
 
-/// Uploads the jar unless the server has it, then registers it. Returns the server's result.
-fn register(
-    api: &Api,
-    pacer: &Pacer,
-    found: &Found,
-    entry: &Entry,
-    division: Division,
-) -> Result<String, String> {
+/// Uploads the jar unless the server has it (`admin/jars/upload-url`, then the PUT).
+pub(crate) fn upload(api: &Api, pacer: &Pacer, info: &JarInfo, bytes: &[u8]) -> Result<(), String> {
     let request = UploadUrlRequest {
-        sha256: found.info.sha256.clone(),
-        size: found.info.size,
+        sha256: info.sha256.clone(),
+        size: info.size,
     };
     // `{"exists": true}` has no URL, so it is read as plain JSON.
     let answer: Value = retrying(pacer, || api.post_json("admin/jars/upload-url", &request))
@@ -608,10 +459,36 @@ fn register(
         let headers = upload.headers.iter().map(|(k, v)| (k.as_str(), v.as_str()));
         let headers: Vec<_> = headers.collect();
         retrying(pacer, || {
-            api.put_presigned(&upload.url, headers.iter().copied(), &found.bytes)
+            api.put_presigned(&upload.url, headers.iter().copied(), bytes)
         })
         .map_err(|e| format!("upload ({e})"))?;
     }
+    Ok(())
+}
+
+/// `admin/bots/import` with `body`; the server's `result`. A 409 is `conflict`, a 404 (a
+/// historic version of an unknown bot) `no bot`.
+pub(crate) fn import_call(api: &Api, pacer: &Pacer, body: &Value) -> Result<String, String> {
+    let answer = retrying(pacer, || api.admin_import(body)).map_err(|e| match e {
+        ApiError::Conflict(_) => "conflict".to_string(),
+        ApiError::NotFound(_) => "no bot".to_string(),
+        other => format!("api ({other})"),
+    })?;
+    match answer.get("result").and_then(Value::as_str) {
+        Some(r @ ("created" | "exists" | "divisionAdded" | "updated")) => Ok(r.to_string()),
+        other => Err(format!("api (unexpected result {other:?})")),
+    }
+}
+
+/// Uploads the jar unless the server has it, then registers it. Returns the server's result.
+fn register(
+    api: &Api,
+    pacer: &Pacer,
+    found: &Found,
+    entry: &Entry,
+    division: Division,
+) -> Result<String, String> {
+    upload(api, pacer, &found.info, &found.bytes)?;
     let mut body = json!({
         "bot": found.info.bot_id,
         "version": found.info.version,
@@ -625,14 +502,7 @@ fn register(
         body["versionFromList"] = json!(true);
     }
     debug_assert_eq!(found.info.bot_id, entry.id);
-    let answer = retrying(pacer, || api.admin_import(&body)).map_err(|e| match e {
-        ApiError::Conflict(_) => "conflict".to_string(),
-        other => format!("api ({other})"),
-    })?;
-    match answer.get("result").and_then(Value::as_str) {
-        Some(r @ ("created" | "exists" | "divisionAdded")) => Ok(r.to_string()),
-        other => Err(format!("api (unexpected result {other:?})")),
-    }
+    import_call(api, pacer, &body)
 }
 
 fn process(

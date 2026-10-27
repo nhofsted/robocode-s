@@ -11,7 +11,9 @@
 		active: 'Active: ranked.',
 		failed: 'Failed: it did not load, crashed or was disabled in too many battles.',
 		retired: 'Retired.',
-		removed: 'Removed.'
+		removed: 'Removed.',
+		delisted:
+			'Delisted (not on the LiteRumble list): not ranked or battled; its last numbers are kept. Submit a new version to bring it back.'
 	};
 
 	let bots: BotInfo[] | undefined = $state();
@@ -71,7 +73,7 @@
 			<section class="panel bot">
 				<header>
 					<h2>
-						{#if bot.state === 'active'}
+						{#if bot.state === 'active' || bot.state === 'delisted'}
 							<a href={resolve('/bot/[id]', { id: bot.id })}>{bot.id}</a>
 						{:else}
 							{bot.id}

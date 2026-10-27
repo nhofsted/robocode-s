@@ -191,6 +191,7 @@ pub fn version(vid: u32) -> VersionItem {
         retired: None,
         url: None,
         colors: None,
+        released: None,
     }
 }
 

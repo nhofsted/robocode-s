@@ -149,6 +149,8 @@ pub fn fold_hour(states: &mut [State], hour: u32, items: &[LogItem]) -> HourRepo
 }
 
 /// The versions whose pairings leave the state (§10.5 step 2): retired, removed, failed.
+/// Delisted versions keep theirs, frozen (§16.5): they are not planned, so nothing is added,
+/// and not ranked, so they count for nobody, until the version is listed again.
 pub fn dropped_versions(versions: &[VersionItem]) -> HashSet<u32> {
     versions
         .iter()
@@ -352,13 +354,16 @@ pub fn apply_updates<S: Store + ?Sized>(
                 if let Some(mut bot) = store.get_bot(&v.bot)?
                     && bot.state != BotState::Removed
                 {
+                    // A delisted current version (a bot delisted before it was claimed, §16.5)
+                    // is replaced the same way.
                     if let Some(previous) = bot.current.filter(|&p| p != v.vid)
                         && let Some(mut old) = store.get_version(previous)?
-                        && old.state == VersionState::Active
+                        && matches!(old.state, VersionState::Active | VersionState::Delisted)
                     {
+                        let expected = old.state;
                         old.state = VersionState::Retired;
                         old.retired = Some(now);
-                        match store.update_version(&old, VersionState::Active) {
+                        match store.update_version(&old, expected) {
                             Ok(()) => line
                                 .push_str(&format!("; {} (vid {}) retired", old.version, previous)),
                             Err(StoreError::ConditionFailed) => {}
@@ -620,6 +625,7 @@ mod tests {
             retired: None,
             url: None,
             colors: None,
+            released: None,
         }
     }
 
@@ -879,18 +885,63 @@ mod tests {
             version(2, "b.B", VersionState::Active),
             version(3, "c.C", VersionState::Probation),
             version(4, "d.D", VersionState::Retired),
+            version(5, "e.E", VersionState::Delisted),
         ];
         versions[1].divisions = vec![Division::OneVsOne, Division::Melee];
         let mut snapshot = Snapshot::new();
         snapshot.insert("a.A".into(), SnapshotRow(1, 60.0, 1600.0, "1.1".into()));
         snapshot.insert("b.B".into(), SnapshotRow(2, 55.0, 1550.0, "0.9".into()));
         snapshot.insert("d.D".into(), SnapshotRow(3, 50.0, 1500.0, "1.4".into()));
+        snapshot.insert("e.E".into(), SnapshotRow(4, 50.0, 1500.0, "1.5".into()));
         assert_eq!(top_from_snapshots(&[snapshot], &versions, 50), vec![1]);
         let (active, probation) = plan_bots(&versions, Division::OneVsOne);
         assert_eq!(active.iter().map(|b| b.vid).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(probation.iter().map(|b| b.vid).collect::<Vec<_>>(), vec![3]);
         let (active, _) = plan_bots(&versions, Division::Melee);
         assert_eq!(active.len(), 1);
+        assert_eq!(ranking(None, &versions, Division::OneVsOne), vec![1, 2]);
+        // A delisted version is neither planned nor dropped: its pairings stay, frozen.
         assert_eq!(dropped_versions(&versions), [4].into());
+    }
+
+    #[test]
+    fn probation_replaces_a_delisted_current_version() {
+        // A bot delisted before it was claimed; its owner's new version passes probation.
+        let store = MemStore::new();
+        let mut old = version(1, "x.Bot", VersionState::Delisted);
+        old.retired = None;
+        store.put_version(&old).unwrap();
+        store
+            .put_version(&version(2, "x.Bot", VersionState::Probation))
+            .unwrap();
+        store
+            .put_bot(&BotItem {
+                id: "x.Bot".into(),
+                author: "Ann".into(),
+                owner: Some("g1".into()),
+                homepage: None,
+                description: None,
+                divisions: vec![Division::OneVsOne],
+                versions: vec![2, 1],
+                current: Some(1),
+                state: BotState::Active,
+                created: NOW,
+                source: BotSource::Import,
+            })
+            .unwrap();
+        let mut state = State::new(1, Division::OneVsOne, 0);
+        for _ in 0..10 {
+            state.fold(&record(2, 4, None), 1);
+        }
+        let updates = version_updates(
+            &[state],
+            &Config::default(),
+            &store.list_versions().unwrap(),
+        );
+        let (log, _) = apply_updates(&store, &updates, NOW * 1000).unwrap();
+        assert!(log[0].contains("retired"), "{log:?}");
+        let old = store.get_version(1).unwrap().unwrap();
+        assert_eq!((old.state, old.retired), (VersionState::Retired, Some(NOW)));
+        assert_eq!(store.get_bot("x.Bot").unwrap().unwrap().current, Some(2));
     }
 }

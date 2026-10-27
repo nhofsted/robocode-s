@@ -46,6 +46,7 @@ For an admin account; the commands print the server's answer.
 | Command | What it does |
 |---|---|
 | `admin import --division 1v1\|melee [--list URL\|FILE] [--local DIR] [--mirror TEMPLATE\|none] [--dry-run] [--concurrency N] [--report FILE]` | Seed a division from the RoboWiki participants list (default: the page itself). Jars come from `--local` (files `<id>_<version>.jar`), the list's URL, then the mirror. `--dry-run` only downloads and validates; `--concurrency` is the downloads at once (default 4); the report is JSON (default `import-<division>-<date>.json`). |
+| `admin import --history FILE [--dry-run] [--concurrency N] [--report FILE]` | Register the archives' older versions (`versions.json`: per version its `id`, `version`, `sha256`, the jar in `files`, its `releaseDate` and the participants pages it was on) as retired versions of the bots the rumble has, with their release dates. Versions on today's participants lists only get their release date; versions of bots the rumble doesn't have are reported as `noBot`. `--dry-run` only checks the jars. Takes no `--division`, `--list`, `--local` or `--mirror`; the report defaults to `history-<date>.json`. |
 | `admin user UID [--rep N] [--state new\|quar\|ban] [--admin true\|false] [--trusted true\|false]` | Change a user (UID as `g<GitHub id>`). |
 | `admin bot claim <id> <github login>` | Give a bot to the GitHub user who claimed it. |
 | `admin bot remove <id> --reason TEXT` | Take a bot down. |

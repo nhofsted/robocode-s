@@ -9,7 +9,7 @@ use rumble_core::api::{
     BattleKind, BattleStatus, RecordingsDoneRequest, ResultsResponse, WorkResponse,
 };
 use rumble_core::ids::Division;
-use rumble_core::store::{Run, Store, VERIFY_TTL, VerifyItem, VerifyKind};
+use rumble_core::store::{Run, Store, VERIFY_TTL, VerifyItem, VerifyKind, VersionState};
 use rumble_core::token;
 use rumble_lambda::http::{OAUTH_COOKIE, Request, SESSION_COOKIE};
 use rumble_lambda::s3::{Bucket, IMMUTABLE, Objects};
@@ -465,6 +465,17 @@ fn web_sign_in() {
     let token = h.user(5, 0);
     assert_eq!(h.post("me", &token, &json!({"country": "nl"})).status, 200);
     assert_eq!(h.post("me", &token, &json!({"country": "NLD"})).status, 400);
+    // The flags that are no country: the EU and the RoboWiki's own.
+    assert_eq!(h.post("me", &token, &json!({"country": "eu"})).status, 200);
+    assert_eq!(h.post("me", &token, &json!({"country": "un"})).status, 200);
+    assert_eq!(
+        h.post("me", &token, &json!({"country": "ancap"})).status,
+        200
+    );
+    assert_eq!(
+        h.post("me", &token, &json!({"country": "ANCAP"})).status,
+        400
+    );
 
     // Logout: the session is gone, the cookie cleared.
     let out = h.send(with_cookie("POST", "auth/logout").header("Origin", SITE));
@@ -813,6 +824,46 @@ fn admin_routes() {
     assert_eq!(
         h.post("admin/bots/import", &admin, &melee).value()["result"],
         "divisionAdded"
+    );
+    // A release date for it: `updated`.
+    let mut dated = flagged.clone();
+    dated["released"] = json!(1_100_000_000_000u64);
+    assert_eq!(
+        h.post("admin/bots/import", &admin, &dated).value()["result"],
+        "updated"
+    );
+    // Historic versions (§16.6): the bot must exist, and its jar is not published otherwise.
+    let old = jar("jk.mega.Druss", Some("2.0"));
+    let old_sha = sha_hex(&old);
+    h.objects.upload(
+        Bucket::State,
+        &format!("uploads/g{ADMIN_ID}/{old_sha}.jar"),
+        &old,
+    );
+    let historic = json!({"bot": "jk.mega.Druss", "version": "2.0", "sha256": old_sha,
+                          "division": "1v1", "historic": true, "released": 1_000_000_000_000u64});
+    let mut unknown = historic.clone();
+    unknown["bot"] = json!("no.Such");
+    assert_eq!(h.post("admin/bots/import", &admin, &unknown).status, 404);
+    assert!(
+        h.objects
+            .object(Bucket::Jars, &format!("jars/{old_sha}.jar"))
+            .is_none()
+    );
+    let registered = h.post("admin/bots/import", &admin, &historic);
+    assert_eq!(registered.value(), json!({"vid": 2, "result": "created"}));
+    let v = h.store.get_version(2).unwrap().unwrap();
+    assert_eq!(
+        (v.state, v.retired, v.released),
+        (
+            VersionState::Retired,
+            Some(1_000_000_000),
+            Some(1_000_000_000_000)
+        )
+    );
+    assert_eq!(
+        h.store.get_bot("jk.mega.Druss").unwrap().unwrap().current,
+        Some(1)
     );
 
     h.advance(10_000);

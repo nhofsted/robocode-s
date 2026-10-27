@@ -10,6 +10,7 @@ use rumble_client::battle::{DEFAULT_MEMORY_MB, Options as BattleOptions, check_e
 use rumble_client::contributor::{
     Config, Contributor, Event, Stop, Summary, default_slots, release_at_least,
 };
+use rumble_client::history;
 use rumble_client::http::Api;
 use rumble_client::import::{self, HttpFetcher};
 use rumble_client::login::{DeviceCode, DeviceFlow, GITHUB};
@@ -84,6 +85,12 @@ Admin commands (an admin account; they print the server's answer):
                          {id}_{version}.jar); --dry-run only downloads and validates;
                          --concurrency downloads at once (default 4); the report is
                          JSON (default import-<division>-<date>.json)
+  admin import --history FILE [--dry-run] [--concurrency N] [--report FILE]
+                         register the versions of the archives' dataset (versions.json:
+                         id, version, sha256, files, releaseDate, wiki pages) as retired
+                         versions of the bots the rumble has, with their release dates;
+                         versions on today's participants lists only get their date
+                         (default report history-<date>.json)
   admin user UID [--rep N] [--state new|quar|ban] [--admin true|false]
                [--trusted true|false]
                          change a user (UID as g<GitHub id>)
@@ -143,6 +150,9 @@ pub struct ImportOptions {
     pub dry_run: bool,
     pub concurrency: usize,
     pub report: Option<PathBuf>,
+    /// `--history <versions.json>`: the historic versions import (no division, list or
+    /// mirror).
+    pub history: Option<PathBuf>,
 }
 
 fn number<T: std::str::FromStr>(name: &str, v: String) -> Result<T, String> {
@@ -323,6 +333,7 @@ impl ImportOptions {
             dry_run: false,
             concurrency: 4,
             report: None,
+            history: None,
         };
         let mut args = args.iter();
         while let Some(arg) = args.next() {
@@ -354,11 +365,22 @@ impl ImportOptions {
                     o.concurrency = n;
                 }
                 "--report" => o.report = Some(value()?.into()),
+                "--history" => o.history = Some(value()?.into()),
                 a if a.starts_with("--") => {
                     return Err(format!("admin import: unknown option {a}"));
                 }
                 a => return Err(format!("admin import: unexpected argument {a}")),
             }
+        }
+        if o.history.is_some() {
+            // Divisions come from the dataset; jars from its files.
+            if division.is_some() || o.list.is_some() || o.local.is_some() || o.mirror.is_some() {
+                return Err(
+                    "admin import --history takes no --division, --list, --local or --mirror"
+                        .into(),
+                );
+            }
+            return Ok(o);
         }
         o.division = division.ok_or("admin import needs --division 1v1 or --division melee")?;
         Ok(o)
@@ -865,6 +887,9 @@ fn run_logged(parsed: &Parsed, o: &RunOptions, log: Option<&Path>) -> Result<(),
 // ---- admin import ----
 
 fn run_import(parsed: &Parsed, o: &ImportOptions) -> Result<(), String> {
+    if let Some(dataset) = &o.history {
+        return run_history(parsed, o, dataset);
+    }
     let fetcher = HttpFetcher::new();
     let source = o
         .list
@@ -910,6 +935,60 @@ fn run_import(parsed: &Parsed, o: &ImportOptions) -> Result<(), String> {
     std::fs::write(&path, report.to_json()).map_err(|e| format!("{}: {e}", path.display()))?;
     print!("{}", report.summary());
     println!("Report: {}", path.display());
+    Ok(())
+}
+
+/// `admin import --history`: the versions of both participants lists today are the bots'
+/// current ones (their dates only); every other dataset version is historic (§16.6).
+fn run_history(parsed: &Parsed, o: &ImportOptions, path: &Path) -> Result<(), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let dataset = history::parse_dataset(&text, dir)?;
+    let fetcher = HttpFetcher::new();
+    let mut listed = history::Listed::new();
+    for division in Division::ALL {
+        let source = import::default_list(division);
+        let list = import::load_list(source, &fetcher)?;
+        for entry in list.entries {
+            listed.entry((entry.id, entry.version)).or_insert(division);
+        }
+    }
+    eprintln!(
+        "robocode-s rumble: {} versions in {} ({} unusable), {} listed today",
+        dataset.entries.len(),
+        path.display(),
+        dataset.unusable.len(),
+        listed.len()
+    );
+    let api = if o.dry_run {
+        None
+    } else {
+        Some(signed_in(parsed)?.0)
+    };
+    let options = history::HistoryOptions {
+        concurrency: o.concurrency,
+        dry_run: o.dry_run,
+        config: rumble_core::Config::default(),
+    };
+    let progress = |row: &history::HistoryRow, done: usize, total: usize| {
+        eprintln!(
+            "[{done}/{total}] {} {}: {}{}",
+            row.id,
+            row.version,
+            row.result,
+            row.error
+                .as_ref()
+                .map_or(String::new(), |e| format!(" ({e})"))
+        );
+    };
+    let report = history::run(&dataset, &listed, &options, api.as_ref(), &progress);
+    let out = o
+        .report
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(history::default_report_name(&import::today())));
+    std::fs::write(&out, report.to_json()).map_err(|e| format!("{}: {e}", out.display()))?;
+    print!("{}", report.summary());
+    println!("Report: {}", out.display());
     Ok(())
 }
 
@@ -1023,6 +1102,18 @@ mod tests {
         assert!(parse("admin import").is_err());
         assert!(parse("admin import --division 2v2").is_err());
         assert!(parse("admin import --division 1v1 --concurrency 0").is_err());
+        assert_eq!(o.history, None);
+        let Command::Import(o) = parse("admin import --history /d/versions.json --dry-run")
+            .unwrap()
+            .command
+        else {
+            panic!()
+        };
+        assert_eq!(o.history, Some("/d/versions.json".into()));
+        assert!(o.dry_run);
+        assert!(parse("admin import --history v.json --division 1v1").is_err());
+        assert!(parse("admin import --history v.json --mirror none").is_err());
+        assert!(parse("admin import --history").is_err());
     }
 
     #[test]
@@ -1096,6 +1187,7 @@ mod tests {
             "--batches",
             "--json",
             "admin import",
+            "admin import --history",
             "admin user",
             "admin bot claim",
             "admin bot remove",

@@ -27,6 +27,7 @@ use rumble_core::api::{
 use rumble_core::auth::{self, Authenticated, SESSION_SECONDS};
 use rumble_core::bots;
 use rumble_core::config::Config;
+use rumble_core::flags;
 use rumble_core::ids::{Division, parse_uid};
 use rumble_core::jar;
 use rumble_core::plan::Plan;
@@ -722,10 +723,11 @@ impl App {
         let body: MeUpdate = request.body_json()?;
         if let Some(country) = &body.country
             && !(country.is_empty()
+                || country == flags::ANCAP_FLAG
                 || (country.len() == 2 && country.bytes().all(|b| b.is_ascii_lowercase())))
         {
             return Err(bad_request(
-                "country: two lower-case letters (ISO 3166-1), or \"\"",
+                "country: two lower-case letters (ISO 3166-1, or un), ancap, or \"\"",
             ));
         }
         let patch = UserPatch {
@@ -1075,7 +1077,18 @@ impl App {
         if !is_sha256_hex(&body.sha256) {
             return Err(bad_request("sha256: 64 lower-case hex digits"));
         }
+        // A listed version's date (§16.6): no jar.
+        if body.date_only {
+            return Ok(Response::ok(&bots::set_release_date(self.store(), &body)?));
+        }
         let uid = caller.user().uid.clone();
+        // A historic version needs its bot (§16.6): checked before its jar is published.
+        if body.historic && self.store().get_bot(&body.bot)?.is_none() {
+            return Err(ApiError::new(
+                ErrorCode::NotFound,
+                format!("no bot {}", body.bot),
+            ));
+        }
         // The server never trusts the client: the jar is validated again from S3 (§16.2).
         let in_jars = self
             .services

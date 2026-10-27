@@ -746,6 +746,7 @@ mod tests {
                     retired: None,
                     url: None,
                     colors: None,
+                    released: None,
                 })
                 .unwrap();
         }

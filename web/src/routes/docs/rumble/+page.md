@@ -67,6 +67,8 @@ See [Developing a robot](/docs/robot-development/release#package-it) for how to 
 
 **Existing bots.** At launch the rumble imports the bots in the current RoboRumble participant lists, attributed to their authors. Authors can claim their bots by signing in with GitHub.
 
+Imported bots that nobody has claimed follow the RoboWiki participant lists, checked daily: a new version on the list is added, and a bot that leaves the lists is delisted. A delisted bot is no longer ranked or battled, but its page, downloads and last numbers stay, and it returns with them if it is listed again. A claimed bot is managed by its owner and doesn't follow the lists.
+
 **Mirroring and takedown.** The rumble keeps a copy of every jar so the rumble keeps working when original download links disappear. Authors can ask for a bot to be removed at any time, through the site or a [GitHub issue](https://github.com/nhofsted/robocode-s/issues), and removals are handled promptly.
 
 ## Replays

@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::data::{
     self, Author, BotDetails, BotVersion, Contributor, Contributors, RumbleIndex, RumbleSummary,
 };
+use crate::flags::FlagMap;
 use crate::ids::{Division, RumbleId};
 use crate::metrics::{self, Member, RumbleMetrics};
 use crate::state::State;
@@ -75,6 +76,8 @@ pub struct Catalog<'a> {
     pub bots: &'a BTreeMap<String, BotItem>,
     /// The owners of claimed bots, by uid.
     pub owners: &'a BTreeMap<String, User>,
+    /// The RoboWiki's flags by package (§16.7).
+    pub flags: &'a FlagMap,
 }
 
 fn country(user: Option<&User>) -> Option<String> {
@@ -87,9 +90,15 @@ impl Catalog<'_> {
         bot.owner.as_ref().and_then(|uid| self.owners.get(uid))
     }
 
+    /// The flag of a bot: the country its owner chose, else the RoboWiki's flag of its
+    /// package.
+    fn country(&self, bot: &BotItem) -> Option<String> {
+        country(self.owner(bot)).or_else(|| self.flags.of(&bot.id).map(str::to_string))
+    }
+
     /// The ranked version of each bot of a division (§15 step 3): its active versions with
     /// the division (probation versions are not members); of several, the bot's `cur` if it
-    /// is one of them, else the newest. Bots that are retired or removed have none.
+    /// is one of them, else the newest. Bots that are retired, delisted or removed have none.
     pub fn ranked(&self, division: Division) -> Vec<&VersionItem> {
         let mut by_bot: BTreeMap<&str, Vec<&VersionItem>> = BTreeMap::new();
         for v in self.versions {
@@ -193,7 +202,7 @@ pub fn compute_rumble(
                 id: v.bot.clone(),
                 version: v.version.clone(),
                 author: bot.author.clone(),
-                country: country(catalog.owner(bot)),
+                country: catalog.country(bot),
                 rank_week_ago: week_ago.and_then(|s| s.get(&v.bot)).map(|row| row.0),
                 colors: v.colors.clone(),
             })
@@ -214,8 +223,9 @@ pub fn index(summaries: Vec<RumbleSummary>, generated_at: &str) -> RumbleIndex {
     }
 }
 
-/// `bots/<id>.json` (§15 step 5): metadata, the versions that were ranked (current first,
-/// then newest first; probation, failed and removed versions are not shown), and per rumble
+/// `bots/<id>.json` (§15 step 5): metadata and state, the versions that were ranked (current
+/// first, then by release date, else registration, newest first; probation, failed and removed
+/// versions are not shown, delisted ones are), and per rumble
 /// the bot is ranked in today its numbers with the history extended by today's point (one
 /// point a day: a later run of the same day replaces it) and thinned. A bot ranked nowhere
 /// today keeps the rumbles of its previous file and gets no point. `None` if the bot has no
@@ -232,9 +242,19 @@ pub fn bot_details(
         .versions
         .iter()
         .filter_map(|vid| by_vid.get(vid).copied())
-        .filter(|v| matches!(v.state, VersionState::Active | VersionState::Retired))
+        .filter(|v| {
+            matches!(
+                v.state,
+                VersionState::Active | VersionState::Retired | VersionState::Delisted
+            )
+        })
         .collect();
-    shown.sort_by_key(|v| (Some(v.vid) != bot.current, std::cmp::Reverse(v.vid)));
+    shown.sort_by_key(|v| {
+        (
+            Some(v.vid) != bot.current,
+            std::cmp::Reverse((release_order(v), v.vid)),
+        )
+    });
     if shown.is_empty() {
         return None;
     }
@@ -264,7 +284,7 @@ pub fn bot_details(
         author: Author {
             name: bot.author.clone(),
             github: owner.map(|u| u.login.clone()),
-            country: country(owner),
+            country: catalog.country(bot),
         },
         description: text(&bot.description),
         homepage: text(&bot.homepage),
@@ -282,11 +302,21 @@ pub fn bot_details(
                     .filter(|_| v.state == VersionState::Retired)
                     .map(rfc3339),
                 colors: v.colors.clone(),
+                released_at: v.released.map(|ms| rfc3339(ms / 1000)),
             })
             .collect(),
         rumbles,
         recordings: BTreeMap::new(),
+        state: Some(bot.state.as_str().to_string()),
     })
+}
+
+/// The time a version is sorted by among a bot's versions (milliseconds): its release date,
+/// else its registration.
+pub fn release_order(version: &VersionItem) -> u64 {
+    version
+        .released
+        .unwrap_or(version.created.saturating_mul(1000))
 }
 
 /// `contributors.json` (§15 step 6): users with battles who haven't hidden themselves and
@@ -374,6 +404,7 @@ mod tests {
             retired: None,
             url: None,
             colors: None,
+            released: None,
         }
     }
 
@@ -478,10 +509,19 @@ mod tests {
         bots.insert("c.C".into(), bot("c.C", vec![5, 4], 4, None));
         let mut owners = BTreeMap::new();
         owners.insert("g9".into(), user("g9", 0, 0, UserState::New, false));
+        // The owner's country wins over the wiki's flag; an unclaimed bot takes the wiki's.
+        let flags = FlagMap {
+            packages: [("a", "us"), ("b", "nl")]
+                .into_iter()
+                .map(|(p, f)| (p.to_string(), f.to_string()))
+                .collect(),
+            at: 0,
+        };
         let catalog = Catalog {
             versions: &versions,
             bots: &bots,
             owners: &owners,
+            flags: &flags,
         };
         let mut state = State::new(1, Division::OneVsOne, 0);
         battle(&mut state, 2, 3, 70.0);
@@ -516,6 +556,9 @@ mod tests {
         let b_row = rankings.bots.iter().find(|r| r.id == "b.B").unwrap();
         assert_eq!(b_row.rank_week_ago, Some(1));
         assert_eq!(b_row.colors, None);
+        assert_eq!(b_row.country.as_deref(), Some("nl"));
+        let c_row = rankings.bots.iter().find(|r| r.id == "c.C").unwrap();
+        assert_eq!(c_row.country, None);
         let snapshot = mega.snapshot();
         assert_eq!(snapshot["a.A"].0, 1);
         assert_eq!(snapshot["a.A"].3, "1.2");
@@ -533,6 +576,9 @@ mod tests {
         assert_eq!(a.versions[0].colors.as_ref(), Some(&black));
         assert_eq!(a.versions[1].colors, None);
         assert_eq!(a.author.github.as_deref(), Some("lg9"));
+        assert_eq!(a.author.country.as_deref(), Some("be"));
+        let b = bot_details(&bots["b.B"], &catalog, &runs, None, "2026-10-24").unwrap();
+        assert_eq!(b.author.country.as_deref(), Some("nl"));
         assert_eq!(a.description, None);
         assert_eq!(a.rumbles.len(), 2);
         assert_eq!(a.rumbles["1v1"].history.len(), 1);
@@ -550,6 +596,111 @@ mod tests {
         // JSON round trip through the data types.
         let json = serde_json::to_string(&a).unwrap();
         assert_eq!(serde_json::from_str::<BotDetails>(&json).unwrap(), a);
+    }
+
+    #[test]
+    fn delisted_bots_are_not_ranked_but_keep_their_file() {
+        let versions = vec![
+            version(1, "a.A", WeightClass::Mega, VersionState::Active),
+            version(2, "b.B", WeightClass::Mega, VersionState::Active),
+            VersionItem {
+                released: Some((NOW - 400 * DAY) * 1000),
+                ..version(3, "d.D", WeightClass::Mega, VersionState::Delisted)
+            },
+            VersionItem {
+                released: Some((NOW - 900 * DAY) * 1000),
+                retired: Some(NOW - 500 * DAY),
+                ..version(4, "d.D", WeightClass::Mega, VersionState::Retired)
+            },
+            // Registered later, released earlier than 4: sorted by the release date.
+            VersionItem {
+                released: Some((NOW - 1000 * DAY) * 1000),
+                retired: Some(NOW - 900 * DAY),
+                ..version(5, "d.D", WeightClass::Mega, VersionState::Retired)
+            },
+        ];
+        let mut bots = BTreeMap::new();
+        bots.insert("a.A".into(), bot("a.A", vec![1], 1, None));
+        bots.insert("b.B".into(), bot("b.B", vec![2], 2, None));
+        bots.insert(
+            "d.D".into(),
+            BotItem {
+                state: BotState::Delisted,
+                ..bot("d.D", vec![3, 4, 5], 3, None)
+            },
+        );
+        let owners = BTreeMap::new();
+        let flags = FlagMap::default();
+        let catalog = Catalog {
+            versions: &versions,
+            bots: &bots,
+            owners: &owners,
+            flags: &flags,
+        };
+        let mut state = State::new(1, Division::OneVsOne, 0);
+        battle(&mut state, 1, 2, 60.0);
+        // The delisted bot's frozen pairings: a.A lost badly, b.B won.
+        for _ in 0..5 {
+            battle(&mut state, 1, 3, 0.0);
+            battle(&mut state, 2, 3, 100.0);
+        }
+        let run = compute_rumble(
+            RumbleId::new(Division::OneVsOne, WeightClass::Mega),
+            &catalog,
+            &state,
+            None,
+        );
+        let ids: Vec<&str> = run.metrics.members.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["a.A", "b.B"]);
+        let rankings = run.metrics.rankings("1v1", "t", 1);
+        assert_eq!(rankings.bots[0].id, "a.A");
+        assert_eq!(
+            (rankings.bots[0].metrics.aps, rankings.bots[0].pairings),
+            (60.0, 1)
+        );
+        assert_eq!(rankings.bots[0].battles, 1);
+
+        // Its file: written, with the state, the last rumbles kept and the versions current
+        // first, then by release date.
+        let ranked = bot_details(&bots["a.A"], &catalog, &[run], None, "2026-10-24").unwrap();
+        assert_eq!(ranked.state.as_deref(), Some("active"));
+        let earlier = BotDetails {
+            rumbles: ranked.rumbles.clone(),
+            ..ranked
+        };
+        let d = bot_details(&bots["d.D"], &catalog, &[], Some(&earlier), "2026-10-25").unwrap();
+        assert_eq!(d.state.as_deref(), Some("delisted"));
+        assert_eq!(d.rumbles, earlier.rumbles);
+        let shown: Vec<(&str, Option<&str>, Option<&str>)> = d
+            .versions
+            .iter()
+            .map(|v| {
+                (
+                    v.version.as_str(),
+                    v.released_at.as_deref(),
+                    v.retired_at.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("1.3", Some("2025-09-19T12:00:00Z"), None),
+                (
+                    "1.4",
+                    Some("2024-05-07T12:00:00Z"),
+                    Some("2025-06-11T12:00:00Z")
+                ),
+                (
+                    "1.5",
+                    Some("2024-01-28T12:00:00Z"),
+                    Some("2024-05-07T12:00:00Z")
+                ),
+            ]
+        );
+        let json = serde_json::to_value(&d).unwrap();
+        assert_eq!(json["state"], "delisted");
+        assert_eq!(json["versions"][0]["releasedAt"], "2025-09-19T12:00:00Z");
     }
 
     #[test]

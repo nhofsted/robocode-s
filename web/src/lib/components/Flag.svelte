@@ -2,7 +2,7 @@
 	// An author's country flag, as on LiteRumble. SVGs from flag-icons (MIT); each flag is its
 	// own small file, fetched only when shown. Emoji flags would show as letters on Windows.
 	interface Props {
-		/** ISO 3166-1 alpha-2, lower case. */
+		/** ISO 3166-1 alpha-2, lower case, or one of the RoboWiki's own flags (`CUSTOM`). */
 		code: string | null | undefined;
 		height?: number;
 	}
@@ -12,12 +12,21 @@
 		query: '?url',
 		import: 'default'
 	});
+	// The RoboWiki's flags page has `MAN` (anarcho-capitalist), drawn as LiteRumble's.
+	const CUSTOM: Record<string, { name: string; load: () => Promise<string> }> = {
+		ancap: {
+			name: 'Anarcho-capitalist',
+			load: () => import('#lib/flags/ancap.svg?url').then((m) => m.default)
+		}
+	};
 
 	const names = new Intl.DisplayNames(['en'], { type: 'region' });
 
 	let url: string | undefined = $state();
 	const name = $derived.by(() => {
 		if (!code) return '';
+		const custom = CUSTOM[code.toLowerCase()];
+		if (custom) return custom.name;
 		try {
 			return names.of(code.toUpperCase()) ?? code.toUpperCase();
 		} catch {
@@ -27,7 +36,10 @@
 
 	$effect(() => {
 		url = undefined;
-		const load = code ? FLAGS[`/node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`] : undefined;
+		const load = code
+			? (CUSTOM[code.toLowerCase()]?.load ??
+				FLAGS[`/node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`])
+			: undefined;
 		let cancelled = false;
 		load?.().then((u) => {
 			if (!cancelled) url = u;
