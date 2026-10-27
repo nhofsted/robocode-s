@@ -1032,7 +1032,7 @@ impl Rumble {
                 ui.add(
                     egui::Label::new(
                         RichText::new(
-                            "Choose another sandbox in Options (os, bwrap or docker) unless \
+                            "Choose another sandbox in Options (os, bwrap, docker or podman) unless \
                              this computer is one you don't mind risking. Your answer is \
                              remembered.",
                         )

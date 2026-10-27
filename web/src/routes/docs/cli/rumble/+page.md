@@ -29,8 +29,8 @@ The client for [the rumble](/docs/rumble): volunteers run its battles. You need 
 |---|---|
 | `--parallel N` | Battles at once (default: half the cores, and one per 2 GiB of memory). A melee battle takes 5 of them. |
 | `--divisions LIST` | `1v1`, `melee` or `1v1,melee` (default both). Melee needs 5 parallel battles. |
-| `--sandbox KIND` | `os`, `bwrap`, `docker` or `none`; see [sandboxes](/docs/cli#sandboxes). |
-| `--unsandboxed` | Run robots as plain processes (`--sandbox none`). The rumble runs robots from anyone, so without this the client refuses to run without a sandbox. On macOS: Docker, or this. |
+| `--sandbox KIND` | `os`, `bwrap`, `docker`, `podman` or `none`; see [sandboxes](/docs/cli#sandboxes). |
+| `--unsandboxed` | Run robots as plain processes (`--sandbox none`). The rumble runs robots from anyone, so without this the client refuses to run without a sandbox. On macOS: Docker or Podman, or this. |
 | `--memory MB` | Heap per robot JVM (default 512). |
 | `--batches N` | Stop after N batches have been posted (default: go on). |
 | `--json` | Print the events as JSON lines instead of one line per battle and per post. |

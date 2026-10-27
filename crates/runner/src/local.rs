@@ -464,7 +464,7 @@ fn run_describe(
         )
     })?;
     // A container sees the paths mounted at other ones.
-    let (lib, jars_seen, home_seen) = if host.sandbox == Sandbox::Docker {
+    let (lib, jars_seen, home_seen) = if host.sandbox.is_container() {
         let seen = |i, p: &PathBuf| crate::sandbox::container_path(i, p);
         (
             seen(0, &lib),
@@ -482,6 +482,8 @@ fn run_describe(
         command
             .arg(format!("-Xmx{DESCRIBE_MEMORY_MB}m"))
             .args(crate::sandbox::jvm_flags(&home_seen));
+    } else {
+        command.args(crate::PLAIN_FLAGS);
     }
     crate::no_window(command)
         .args(MODULE_OPENINGS)
@@ -796,7 +798,7 @@ impl Environment {
         self.sandbox.prepare()?;
         let java = match &self.java {
             // The container has its own Java.
-            _ if self.sandbox == Sandbox::Docker => PathBuf::from("java"),
+            _ if self.sandbox.is_container() => PathBuf::from("java"),
             Some(java) => java.clone(),
             None => crate::jre::java(&self.data).map_err(|e| format!("no Java runtime: {e}"))?,
         };

@@ -24,7 +24,7 @@ These work the same in `battle`, `agent` and `rumble run`:
 
 | Option | Meaning |
 |---|---|
-| `--sandbox KIND` | What robots run in: `os`, `bwrap`, `docker` or `none`. See [sandboxes](#sandboxes). |
+| `--sandbox KIND` | What robots run in: `os`, `bwrap`, `docker`, `podman` or `none`. See [sandboxes](#sandboxes). |
 | `--data DIR` | The data folder: Java runtime, robots' data files, caches. Also `$ROBOCODES_DATA`. Default: the user data folder of an installation, `target/robocodes-data` in a source tree. |
 | `--java PATH` | Java executable (`$ROBOCODES_JAVA`). Default: the pinned runtime, downloaded on first use. |
 | `--host-lib DIR` | The robot host's lib folder (`$ROBOCODES_HOST_LIB`). |
@@ -42,7 +42,8 @@ Robots are code from anyone, so they run in a sandbox. The battle's header says 
 | `os` | The default where there is one. Linux: seccomp, and Landlock where the kernel has it. Windows: an AppContainer and a Job Object. No network, no files but the robot's own. |
 | `bwrap` | Bubblewrap, on Linux, if installed. |
 | `docker` | Each robot in a container of the Temurin JRE image, without network. Needs Docker; pulls the image the first time. Any platform. |
-| `none` | A plain process. macOS has only this and `docker`. |
+| `podman` | The same container in Podman (on macOS, Podman Desktop or `podman machine`). Any platform. |
+| `none` | A plain process. macOS has only this, `docker` and `podman`. |
 
 ## Updates
 

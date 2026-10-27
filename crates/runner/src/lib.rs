@@ -85,6 +85,14 @@ pub const MODULE_OPENINGS: [&str; 2] = [
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
 ];
 
+/// JVM flags for a robot host without a sandbox. On macOS it has no display either, as in
+/// a sandbox: AWT's toolkit, which classic's classes load, would make each robot's JVM an
+/// app with a Dock icon that takes the focus.
+#[cfg(target_os = "macos")]
+pub const PLAIN_FLAGS: [&str; 1] = ["-Djava.awt.headless=true"];
+#[cfg(not(target_os = "macos"))]
+pub const PLAIN_FLAGS: [&str; 0] = [];
+
 /// Switches Math.sin, cos, tan, atan2, exp, log, log10 and pow to StrictMath's results: their
 /// intrinsics are inexact and differ from it. The exact intrinsics (sqrt, abs, ...) stay on.
 pub const STRICT_MATH_FLAGS: [&str; 2] = [
@@ -97,6 +105,8 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     let mut args = vec![format!("-Xmx{}m", launch.memory_mb)];
     if host.sandbox != Sandbox::None {
         args.extend(sandbox::jvm_flags(&launch.home));
+    } else {
+        args.extend(PLAIN_FLAGS.map(String::from));
     }
     args.extend(MODULE_OPENINGS.map(String::from));
     if launch.deterministic {
@@ -191,9 +201,10 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
     }
     read.extend(launch.jars.iter().cloned());
     // A container sees the paths mounted at other ones.
-    let (seen_host, seen_launch) = match host.sandbox {
-        Sandbox::Docker => container_view(&host, &launch),
-        _ => (host.clone(), launch.clone()),
+    let (seen_host, seen_launch) = if host.sandbox.is_container() {
+        container_view(&host, &launch)
+    } else {
+        (host.clone(), launch.clone())
     };
     let mut sandboxed = sandboxed(&host, read, &launch.home, launch.memory_mb)?;
     no_window(&mut sandboxed.command)
@@ -311,7 +322,7 @@ pub(crate) fn sandboxed(
     if host.sandbox == Sandbox::None {
         return Ok(sandbox::Sandboxed::plain(&host.java));
     }
-    if host.sandbox == Sandbox::Docker {
+    if host.sandbox.is_container() {
         // The container has its own Java.
         let grants = sandbox::Grants {
             runtime: PathBuf::new(),
@@ -319,7 +330,7 @@ pub(crate) fn sandboxed(
             home: home.to_path_buf(),
             memory_mb,
         };
-        return sandbox::command(Sandbox::Docker, &host.java, &grants);
+        return sandbox::command(host.sandbox, &host.java, &grants);
     }
     let (java, runtime) = sandbox::java_runtime(&host.java)?;
     read.extend(sandbox::linked_from(&runtime));
@@ -410,7 +421,11 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("DisableIntrinsic") || a.contains("javaagent"))
         );
-        assert!(!args.iter().any(|a| a.contains("headless")));
+        // Without a sandbox it may have a display, except on macOS (a Dock icon each).
+        assert_eq!(
+            args.iter().any(|a| a.contains("headless")),
+            cfg!(target_os = "macos")
+        );
         // A sandboxed robot host has no display and its temporary files in its home.
         let host = JavaHost {
             sandbox: Sandbox::Os,

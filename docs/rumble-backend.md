@@ -362,7 +362,7 @@ Slot `key` (§12.5): 1v1 `<vidLo36>#<vidHi36>`, melee `<vid36>`. Slot ids in the
 |---|---|---|---|
 | Auth lookup (cache miss, ≤ once per token per instance per 5 min) | GetItem `T#` + GetItem user | - | 1 |
 | `GET work`, normal | none (plan in memory, from S3) | 0 | 0 |
-| `GET work`, verifier | Query `V#<E>` (Limit 25, cached empty for 30 s), claim each served item (UpdateItem, condition) | 1 per item served | 0.5 |
+| `GET work`, verifier | Query `V#<E>` (pages of Limit 25, at most 40 pages, cached empty for 30 s), claim each served item (UpdateItem, condition) | 1 per item served | 0.5 |
 | `POST results` (1v1, 20 battles) | TransactWriteItems: Put `B#` (~0.3 KB), Put `R#` (20 × 24 B + keys ≈ 0.6 KB), Update user (~0.3 KB) | 2 × (1 + 1 + 1) = **6** | 0 |
 | ... same, melee, 5 battles (≈ 0.6 KB of records) | | 6 | 0 |
 | ... each battle picked for verification (rate r) | Put `V#` (~0.5 KB) | 1 | - |
@@ -440,7 +440,7 @@ V(A,B)    = gain(n) · close · mean_{r ∈ R(A,B)} ½ (contested_A,r · coverag
 ### 10.4 Serving a batch (`api`, `GET work`)
 
 1. Choose divisions: among the client's `divisions`, each with probability ∝ its `share` (1v1 0.7, melee 0.3) among those it offers; a batch is one division.
-2. If the user may verify (rep ≥ `rep.verifierMin`, state `new`): up to `⌈max/2⌉` battles from `V#<E>` (oldest first, `NOT contains(uids, me)`, unclaimed or claim expired), each claimed with a conditional UpdateItem `cl = me, cu = now + deadline`. Probation battles (§12.3) come from the same queue. Watch requests (M6) likewise.
+2. If the user may verify (rep ≥ `rep.verifierMin`, state `new`): up to `⌈max/2⌉` battles from `V#<E>` (oldest first, reading on past pages it cannot take from, at most 40 pages of 25, `NOT contains(uids, me)`, unclaimed or claim expired), each claimed with a conditional UpdateItem `cl = me, cu = now + deadline`. Probation battles (§12.3) come from the same queue. Watch requests (M6) likewise.
 3. Fill the rest from the plan: **1v1** samples pairings with probability ∝ remaining quota (an alias table rebuilt when the plan changes; the instance decrements its copy). When the instance has used its quotas, it samples the overflow quotas the same way, and after those ∝ all the quotas, so extra volunteers still get the most useful pairings. **Melee** samples an anchor ∝ remaining anchor quota (then overflow anchors, as in 1v1), then adds 9 partners one at a time, each sampled ∝ `Σ V(chosen, O)` over the anchor's and the chosen bots' partner lists (bots not yet in the battle).
 4. Seeds: 64 random bits each (`getrandom`). Robot order: shuffled.
 5. Sign the token; no write.
