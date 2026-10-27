@@ -82,6 +82,8 @@ mod tests {
             url: None,
             colors: None,
             released: None,
+            nondeterministic: None,
+            disagreements: 0,
         }
     }
 
@@ -114,6 +116,8 @@ mod tests {
             version(8, "d.NoItem", VersionState::Active),
             VersionItem {
                 released: Some(1_000_000_000_000),
+                nondeterministic: None,
+                disagreements: 0,
                 ..version(9, "e.Gone", VersionState::Delisted)
             },
         ];

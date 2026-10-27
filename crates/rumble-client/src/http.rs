@@ -7,9 +7,9 @@
 //! rejects bodies without it).
 
 use rumble_core::api::{
-    AuthTokenRequest, AuthTokenResponse, ErrorBody, ErrorCode, Info, Me, RecordingsDoneRequest,
-    RecordingsDoneResponse, ResultsRequest, ResultsResponse, SubmitRequest, SubmitResponse,
-    UploadUrlRequest, UploadUrlResponse, WorkQuery, WorkResponse,
+    AuthTokenRequest, AuthTokenResponse, ErrorBody, ErrorCode, Info, Me, NondeterministicRequest,
+    RecordingsDoneRequest, RecordingsDoneResponse, ResultsRequest, ResultsResponse, SubmitRequest,
+    SubmitResponse, UploadUrlRequest, UploadUrlResponse, WorkQuery, WorkResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -486,6 +486,11 @@ impl Api {
             "admin/bots/remove",
             &json!({ "bot": bot, "reason": reason }),
         )
+    }
+
+    /// `POST admin/bots/nd`
+    pub fn admin_nondeterministic(&self, body: &NondeterministicRequest) -> Result<Value, Error> {
+        self.post_json("admin/bots/nd", body)
     }
 
     /// `POST admin/users/update`; `body` has `uid` and any of `rep`, `state`, `admin`.

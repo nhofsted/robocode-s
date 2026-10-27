@@ -366,6 +366,9 @@ pub struct RobotResult {
     /// set any. Absent where it set none, and from clients (or robot hosts) that don't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colors: Option<BotColors>,
+    /// The robot started threads of its own: its battles aren't reproducible (ADR 0014).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub threads: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -782,6 +785,46 @@ pub struct UserUpdateRequest {
     pub admin: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trusted: Option<bool>,
+    /// `mm`: set the count of confirmed mismatches (the repair of §11.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mismatches: Option<u64>,
+    /// Empty `mmt`, the mismatch times of the ban window.
+    #[serde(
+        default,
+        rename = "clearMismatchTimes",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub clear_mismatch_times: bool,
+}
+
+/// `POST admin/bots/nd` (§11.5): flags (`reason`) or clears (absent) the nondeterministic
+/// flag of one version.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NondeterministicRequest {
+    pub bot: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A version in the answer of `admin/bots/nd`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NondeterministicVersion {
+    pub vid: u32,
+    pub bot: String,
+    pub version: String,
+    /// The flag's reason; absent for a version only counted in disagreements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Three-way disagreements the version was in.
+    pub disagreements: u32,
+}
+
+/// The answer of `GET admin/bots/nd` (versions flagged or with disagreements) and of
+/// `POST admin/bots/nd` (the one version).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NondeterministicResponse {
+    pub versions: Vec<NondeterministicVersion>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

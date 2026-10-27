@@ -399,6 +399,14 @@ pub struct VersionItem {
     /// the daily sync's first sighting on a participants list, or the archives' date
     /// (§16.5, §16.6). `None` for versions registered before.
     pub released: Option<u64>,
+    /// `nd` (new): the reason the robot's battles aren't reproducible (`threads`,
+    /// `disagreements`, or an admin's text, §11.5); `None` for a robot believed
+    /// deterministic. Set with [`Store::set_version_nondeterministic`]. A flagged version never
+    /// costs anyone reputation: its battles aren't verified.
+    pub nondeterministic: Option<String>,
+    /// `ndn` (new): three-way disagreements of verification items the version was in
+    /// ([`Store::add_version_disagreement`]); counted towards the automatic flag (§11.5).
+    pub disagreements: u32,
 }
 
 // ---- results ----
@@ -648,6 +656,12 @@ pub trait Store {
     /// confirmed colours stay). A put of the version read before replaces them, which only
     /// delays them to the next confirmed battle.
     fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()>;
+    /// UpdateItem `SET nd` (`Some`) or `REMOVE nd` (`None`), condition: the version exists
+    /// (`ConditionFailed` otherwise). A put of the version read before replaces the change,
+    /// which the next signal repeats.
+    fn set_version_nondeterministic(&self, vid: u32, reason: Option<&str>) -> StoreResult<()>;
+    /// UpdateItem `ADD ndn 1`, condition: the version exists. Returns the count afterwards.
+    fn add_version_disagreement(&self, vid: u32) -> StoreResult<u32>;
 
     // -- results --
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>>;
@@ -787,6 +801,12 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn set_version_colors(&self, vid: u32, colors: &BotColors) -> StoreResult<()> {
         (**self).set_version_colors(vid, colors)
+    }
+    fn set_version_nondeterministic(&self, vid: u32, reason: Option<&str>) -> StoreResult<()> {
+        (**self).set_version_nondeterministic(vid, reason)
+    }
+    fn add_version_disagreement(&self, vid: u32) -> StoreResult<u32> {
+        (**self).add_version_disagreement(vid)
     }
     fn get_marker(&self, batch_id: &str) -> StoreResult<Option<BatchMarker>> {
         (**self).get_marker(batch_id)
@@ -1122,6 +1142,26 @@ impl Store for MemStore {
                 Ok(())
             }
             _ => Err(StoreError::ConditionFailed),
+        })
+    }
+
+    fn set_version_nondeterministic(&self, vid: u32, reason: Option<&str>) -> StoreResult<()> {
+        self.with(|t| match t.versions.get_mut(&vid) {
+            Some(version) => {
+                version.nondeterministic = reason.map(str::to_string);
+                Ok(())
+            }
+            None => Err(StoreError::ConditionFailed),
+        })
+    }
+
+    fn add_version_disagreement(&self, vid: u32) -> StoreResult<u32> {
+        self.with(|t| match t.versions.get_mut(&vid) {
+            Some(version) => {
+                version.disagreements += 1;
+                Ok(version.disagreements)
+            }
+            None => Err(StoreError::ConditionFailed),
         })
     }
 

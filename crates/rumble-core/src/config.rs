@@ -161,6 +161,9 @@ pub struct RepConfig {
     pub recheck_on_penalty: u32,
     pub ban_mismatches: u32,
     pub ban_window_days: u32,
+    /// Three-way disagreements after which a version is flagged nondeterministic (§11.5);
+    /// 0 turns the automatic flag off.
+    pub nd_disagreements: u32,
 }
 
 impl Default for RepConfig {
@@ -175,6 +178,7 @@ impl Default for RepConfig {
             recheck_on_penalty: 20,
             ban_mismatches: 3,
             ban_window_days: 90,
+            nd_disagreements: 3,
         }
     }
 }
@@ -415,7 +419,7 @@ mod tests {
                 "rate": {"workSeconds": 10, "resultsSeconds": 5},
                 "rep": {"startRate": 0.2, "floorRate": 0.01, "tau": 40.0, "verifierMin": 50,
                         "recorderMin": 20, "quarantineMatches": 20, "recheckOnPenalty": 20,
-                        "banMismatches": 3, "banWindowDays": 90},
+                        "banMismatches": 3, "banWindowDays": 90, "ndDisagreements": 3},
                 "probation": {"battles": 10, "failShare": 0.8},
                 "slots": {"top": 50, "perSide": 5, "maxBytes": 262144},
                 "plan": {"priorVariance": {"1v1": 16.0, "melee": 25.0}, "priorWeight": 3.0,
