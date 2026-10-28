@@ -197,7 +197,8 @@ final class ThreadCalls {
                 "(Ljava/lang/Object;)V", true));
         code.add(below);
         if (frames) {
-            code.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
+            // Expanded, as the class's other frames are (WorkMeter reads them expanded).
+            code.add(new FrameNode(Opcodes.F_NEW, 1, new Object[] {"[J"}, 0, new Object[0]));
         }
         code.add(new InsnNode(Opcodes.RETURN));
         return helper;

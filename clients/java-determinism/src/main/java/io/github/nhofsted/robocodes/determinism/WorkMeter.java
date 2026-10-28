@@ -10,6 +10,7 @@ import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.IntInsnNode;
@@ -63,7 +64,8 @@ final class WorkMeter {
             return null; // interfaces: default methods stay uncounted (rare in robots)
         }
         ClassNode node = new ClassNode(Opcodes.ASM9);
-        reader.accept(node, 0);
+        // Expanded frames: a check's branch reuses the frame of the block it starts (countAndCheck).
+        reader.accept(node, ClassReader.EXPAND_FRAMES);
         boolean meter = RobotRandomness.METER_WORK;
         if (meter) {
             node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_TRANSIENT
@@ -77,7 +79,7 @@ final class WorkMeter {
             if (method.instructions.size() > 0) {
                 // Counting first: a clock call costs one JDK call, not the hook's code.
                 if (meter) {
-                    count(node.name, method);
+                    count(node.name, method, (node.version & 0xFFFF) >= Opcodes.V1_6);
                     replaceClockCalls(node.name, method.instructions);
                 }
                 IdentityHashes.replaceHashCalls(method.instructions);
@@ -289,7 +291,7 @@ final class WorkMeter {
      * {@code synchronized} handlers retry their first instructions. A check there would
      * throw into itself forever.
      */
-    private static void count(String className, MethodNode method) {
+    private static void count(String className, MethodNode method, boolean frames) {
         InsnList instructions = method.instructions;
         List<AbstractInsnNode> starts = new ArrayList<>();
         List<Long> costs = new ArrayList<>();
@@ -330,7 +332,8 @@ final class WorkMeter {
         Set<AbstractInsnNode> checked = repeatable(method);
         checked.removeAll(selfCoveredHandlers(method));
         for (int i = 0; i < starts.size(); i++) {
-            InsnList add = checked.contains(starts.get(i)) ? countAndCheck(className, costs.get(i))
+            InsnList add = checked.contains(starts.get(i))
+                    ? countAndCheck(className, costs.get(i), starts.get(i), frames)
                     : count(className, costs.get(i));
             AbstractInsnNode first = starts.get(i);
             if (first.getOpcode() == Opcodes.NEW) {
@@ -364,10 +367,32 @@ final class WorkMeter {
      * out of bounds, once the count still reaches the limit. A load: storing at a computed
      * index instead made tight loops slower still.
      */
-    private static InsnList countAndCheck(String className, long cost) {
+    private static InsnList countAndCheck(String className, long cost, AbstractInsnNode first, boolean frames) {
         InsnList add = count(className, cost);
-        add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
-        add.add(new MethodInsnNode(Opcodes.INVOKESTATIC, className, ThreadCalls.LIMIT_METHOD, "([J)V", false));
+        FrameNode frame = frames ? frameBefore(first) : null;
+        if (first.getOpcode() == Opcodes.NEW || (frames && frame == null)) {
+            // No frame to branch to (or an uninitialized object on the stack): call the helper.
+            add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+            add.add(new MethodInsnNode(Opcodes.INVOKESTATIC, className, ThreadCalls.LIMIT_METHOD, "([J)V", false));
+        } else {
+            // if (fuel[1] >= 0) robocodes$limit(fuel): inline, so the common case is a load and
+            // a compare; a call there cost BeepBoop half again its CPU time.
+            LabelNode below = new LabelNode();
+            add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+            add.add(new InsnNode(Opcodes.ICONST_1));
+            add.add(new InsnNode(Opcodes.LALOAD));
+            add.add(new InsnNode(Opcodes.LCONST_0));
+            add.add(new InsnNode(Opcodes.LCMP));
+            add.add(new JumpInsnNode(Opcodes.IFLT, below));
+            add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
+            add.add(new MethodInsnNode(Opcodes.INVOKESTATIC, className, ThreadCalls.LIMIT_METHOD, "([J)V", false));
+            add.add(below);
+            if (frame != null) {
+                // The block's own frame: the code before is stack- and locals-neutral.
+                add.add(new FrameNode(Opcodes.F_NEW, frame.local.size(), frame.local.toArray(),
+                        frame.stack.size(), frame.stack.toArray()));
+            }
+        }
         add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
         add.add(new FieldInsnNode(Opcodes.GETSTATIC, className, FIELD, "[J"));
         add.add(new InsnNode(Opcodes.ICONST_1));
@@ -382,6 +407,17 @@ final class WorkMeter {
         add.add(new InsnNode(Opcodes.LALOAD));
         add.add(new InsnNode(Opcodes.POP2));
         return add;
+    }
+
+    /** The (expanded) frame right before a block's first instruction, if any. */
+    private static FrameNode frameBefore(AbstractInsnNode first) {
+        for (AbstractInsnNode insn = first.getPrevious(); insn != null && insn.getOpcode() < 0;
+                insn = insn.getPrevious()) {
+            if (insn instanceof FrameNode frame) {
+                return frame.type == Opcodes.F_NEW ? frame : null;
+            }
+        }
+        return null;
     }
 
     /** The first instructions of loops (backward jumps' targets) and handlers. */
