@@ -24,4 +24,6 @@
 | [0020](0020-remote-runner-agents-and-tls.md) | Remote runner agents and TLS |
 | [0021](0021-rumble-backend.md) | Rumble backend: a result log folded into S3, signed batches, no work cap |
 | [0022](0022-client-updates.md) | The programs look for a newer release and install it when the user agrees |
-| [0023](0023-deterministic-robot-threads.md) | Deterministic threads for robots: one virtual CPU per robot (proposed) |
+| [0023](0023-nondeterministic-robots.md) | Robots that aren't reproducible are flagged, and their battles never penalize anyone |
+| [0024](0024-robots-that-start-threads-are-reported.md) | Robots that start threads of their own are reported |
+| [0025](0025-deterministic-robot-threads.md) | Deterministic threads for robots: one virtual CPU per robot (proposed) |

@@ -1,4 +1,4 @@
-# 0023. Deterministic threads for robots: one virtual CPU per robot
+# 0025. Deterministic threads for robots: one virtual CPU per robot
 
 - Status: Proposed (prototype; open questions below)
 - Date: 2026-10-27

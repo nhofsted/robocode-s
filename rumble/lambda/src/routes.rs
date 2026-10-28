@@ -19,10 +19,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rumble_core::api::{
     AlertInfo, AlertsResponse, ApiError, AuthTokenRequest, AuthTokenResponse, Battlefield,
     BotRequest, BotStateResponse, BotsResponse, ClaimRequest, ErrorCode, FailedSlot, ImportRequest,
-    Info, InfoDivision, MeUpdate, OkResponse, RECORDINGS_DONE_MAX_SLOTS, RecordingsDoneRequest,
-    RecordingsDoneResponse, RemoveRequest, ResultsRequest, RevokeRequest, SlotFailure,
-    SubmitRequest, SubmitSource, TokenInfo, TokensResponse, UploadUrlRequest, UploadUrlResponse,
-    UserUpdateRequest, WorkQuery,
+    Info, InfoDivision, MeUpdate, NondeterministicRequest, OkResponse, RECORDINGS_DONE_MAX_SLOTS,
+    RecordingsDoneRequest, RecordingsDoneResponse, RemoveRequest, ResultsRequest, RevokeRequest,
+    SlotFailure, SubmitRequest, SubmitSource, TokenInfo, TokensResponse, UploadUrlRequest,
+    UploadUrlResponse, UserUpdateRequest, WorkQuery,
 };
 use rumble_core::auth::{self, Authenticated, SESSION_SECONDS};
 use rumble_core::bots;
@@ -503,6 +503,8 @@ impl App {
                 | ("POST", "admin/bots/import")
                 | ("POST", "admin/bots/claim")
                 | ("POST", "admin/bots/remove")
+                | ("GET", "admin/bots/nd")
+                | ("POST", "admin/bots/nd")
                 | ("POST", "admin/users/update")
                 | ("GET", "admin/alerts")
                 | ("GET", "admin/config")
@@ -544,6 +546,10 @@ impl App {
             ("POST", "admin/bots/import") => self.import(request, &caller, &config, now_ms),
             ("POST", "admin/bots/claim") => self.claim(request),
             ("POST", "admin/bots/remove") => self.remove(request, now_ms),
+            ("GET", "admin/bots/nd") => {
+                Ok(Response::ok(&bots::list_nondeterministic(self.store())?))
+            }
+            ("POST", "admin/bots/nd") => self.set_nondeterministic(request),
             ("POST", "admin/users/update") => self.update_user(request, &config, now_ms),
             ("GET", "admin/alerts") => self.alerts(),
             ("GET", "admin/config") => self.get_config(),
@@ -1160,6 +1166,16 @@ impl App {
             state: removed.bot.state.as_str().to_string(),
             owner: removed.bot.owner,
         }))
+    }
+
+    fn set_nondeterministic(&self, request: &Request) -> Handled {
+        let body: NondeterministicRequest = request.body_json()?;
+        let answer = bots::set_nondeterministic(self.store(), &body)?;
+        println!(
+            "NONDETERMINISTIC {} {} set to {:?} by an admin",
+            body.bot, body.version, body.reason
+        );
+        Ok(Response::ok(&answer))
     }
 
     fn update_user(&self, request: &Request, config: &Config, now_ms: u64) -> Handled {

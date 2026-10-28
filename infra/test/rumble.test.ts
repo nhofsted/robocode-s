@@ -313,6 +313,12 @@ test('IAM: api cannot touch state outside config, plan and uploads, nor delete j
 	assert.match(forApi, /jars\/\*/);
 	assert.match(forApi, /rec\/\*/);
 	assert.doesNotMatch(forApi, /BatchWriteItem/);
+	// `admin config set` writes the configuration; the plan stays read-only.
+	const puts = JSON.parse(forApi).filter((statement: { Action: string | string[] }) =>
+		[statement.Action].flat().includes('s3:PutObject')
+	);
+	assert.match(JSON.stringify(puts), /state\/config\.json/);
+	assert.doesNotMatch(JSON.stringify(puts), /plan\.json/);
 	// DeleteObject on jars/* is the batch Lambda's alone.
 	for (const statement of JSON.parse(forApi)) {
 		const actions = [statement.Action].flat();

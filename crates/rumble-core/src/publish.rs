@@ -405,6 +405,8 @@ mod tests {
             url: None,
             colors: None,
             released: None,
+            nondeterministic: None,
+            disagreements: 0,
         }
     }
 
@@ -605,16 +607,22 @@ mod tests {
             version(2, "b.B", WeightClass::Mega, VersionState::Active),
             VersionItem {
                 released: Some((NOW - 400 * DAY) * 1000),
+                nondeterministic: None,
+                disagreements: 0,
                 ..version(3, "d.D", WeightClass::Mega, VersionState::Delisted)
             },
             VersionItem {
                 released: Some((NOW - 900 * DAY) * 1000),
+                nondeterministic: None,
+                disagreements: 0,
                 retired: Some(NOW - 500 * DAY),
                 ..version(4, "d.D", WeightClass::Mega, VersionState::Retired)
             },
             // Registered later, released earlier than 4: sorted by the release date.
             VersionItem {
                 released: Some((NOW - 1000 * DAY) * 1000),
+                nondeterministic: None,
+                disagreements: 0,
                 retired: Some(NOW - 900 * DAY),
                 ..version(5, "d.D", WeightClass::Mega, VersionState::Retired)
             },

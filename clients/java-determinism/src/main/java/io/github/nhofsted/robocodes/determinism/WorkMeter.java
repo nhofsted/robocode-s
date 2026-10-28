@@ -55,7 +55,7 @@ final class WorkMeter {
 
     /**
      * Adds work counting and the virtual clock to a robot class, and routes its thread calls
-     * through the robot's scheduler (ADR 0023). Null: leave unchanged.
+     * through the robot's scheduler (ADR 0025). Null: leave unchanged.
      */
     static byte[] patchRobotClass(byte[] classfileBuffer, ClassLoader loader) {
         ClassReader reader = new ClassReader(classfileBuffer);
@@ -359,7 +359,7 @@ final class WorkMeter {
 
     /**
      * The same, then {@code robocodes$limit(fuel)}, which asks the robot's scheduler once the
-     * count reaches the limit (a quantum's end for a robot with threads, ADR 0023; at the
+     * count reaches the limit (a quantum's end for a robot with threads, ADR 0025; at the
      * cutoff it changes nothing), then {@code fuel[1 + (int) (~fuel[1] >>> 63)]}: index 2,
      * out of bounds, once the count still reaches the limit. A load: storing at a computed
      * index instead made tight loops slower still.

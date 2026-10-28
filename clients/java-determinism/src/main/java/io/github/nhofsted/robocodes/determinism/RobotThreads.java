@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Deterministic threads for robots (ADR 0023): one virtual CPU per robot.
+ * Deterministic threads for robots (ADR 0025): one virtual CPU per robot.
  *
  * <p>A robot's threads that robot code started run one at a time, and the CPU changes
  * hands only at points that depend on what the robot executes, never on the machine:

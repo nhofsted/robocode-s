@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** A robot's own threads run deterministically on one virtual CPU (ADR 0023). Agent installed. */
+/** A robot's own threads run deterministically on one virtual CPU (ADR 0025). Agent installed. */
 class RobotThreadsTest {
 
     @BeforeAll

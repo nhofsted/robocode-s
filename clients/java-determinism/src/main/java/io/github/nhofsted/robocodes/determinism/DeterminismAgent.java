@@ -44,11 +44,13 @@ public final class DeterminismAgent {
 
     /**
      * Hook in classic's {@code RobotThreadManager.waitForStop()} (a {@code Predicate<Thread>}:
-     * true when the robot's threads are stopped already, ADR 0023).
+     * true when the robot's threads are stopped already, ADR 0025).
      */
     static final String STOP_KEY = "robocodes.determinism.awaitStop";
-    /** Hooks in {@code java.lang.Thread}'s {@code start()}, {@code run()} and {@code exit()} (each a {@code Consumer<Object>}). */
-    static final String THREAD_START_KEY = "robocodes.determinism.threadStart";
+    /**
+     * Hooks in {@code java.lang.Thread}'s {@code run()}, {@code exit()} and {@code interrupt()}
+     * (each a {@code Consumer<Object[]>}; {@code start} uses {@link RobotRandomness#THREAD_START_KEY}).
+     */
     static final String THREAD_RUN_KEY = "robocodes.determinism.threadRun";
     static final String THREAD_EXIT_KEY = "robocodes.determinism.threadExit";
     static final String THREAD_INTERRUPT_KEY = "robocodes.determinism.threadInterrupt";
@@ -133,11 +135,18 @@ public final class DeterminismAgent {
         System.getProperties().put(RobotRandomness.API_TRACE_KEY,
                 (java.util.function.BiConsumer<Object, Object>) RobotRandomness::traceApi);
         System.getProperties().put(STOP_KEY, (Predicate<Object>) DeterminismAgent::awaitRobotThread);
-        // Deterministic threads for robots (ADR 0023).
+        // Deterministic threads for robots (ADR 0025).
         System.getProperties().put(ThreadCalls.CALL_KEY, (Consumer<Object[]>) DeterminismAgent::threadCall);
         System.getProperties().put(ThreadCalls.LIMIT_KEY, (Consumer<Object>) RobotThreads::atLimit);
         System.getProperties().put(ThreadCalls.ENTER_KEY, (Runnable) RobotThreads::entering);
-        System.getProperties().put(THREAD_START_KEY, (Consumer<Object[]>) a -> RobotThreads.starting(a[0]));
+        // Robot threads are reported (ADR 0024); those started by robot code with start() are
+        // also scheduled (start(ThreadContainer) is how the JDK's executors start theirs).
+        System.getProperties().put(RobotRandomness.THREAD_START_KEY, (Consumer<Object[]>) a -> {
+            RobotRandomness.threadStart(a[0]);
+            if (a.length == 1) {
+                RobotThreads.starting(a[0]);
+            }
+        });
         System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object[]>) a -> RobotThreads.entering());
         System.getProperties().put(THREAD_EXIT_KEY, (Consumer<Object[]>) a -> RobotThreads.exiting(a[0]));
         System.getProperties().put(THREAD_INTERRUPT_KEY, (Consumer<Object[]>) a -> RobotThreads.interrupting(a[0]));
@@ -151,7 +160,7 @@ public final class DeterminismAgent {
         instrumentation.addTransformer(new Transformer(), true);
         instrumentation.retransformClasses(Math.class, StrictMath.class, Random.class, Enum.class, Thread.class,
                 java.util.HashMap.class, java.util.WeakHashMap.class, java.util.Hashtable.class,
-                java.util.concurrent.ConcurrentHashMap.class, java.util.Objects.class);
+                java.util.concurrent.ConcurrentHashMap.class, java.util.Objects.class, Thread.class);
         RobotRandomness.markAgentInstalled();
     }
 
@@ -346,7 +355,8 @@ public final class DeterminismAgent {
     }
 
     private static final List<ThreadHook> THREAD_HOOKS = List.of(
-            new ThreadHook("start", "()V", THREAD_START_KEY, false),
+            new ThreadHook("start", "()V", RobotRandomness.THREAD_START_KEY, false),
+            new ThreadHook("start", "(Ljdk/internal/vm/ThreadContainer;)V", RobotRandomness.THREAD_START_KEY, false),
             new ThreadHook("run", "()V", THREAD_RUN_KEY, false),
             new ThreadHook("exit", "()V", THREAD_EXIT_KEY, false),
             new ThreadHook("interrupt", "()V", THREAD_INTERRUPT_KEY, false),
@@ -356,11 +366,12 @@ public final class DeterminismAgent {
 
     /**
      * {@code java.lang.Thread}: these methods first call their hook, if it is installed, with
-     * {@code new Object[] {this (unless static), args...}}: {@code start()}, {@code run()},
+     * {@code new Object[] {this (unless static), args...}}: {@code start()} and
+     * {@code start(ThreadContainer)} (reported, ADR 0024), {@code run()},
      * {@code exit()} (which the JVM calls when a thread ends) and {@code interrupt()} a
      * {@code Consumer}; {@code sleep(long)}, {@code sleep(long, int)} and {@code join(long)}
      * (which {@code join()} and {@code join(long, int)} call) a {@code Predicate} that returns
-     * true when it did the call itself. The robot's scheduler (ADR 0023) learns of new robot
+     * true when it did the call itself. The robot's scheduler (ADR 0025) learns of new robot
      * threads, makes them wait for the CPU, hands it on when they end, and takes over robot
      * code's sleeps and joins. For other threads nothing changes, not even their stack traces.
      */
@@ -414,7 +425,8 @@ public final class DeterminismAgent {
             locals.add("java/lang/Thread");
         }
         for (Type a : args) {
-            locals.add(a.getSort() == Type.LONG ? Opcodes.LONG : Opcodes.INTEGER);
+            locals.add(a.getSort() == Type.LONG ? Opcodes.LONG
+                    : a.getSort() == Type.OBJECT ? a.getInternalName() : Opcodes.INTEGER);
         }
         Object[] frame = locals.toArray();
         Label call = new Label();
@@ -445,7 +457,7 @@ public final class DeterminismAgent {
             mv.visitVarInsn(a.getOpcode(Opcodes.ILOAD), slot);
             if (a.getSort() == Type.LONG) {
                 mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf", "(J)Ljava/lang/Long;", false);
-            } else {
+            } else if (a.getSort() == Type.INT) {
                 mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;",
                         false);
             }

@@ -30,7 +30,7 @@ import java.util.WeakHashMap;
 
 /**
  * Robot code's thread calls go through the robot's deterministic scheduler
- * ({@link RobotThreads}, ADR 0023): {@code Thread.yield} calls a synthetic helper of the
+ * ({@link RobotThreads}, ADR 0025): {@code Thread.yield} calls a synthetic helper of the
  * robot class that hands it to the scheduler, robot classes that extend {@code Thread} wait for the CPU when their
  * {@code run()} starts, and where robot code checks its work limit (ADR 0018) it first
  * asks the scheduler once the limit is reached ({@code robocodes$limit}). Applied after the
