@@ -15,6 +15,7 @@ pub mod ide;
 pub mod net;
 pub mod recording;
 pub mod results;
+pub mod skipped;
 pub mod tls;
 pub mod watch;
 
@@ -44,10 +45,6 @@ const MAX_HANDSHAKES: usize = 32;
 /// An observer from elsewhere that takes no data for this long is dropped (a stalled
 /// connection would otherwise hold the battle up: the battle loop does all writing).
 const REMOTE_OBSERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// More consecutive skipped turns disable a robot (240 for robots that did file I/O).
-const MAX_SKIPPED_TURNS: i64 = 30;
-const MAX_SKIPPED_TURNS_WITH_IO: i64 = 240;
 
 /// Deterministic mode: the counted work (as virtual time, ADR 0014) a robot may do in a
 /// turn before it skips turns. How long classic waits for a robot on the machine the
@@ -181,6 +178,9 @@ pub struct BattleOutcome {
     /// turn took longer than [`ServerConfig::hard_limit`] in real time, which depends on the
     /// machine, ADR 0025). Empty where that isn't known.
     pub hard_limits: Vec<bool>,
+    /// Per robot, by robot index: the (round, turn)s it got a `SkippedTurnEvent` for, in
+    /// order. Empty where that isn't known.
+    pub skipped_turns: Vec<Vec<(i32, i64)>>,
 }
 
 /// What became of a robot's connection in a battle.
@@ -309,6 +309,8 @@ struct Link {
     threads: bool,
     /// The hard limit disabled the robot.
     hard_limit: bool,
+    /// The turns it skipped, by round, as it learned of them ([`BattleOutcome::skipped_turns`]).
+    skipped_turns: Vec<(i32, i64)>,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -879,6 +881,11 @@ impl<'a> BattleLoop<'a> {
             .collect();
         let threads = self.links.iter().map(|l| l.threads).collect();
         let hard_limits = self.links.iter().map(|l| l.hard_limit).collect();
+        let skipped_turns = self
+            .links
+            .iter_mut()
+            .map(|l| std::mem::take(&mut l.skipped_turns))
+            .collect();
         self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
             aborted,
             rounds,
@@ -908,6 +915,7 @@ impl<'a> BattleLoop<'a> {
             connections,
             threads,
             hard_limits,
+            skipped_turns,
         })
     }
 
@@ -1281,6 +1289,7 @@ impl<'a> BattleLoop<'a> {
     /// that is still busy (skipping turns) gets them, accumulated, after its `Execute`.
     fn deliver(&mut self) {
         let turn = self.battle().time;
+        let round = self.battle().round;
         let round_over = self.battle().is_round_over();
         let budget = self.budget_nanos();
         for i in 0..self.links.len() {
@@ -1293,14 +1302,21 @@ impl<'a> BattleLoop<'a> {
             } else {
                 None
             };
-            let skipped_alive = self.battle().robots[i].is_alive();
-            if let Some(answered) = answered_late {
-                let max = if self.links[i].io_robot {
-                    MAX_SKIPPED_TURNS_WITH_IO
-                } else {
-                    MAX_SKIPPED_TURNS
-                };
-                if turn - answered - 1 > max {
+            let skipped = answered_late.map(|answered| {
+                skipped::skipped(
+                    answered,
+                    turn,
+                    self.battle().robots[i].is_alive(),
+                    self.links[i].io_robot,
+                )
+            });
+            // The turn's events come before the disable's (its death), as in classic, where
+            // the robot learns of its skipped turns and is then disabled.
+            let disabled = skipped.as_ref().is_some_and(|s| s.disable);
+            let mut turn_events = Vec::new();
+            if let Some(skipped) = &skipped {
+                if skipped.disable {
+                    turn_events = self.engine.driver.battle.take_events(i);
                     self.engine.input(Entry::DiscardCommands(i as i32));
                     self.engine.input(Entry::Disable(i as i32));
                     // Classic then stops the robot's thread: its code doesn't run again.
@@ -1326,20 +1342,26 @@ impl<'a> BattleLoop<'a> {
             if !link.active {
                 continue;
             }
-            link.events.extend(events);
+            let disable_events = if disabled {
+                events
+            } else {
+                turn_events = events;
+                Vec::new()
+            };
+            link.events.extend(turn_events);
             link.bullet_updates
                 .extend(bullets.iter().map(convert::bullet_status));
             link.team_messages
                 .extend(messages.iter().map(convert::team_message));
-            if let Some(answered) = answered_late {
+            if let Some(skipped) = skipped {
                 link.events.retain(convert::is_critical);
                 link.input.clear();
-                if skipped_alive {
-                    for skipped in answered + 1..turn {
-                        link.events.push(Event::SkippedTurn { turn: skipped });
-                    }
-                }
+                link.skipped_turns
+                    .extend(skipped.events.clone().map(|t| (round, t)));
+                link.events
+                    .extend(skipped.events.map(|turn| Event::SkippedTurn { turn }));
             }
+            link.events.extend(disable_events);
             if link.stream.is_none() || link.awaiting.is_some() {
                 continue;
             }

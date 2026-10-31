@@ -20,6 +20,7 @@ fn watched(outcome: BattleOutcome) -> BattleOutcome {
         connections: Vec::new(),
         threads: Vec::new(),
         hard_limits: Vec::new(),
+        skipped_turns: Vec::new(),
         ..outcome
     }
 }
