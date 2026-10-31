@@ -1,7 +1,7 @@
 # 0025. Deterministic threads for robots: one virtual CPU per robot
 
-- Status: Proposed (prototype; open questions below)
-- Date: 2026-10-27
+- Status: Accepted (the owner's decisions of 2026-10-31, below)
+- Date: 2026-10-27, decided 2026-10-31
 
 ## Context
 
@@ -27,7 +27,8 @@ In deterministic mode, the determinism agent gives each robot **one virtual CPU*
 - **Next thread:** the first waiting thread of the highest Java priority, round-robin among equals. Classic caps a robot's thread group at its main thread's priority (`NORM_PRIORITY - 1`), so helpers can never outrank the main thread, only yield to it: Toad's idle tree thread (priority 1) then only runs when the main thread waits.
 - **The main thread's turn:** while it runs, the robot's other threads of its priority get their quanta in turn. Their work counts toward the turn, as decided in ADR 0018.
 - **The turn's end:** where classic's robot side executes (`BasicRobotProxy.executeImpl`, before the robot's commands go out; the same code in classic and in robocode-s), the other threads that wait for the CPU run until none can, or for at most what is left of the turn's budget less a quantum, and at most 1 ms (`TURN_NANOS`, the virtual clock's time between turns for waiting on the other robots, ADR 0014). This work counts toward the turn too, but it can't by itself make the main thread late (but for running past the slice's end to the next check). A round's first turn gives none: the work before the first execute is free and isn't measured.
-- **Time:** `Thread.sleep` and timed joins wait on the robot's virtual clock (turns and counted work, ADR 0014). A sleeper wakes at the first switch point after its deadline, earliest deadline first. When nothing else can run, a sleeper wakes early: the main thread if it sleeps, otherwise the earliest deadline. Virtual time never jumps: the clock stays turns plus work. `PatternAnalyzer`'s `sleep(500)` thus wakes about every 500 turns.
+- **Time:** `Thread.sleep` and timed joins wait on the robot's virtual clock (turns and counted work, ADR 0014), for as many turns as they lasted in classic: a sleep of d lasts d × `TURN_NANOS` / `CLASSIC_TURN_NANOS` of virtual time, about d / 8 ms turns. `CLASSIC_TURN_NANOS` (8 ms) is classic's wall time per turn in the threaded robots' battles on the calibration machine of ADR 0014, measured on 2026-10-31 with the classic oracle (tools/difftest; main's agent, so their threads ran freely and slept in real time; quiet machine): TNT, Rapture and FlamingForest against lancel.Lynx 1.09 took 7.2–9.5 ms per turn (median 8.3); the Fermat melee 1.3 ms, but Fermat doesn't sleep. `PatternAnalyzer`'s `sleep(500)` thus wakes about every 62 turns. A sleeper wakes at the first switch point after its deadline, earliest deadline first. When nothing else can run, a sleeper wakes early: the main thread if it sleeps, otherwise the earliest deadline. Virtual time never jumps: the clock stays turns plus work, so a robot that times its own sleep with `nanoTime` sees it last an eighth of what it asked for.
+- **Reported threads (ADR 0024):** the robot host reports (`Execute.threads`) only threads the scheduler doesn't run: those the JDK starts for the robot (`Timer`, executors) and those robot code starts outside a scheduled thread. A robot is also reported when it has scheduled threads and one of its classes (checked as it loads) uses what the scheduler doesn't cover: `synchronized`, `wait`/`notify`, or `java.util.concurrent` classes that can block (all but its atomics and non-blocking collections). Robots whose threads are all scheduled are no longer reported, so the rumble can verify their battles again.
 - **Interrupts:** robot code's `interrupt()` sets the flag as usual; a sleeping or joining target gets in line and throws `InterruptedException` when it next runs.
 - **The round's end:** classic's `RobotThreadManager.waitForStop` first awaits the main thread (as before), then the scheduler, driven from the battle side: the other threads are interrupted 30 times (as classic does every 100 ms for 3 s), each time running until they all wait, for at most 1 ms of counted work; then they are stopped as classic did up to Java 19: a `ThreadDeath` where each next runs, with its limit at its count, so its loops throw too. A thread that still doesn't end never runs again. Classic's own wait (3 s of wall time per thread, with re-interrupts) is skipped for such robots. The next round starts without threads; the work cutoff applies to all of this.
 - **Not covered yet:** `synchronized` and `wait`/`notify` among a robot's threads, `java.util.concurrent` locks and `LockSupport`, `Timer` and executors, and JDK code that blocks while it holds the CPU (a robot thread preempted while it holds a monitor or initializes a class, which another of its threads then needs). Such a thread blocks for real while it holds the CPU and the robot hangs until the server's hard limit. No threaded corpus robot does this. The design for monitors: `DUP; hook; MONITORENTER` with ownership kept by the scheduler (the real monitor is then never contended among the robot's threads), `synchronized` methods wrapped likewise, and `wait`/`notify` as scheduler queues; `LockSupport.park`/`unpark` patched in `java.base` for the robot's threads covers `java.util.concurrent`.
@@ -35,7 +36,7 @@ In deterministic mode, the determinism agent gives each robot **one virtual CPU*
 ## Alternatives
 
 - **Run the other threads only at the turn's end, to quiescence, without preemption.** No quantum and no check helper, but a busy-waiting main thread (Toad's `while (addingInProcess) {}`) waits until its work cutoff and crashes, and a thread that never waits (Toad's tree thread) runs until the cutoff each turn. Busy-waiting needs preemption at counted points, so the quantum stays; a quiescence-only gap would also give helpers unlimited work outside the budget.
-- **Free helper work: the other threads use the time the robot waits for the others, uncounted** (after its `Execute` is sent, in `RemotePeer` and in classic's `RobotPeer`). Closest to classic on a multi-core machine, where helpers don't slow the main thread. It needs a hook in each peer and the gap's work subtracted from the counted work on both sides, and ADR 0018 decided that helper work counts. Kept as an open question.
+- **Free helper work: the other threads use the time the robot waits for the others, uncounted** (after its `Execute` is sent, in `RemotePeer` and in classic's `RobotPeer`). Closest to classic on a multi-core machine, where helpers don't slow the main thread. It needs a hook in each peer and the gap's work subtracted from the counted work on both sides, and ADR 0018 decided that helper work counts. Not chosen (decision 1).
 - **Plain round-robin, ignoring priorities** (Linux JVMs ignore them by default). Toad's idle tree thread would then take every other quantum of the main thread's turn, which would likely make it skip turns (not measured); with priorities it uses only the gap (`-Drobocodes.threadPriorities=false` switches them off, to compare).
 - **No threads in deterministic mode** (`start()` throws, or runs the thread's code synchronously). Simple, but TNT's analyzer loops forever and would hang its robot, and the eight robots lose their behaviour.
 - **A per-thread work counter** (count the main thread only): rejected in ADR 0018 for its cost.
@@ -45,38 +46,49 @@ In deterministic mode, the determinism agent gives each robot **one virtual CPU*
 
 Each classic run interleaves threads differently, so no single deterministic order is "right"; the choices above aim at classic's typical behaviour. What deterministic mode loses against classic on a multi-core machine:
 - Helper work counts toward the robot's turn (ADR 0018); in classic it runs in parallel and only the main thread is timed. Helpers get at most 1 ms per turn outside the main thread's quanta.
-- `sleep` follows the virtual clock (about 1 ms per turn plus work); in classic it depends on how fast the battle runs.
+- `sleep` lasts a fixed number of turns (d / 8 ms); in classic it depends on how fast the battle runs: against cheaper opponents, in melee, classic turns are faster and a sleep spans more of them (the Fermat melee ran 1.3 ms per turn).
 - Unfinished threads are stopped at the round's end, as by classic up to Java 19, not left running as on Java 20 and later.
 - Robot code's `Thread.stop()` throws `UnsupportedOperationException` on Java 21, in both.
 
 ## Consequences
 
-- **Measured (2026-10-27/28, robocode-s, 35 rounds, 1000×1000; recordings compared with Execute order normalized):**
+- **Reproducible (2026-10-27 to 31, robocode-s, 35 rounds, 1000×1000; recordings compared with the order of robots' `Execute`s normalized):**
 
-  | Battle | Before (agent of main) | With the scheduler |
+  | Battle | Before (agent of main) | With the scheduler (final build) |
   |---|---|---|
-  | Fermat melee (seed 5001203142733927833, 10 robots) | 12 runs: 12 different recordings and battle states (first divergence rounds 1–6); Fermat 16301.7–17997.5 | 18 runs: 1 recording; Fermat 16301.7 |
-  | TNT vs lancel.Lynx 1.09 (seed −6337020126646286513) | 7 runs: 7 different battles; TNT 1347.8–2103.0 | 12 runs: 1 recording; TNT 1815.4 |
-  | Rapture vs Lynx (same seed) | 5 runs: 5 recordings, 1 battle state (only counted work and output differed here); Rapture 2081.9 | 10 runs: 1 recording; Rapture 1266.6 |
-  | Toad vs Lynx (same seed) | 7 runs: 7 different battles (from turn 1); Toad 2255.9–2724.7 | 12 runs: 1 recording; Toad 3576.9 |
+  | Fermat melee (seed 5001203142733927833, 10 robots) | 12 runs: 12 different recordings and battle states (first divergence rounds 1–6) | 6 runs: 1 recording (18 more with earlier builds: the same) |
+  | TNT vs lancel.Lynx 1.09 (seed −6337020126646286513) | 7 runs: 7 different battles | 5 runs: 1 recording |
+  | Rapture vs Lynx (same seed) | 5 runs: 5 recordings, 1 battle state (only counted work and output differed) | 5 runs: 1 recording |
+  | Toad vs Lynx (same seed) | 7 runs: 7 different battles (from turn 1) | 5 runs: 1 recording |
   | FlamingForest vs Lynx (same seed) | 3 runs: 3 recordings, 2 battles | 5 runs: 1 recording |
   | TNT, Rapture, Toad vs Lynx, seed 2 | 3 runs each: 3 recordings each (2, 1 and 3 battles) | 3 runs each: 1 recording each |
-  | dam.MogBot 2.9, jasolo.Sonda 0.55 vs Lynx | 2 runs each: 2 battles each | 5 runs each: 1 recording each |
+  | dam.MogBot 2.9, jasolo.Sonda 0.55 vs Lynx | 2 runs each: 2 battles each | 3 runs each: 1 recording each |
 
-  The runs with the scheduler span three builds of it (before and after merging ADR 0024's patch, and with the inline check); all gave the same recordings. Most ran three battles at once on a loaded machine. Robots without threads (BeepBoop vs SandboxDT, DrussGT vs Lynx, MatchupAGF vs Shadow, SkippedTurns vs Fire, EvBotNG vs Lynx, the melee without Fermat) give recordings identical to main's (once the scratch data directory in SandboxDT's error message is masked).
-- **Cost:** on a quiet machine (4 alternating runs each), robots without threads ran +0.4 % (BeepBoop vs SandboxDT, 23.0 s vs 22.9 s median), +0.5 % (MatchupAGF vs Shadow, the tightest loops, 122.8 s vs 122.2 s) and +0.5 % (9-robot melee): within noise. The Fermat melee took 24.4 s instead of 24.6 s. TNT vs Lynx took 159–172 s instead of 145–164 s (scheduler switches, 10 % or less). Toad vs Lynx took 241–264 s instead of 268–337 s: its tree thread no longer competes for the machine's cores, it only uses the gap. A first version spent the whole spare budget on Toad's polling thread each turn (3 rounds in 52 s instead of 19 s): hence the 1 ms cap.
-- **Robots without threads are unchanged:** no scheduler, the same counts, the same results; their recordings are byte-identical to before (measured above). Their code runs one extra load and compare per loop pass, their `yield` calls go through a helper to the JDK's, and `Thread`'s patched methods check a hook first.
-- **Versions:** the outcome of battles with threaded robots changes (from irreproducible to reproducible), so by design §4.4 `ENGINE_VERSION` would be bumped, and `DETERMINISTIC_RULES` with `rulesVersion()`, so that a robot host without the scheduler is refused. Results of robots without threads don't change. Open question below.
-- **The classic oracle** runs the same agent, so its threaded robots are scheduled the same way (the hooks are in classic's robot side, `RobotThreadManager` and `java.lang.Thread`, which both share). Two oracle recordings of TNT vs Lynx (5 rounds) were byte-identical; the oracle's tests pass. TNT, Rapture and Toad, excluded from the corpus difftest as not reproducible in classic, can return to it once a corpus run confirms classic and robocode-s agree on them (not done here). That oracle battle also ends with "Unable to stop thread: lancel.Lynx 1.09" (Lynx skipped too many turns in round 3), with the agent before this change too: a separate issue.
+  Earlier builds of the scheduler (before the sleep scale) gave single recordings too, over 12–18 runs per battle. The final runs ran three battles at once, besides the test suites, on a loaded machine. None of these robots is reported as starting threads any more.
+- **Scores against classic** (classic: the oracle with main's agent, threads free; "classic, scheduled": the oracle with this agent):
 
-## Open questions
+  | Robot (35 rounds) | Classic | robocode-s before | Scheduler, sleeps 1 turn per ms | Final (d / 8 ms) | Classic, scheduled |
+  |---|---|---|---|---|---|
+  | TNT vs Lynx | 2391, 2391 | 1348–2103 | 1815.4 | 2343.1 | 2451 |
+  | Rapture vs Lynx | 2082, 2338 | 2081.9 | 1266.6 | 2142.1 | 2142 |
+  | FlamingForest vs Lynx | 2034 (a second run broke: 120) | 1913–2057 | 2186.1 | 2178.5 | 2179 |
+  | Fermat in the melee | 17998, 17998 | 16302–17998 | 16301.7 | 16301.7 | 16302 |
 
-1. **Does helper work count?** The prototype counts it, in the main thread's turn and at the turn's end (ADR 0018). The alternative gives helpers the time between turns for free, closer to classic on a multi-core machine.
-2. **How much may helpers do at a turn's end?** Prototype: the turn's spare budget less a quantum, at most 1 ms. More makes polling threads (Toad's) cost wall time; less starves helpers of a busy main thread.
-3. **Priorities:** honoured (prototype), or plain round-robin?
-4. **Quantum:** 100 µs of virtual time. Smaller interleaves more finely and switches more often (each switch costs a few µs of real time).
-5. **The round's end:** stop unfinished threads (prototype, classic up to Java 19), or keep them for the next round (classic on Java 20 and later)?
-6. **Versions:** bump `ENGINE_VERSION` and `DETERMINISTIC_RULES` (design §4.4: new rankings), or treat it as a fix for robots whose results never meant anything, bump only `DETERMINISTIC_RULES` so old hosts are refused, and keep the rankings?
-7. **Monitors, `wait`/`notify`, `java.util.concurrent`:** implement them now, or when a robot needs them, with a warning when a robot thread blocks outside the scheduler?
-8. **The report and the flag (ADR 0023, 0024):** a robot whose threads are all scheduled is reproducible, but it is still reported as starting threads, so the rumble flags it and never verifies its battles. Should the robot host report only threads the scheduler doesn't cover (executors, `Timer`, threads started from outside robot code), so these robots are verified again?
-9. **The time scale of `sleep`:** virtual time passes about 1 ms per turn (`TURN_NANOS`), so `sleep(500)` lasts about 500 turns; in the battles measured here robocode-s ran 4 to 7 ms of wall time per turn, so real-time sleeps were several times shorter in turns. Rapture's analyzer then runs less often, and Rapture scores less against Lynx (2081.9 before, 1266.6 now, above). Should sleeps follow a different scale, or is the rule's simplicity worth it?
+  With the scale, the sleeping robots score about as in classic again; classic with the scheduler gives robocode-s's results but for TNT, whose oracle battle also ends with "Unable to stop thread: lancel.Lynx 1.09" (as with main's agent: a separate issue).
+- **Robots without threads are unchanged:** no scheduler, the same counts, the same results. Their recordings are byte-identical to main's: BeepBoop vs SandboxDT, DrussGT vs Lynx, MatchupAGF vs Shadow, SkippedTurns vs Fire, EvBotNG vs Lynx and the melee without Fermat (with the scratch data directory in SandboxDT's error message masked). Their code runs one extra load and compare per loop pass, their `yield` calls go through a helper to the JDK's, and `Thread`'s patched methods check a hook first.
+- **Cost:** on a quiet machine (4 alternating runs each, median), robots without threads ran +0.4 % (BeepBoop vs SandboxDT, 23.0 s vs 22.9 s), +0.5 % (MatchupAGF vs Shadow, the tightest loops, 122.8 s vs 122.2 s) and +0.5 % (9-robot melee): within noise. A later check (3 alternating runs) gave 28.5 s against main's 29.3 s for BeepBoop; this machine has outliers of 40 s and more on either build. The Fermat melee took 24.4 s instead of 24.6 s, TNT vs Lynx 159–172 s instead of 145–164 s (10 % or less), Toad vs Lynx 241–264 s instead of 268–337 s: its tree thread no longer competes for the machine's cores, it only uses the gap. A first version spent the whole spare budget on Toad's polling thread each turn (3 rounds in 52 s instead of 19 s): hence the 1 ms cap.
+- **Versions:** `DETERMINISTIC_RULES` (server, and the rumble backend's copy in `rumble-core`) and `rulesVersion()` are 2, so a robot host without the scheduler is refused and a robot host with it isn't used with an older server. `ENGINE_VERSION` stays 1, and with it the rankings: battles of robots without threads of their own are byte-identical (above), and those of the robots with threads were never reproducible and are no-fault in the rumble (ADR 0023), so no verification compares a result of the old rules with one of the new. Design §4.4 notes the exception; the test that pins the two versions together now pins (1, 2).
+- **Rollout:** the rumble backend reports its rules (`GET info`) and clients refuse other rules, so the release with rules 2 and the backend with rules 2 go out together. The five robots flagged nondeterministic on prod (`nd`: Toad, Fermat, TNT, Rapture, FlamingForest) may be unflagged only after the rumble's `minClient` is the release carrying this change: an older client still runs them nondeterministically (and reports their threads).
+- **The classic oracle** runs the same agent, so its threaded robots are scheduled the same way (the hooks are in classic's robot side, `RobotThreadManager` and `java.lang.Thread`, which both share): see the scores above. TNT, Rapture and Toad, excluded from the corpus difftest as not reproducible in classic, can return to it once a corpus run confirms classic and robocode-s agree on them (not done here; TNT's oracle battle needs the Lynx stop issue looked at).
+
+## Decisions (the owner, 2026-10-31)
+
+1. **Helper work counts** toward the turn, in the main thread's turn and at the turn's end (ADR 0018), as proposed.
+2. **At a turn's end** helpers run for at most the turn's spare budget less a quantum, and at most 1 ms.
+3. **Priorities** are honoured.
+4. **Quantum:** 100 µs of virtual time.
+5. **The round's end:** unfinished threads are stopped (as classic up to Java 19).
+6. **Versions:** only `DETERMINISTIC_RULES` / `rulesVersion()` are bumped (to 2); `ENGINE_VERSION` and the rankings stay (Consequences).
+7. **Monitors, `wait`/`notify`, `java.util.concurrent`:** not implemented; robots that use them with threads are reported (ADR 0024), so they stay no-fault.
+8. **The report:** only threads the scheduler doesn't cover are reported, so scheduled robots become verifiable; the five flagged robots are unflagged once `minClient` carries this (Rollout).
+9. **The time scale of `sleep`:** calibrated against classic's wall time per turn (`CLASSIC_TURN_NANOS`, 8 ms), part of rules 2.

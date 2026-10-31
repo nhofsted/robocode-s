@@ -23,4 +23,4 @@ Deterministic mode (ADR 0005, 0014, 0018) makes a battle a function of its seed 
 - Old robot hosts never set the field: their robots are not flagged, as before.
 - A thread started after the server stopped reading (in the last round's `onRoundEnded`, after `BattleOver`) is lost. Robots that matter start theirs in `run` or in the first rounds; none of the corpus robots checked depend on that.
 - The classic oracle (difftest) JVM runs several robots in one process; `RobotRandomness.robotsWithThreads()` lists them by name, but nothing reports them there.
-- Reproducibility could be restored for some of these robots (a deterministic scheduler for their threads); this ADR only reports it.
+- Reproducibility could be restored for some of these robots (a deterministic scheduler for their threads); this ADR only reports it. ADR 0025 does that, and narrows the report to the threads its scheduler doesn't run deterministically.
