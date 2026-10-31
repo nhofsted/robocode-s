@@ -475,6 +475,13 @@ public final class RobotRandomness {
     }
 
     /** The work counter of the robot whose classes {@code loader} defines. */
+    /** The work counter of the robot whose classes {@code loader} defines, if it has one yet. */
+    static long[] fuelOf(ClassLoader loader) {
+        synchronized (FUEL) {
+            return FUEL.get(loader);
+        }
+    }
+
     static Object fuel(Object loader) {
         long[] fuel;
         synchronized (FUEL) {

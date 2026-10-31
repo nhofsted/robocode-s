@@ -194,7 +194,22 @@ class RobotThreadsTest {
         }
     }
 
-    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Locking.class.getName(), Busy.class.getName(), Worker.class.getName(),
+    /** Robot code that could start a virtual thread, which the scheduler doesn't cover, and starts a thread. */
+    public static final class Virtual implements Function<Object, Object> {
+        @Override
+        public Object apply(Object ignored) {
+            Thread t = new Thread(new Worker(new ArrayList<>(), "v"));
+            t.start();
+            return t;
+        }
+
+        public void never() {
+            Thread.startVirtualThread(() -> { });
+        }
+    }
+
+    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Locking.class.getName(),
+            Virtual.class.getName(), Busy.class.getName(), Worker.class.getName(),
             Interleave.class.getName(), Setter.class.getName(), Spinner.class.getName(), Sleeper.class.getName(),
             Starter.class.getName(), Interrupter.class.getName(), Stubborn.class.getName());
 
@@ -379,7 +394,12 @@ class RobotThreadsTest {
             Robot r = new Robot();
             r.code(Interrupter.class).apply(r.code(Locking.class).apply(null));
         });
-        assertTrue(RobotRandomness.robotsWithThreads().contains("sample.Fire (131)"), "it uses a monitor too");
+        assertFalse(RobotRandomness.robotsWithThreads().contains("sample.Fire (131)"), "monitors are scheduled too");
+        onRobotThread("sample.Fire (132)", () -> {
+            Robot r = new Robot();
+            r.code(Interrupter.class).apply(r.code(Virtual.class).apply(null));
+        });
+        assertTrue(RobotRandomness.robotsWithThreads().contains("sample.Fire (132)"), "virtual threads aren't");
     }
 
     @Test

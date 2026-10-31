@@ -13,10 +13,13 @@ import java.util.Map;
 /**
  * Deterministic threads for robots (ADR 0025): one virtual CPU per robot.
  *
- * <p>A robot's threads that robot code started run one at a time, and the CPU changes
+ * <p>A robot's threads (those robot code starts, also through a {@code Timer} or an
+ * executor, and the thread that starts the first) run one at a time, and the CPU changes
  * hands only at points that depend on what the robot executes, never on the machine:
  * <ul>
- *   <li>a thread blocks: {@code Thread.sleep}, {@code join}, or it ends;</li>
+ *   <li>a thread blocks: {@code Thread.sleep}, {@code join}, a monitor another of the
+ *       robot's threads holds, {@code Object.wait}, {@code LockSupport.park} (so every
+ *       {@code java.util.concurrent} lock, condition, latch and queue), or it ends;</li>
  *   <li>{@code Thread.yield}, a new thread's start (it waits in line);</li>
  *   <li>a thread used up its quantum of counted work ({@link #QUANTUM_INSTRUCTIONS}),
  *       noticed where robot code checks its work limit (loops and handlers, ADR 0018), so
@@ -26,10 +29,13 @@ import java.util.Map;
  *       time between turns ({@link #gap}).</li>
  * </ul>
  * The next thread is the first waiting one of the highest priority (round-robin among
- * equals). {@code Thread.sleep} and timed joins wait on the robot's virtual clock (ADR
- * 0014), as many turns as in classic ({@link RobotRandomness#sleepNanos}): a sleeper wakes at the first switch point after its deadline, or as soon as
- * nothing else can run. At a round's end the robot's other threads are interrupted as in
- * classic, given a bounded amount of work to end, and then stopped.
+ * equals). Monitors of robot code are owned in the scheduler too (reentrant counts), so a
+ * thread only takes a real monitor when no other of the robot's threads holds it.
+ * {@code Thread.sleep}, timed waits and parks wait on the robot's virtual clock (ADR 0014),
+ * as many turns as in classic ({@link RobotRandomness#sleepNanos}): a sleeper wakes at the
+ * first switch point after its deadline, or as soon as nothing else can run. At a round's
+ * end the robot's other threads are interrupted as in classic, given a bounded amount of
+ * work to end, and then stopped.
  *
  * <p>Robots without threads never create a scheduler: their code runs as before.
  */
@@ -63,9 +69,33 @@ final class RobotThreads {
 
     private static final Map<Thread, Task> TASKS = new IdentityHashMap<>();
     private static final Map<Thread, RobotThreads> BY_MAIN = new IdentityHashMap<>();
+    /** The current thread's task, once it runs in the scheduler. */
+    private static final ThreadLocal<Task> CURRENT = new ThreadLocal<>();
     private static volatile boolean any;
+    /** Diagnostics: {@code -Drobocodes.debugThreads=true} (to stderr) or a file to append the scheduler's events to. */
+    private static final String DEBUG_TO = System.getProperty("robocodes.debugThreads");
+    private static final boolean DEBUG = DEBUG_TO != null;
 
-    enum State { READY, RUNNING, SLEEPING, JOINING, GAP, DONE }
+    private static void debug(String what) {
+        if (!DEBUG) {
+            return;
+        }
+        String line = "[sched] " + Thread.currentThread().getName() + ": " + what;
+        if (DEBUG_TO.equals("true")) {
+            System.err.println(line);
+            return;
+        }
+        synchronized (RobotThreads.class) {
+            try {
+                java.nio.file.Files.writeString(java.nio.file.Path.of(DEBUG_TO), line + System.lineSeparator(),
+                        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+            } catch (java.io.IOException e) {
+                // diagnostics only
+            }
+        }
+    }
+
+    enum State { READY, RUNNING, SLEEPING, JOINING, BLOCKED, WAITING, PARKED, GAP, DONE }
 
     /** One of a robot's threads. */
     static final class Task {
@@ -73,9 +103,21 @@ final class RobotThreads {
         final RobotThreads cpu;
         final long id;
         State state = State.READY;
-        /** Virtual time (nanos since the robot's clock started) a sleep or timed join ends. */
+        /** Virtual time (nanos since the robot's clock started) a sleep or timed wait ends. */
         long deadline = Long.MAX_VALUE;
         Task joining;
+        /** The monitor it waits to enter, or {@code Object.wait}s on. */
+        Object monitor;
+        /** Entries of the monitor it gave up to wait, and gets back. */
+        int savedCount;
+        /** It waits in a real {@code Object.wait} on this object: getting the CPU wakes it there. */
+        Object kickOn;
+        /** It may go on (set when it gets the CPU while in a real wait). */
+        volatile boolean granted;
+        /** Inside the scheduler's own real wait: {@code Object.wait} is the JDK's then. */
+        boolean inRealWait;
+        /** {@code LockSupport}'s permit. */
+        boolean permit;
         boolean entered;
         boolean killed;
 
@@ -86,10 +128,19 @@ final class RobotThreads {
         }
     }
 
+    /** A monitor robot code entered, as the scheduler sees it. */
+    private static final class Monitor {
+        Task owner;
+        int count;
+        final ArrayDeque<Task> entrants = new ArrayDeque<>();
+        final ArrayDeque<Task> waiters = new ArrayDeque<>();
+    }
+
     private final RobotRandomness.Stream stream;
     /** Live tasks, in the order they were created. */
     private final List<Task> tasks = new ArrayList<>();
     private final ArrayDeque<Task> ready = new ArrayDeque<>();
+    private final Map<Object, Monitor> monitors = new IdentityHashMap<>();
     private long nextId;
     private Task running;
     private Task main;
@@ -104,6 +155,11 @@ final class RobotThreads {
         this.stream = stream;
     }
 
+    /** Whether any robot thread is scheduled in this JVM (a cheap first test for the hooks). */
+    static boolean active() {
+        return any;
+    }
+
     static Task task(Thread t) {
         if (!any) {
             return null;
@@ -113,11 +169,17 @@ final class RobotThreads {
         }
     }
 
+    /** The current thread's task, if it runs in the scheduler. */
+    static Task current() {
+        return any ? CURRENT.get() : null;
+    }
+
     // ---- Hooks ----
 
     /**
-     * {@code Thread.start()} (any thread): robot code on one of a robot's threads starts a
-     * thread. The new thread joins the robot's CPU and waits in line; the starting thread,
+     * {@code Thread.start()} and {@code start(ThreadContainer)} (any thread): the robot's code
+     * on one of its threads starts a thread, directly or through a {@code Timer} or an
+     * executor. The new thread joins the robot's CPU and waits in line; the starting thread,
      * which holds the CPU, goes on.
      *
      * @return whether the scheduler took the thread (then it isn't reported, ADR 0024): a
@@ -129,7 +191,7 @@ final class RobotThreads {
             return false; // start() throws
         }
         RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
-        Class<?> caller = stream == null ? null : robotCaller();
+        Class<?> caller = stream == null ? null : robotStarter();
         if (caller == null) {
             return false;
         }
@@ -160,6 +222,7 @@ final class RobotThreads {
                 self.entered = true;
                 self.state = State.RUNNING;
                 cpu.running = self;
+                CURRENT.set(self);
                 if (cpu.main == null) {
                     cpu.main = self;
                     synchronized (BY_MAIN) {
@@ -177,48 +240,97 @@ final class RobotThreads {
     }
 
     /**
-     * A robot class that uses what the scheduler doesn't cover (monitors, {@code wait} and
-     * {@code notify}, blocking {@code java.util.concurrent} classes) was loaded on one of the
-     * robot's threads: its threads may block outside the scheduler, so a robot with threads is
-     * reported as not reproducible (ADR 0024, 0025), now or when it starts one.
+     * A robot class that uses what the scheduler doesn't cover (virtual threads, {@code Unsafe}'s
+     * parking) was loaded on one of the robot's threads: such threads aren't reproducible, so
+     * the robot is reported (ADR 0024, 0025).
      */
-    static void uncovered() {
-        RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
-        if (stream == null) {
-            return;
+    static void uncovered(ClassLoader loader) {
+        synchronized (UNCOVERED) {
+            UNCOVERED.put(loader, Boolean.TRUE);
+            anyUncovered = true;
         }
-        stream.uncovered = true;
-        if (stream.threads != null) {
+        RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
+        if (stream != null && !stream.uncovered) {
+            stream.uncovered = true;
             RobotRandomness.reportThreads();
         }
     }
 
-    /**
-     * Whether the code that starts a thread is robot code: the first caller outside
-     * {@code java.lang.Thread} (and Kotlin's {@code thread {}} helpers). Threads the JDK starts
-     * for the robot (a {@code Timer}'s, an executor's) are left alone: their JDK code blocks
-     * in ways the scheduler doesn't see.
-     */
-    private static boolean calledFromRobotCode() {
-        return robotCaller() != null;
+    /** At a turn on the robot's thread: its classes, loaded elsewhere, use what isn't covered. */
+    static void checkUncovered(RobotRandomness.Stream stream) {
+        if (!anyUncovered || stream.uncovered || stream.fuel == null) {
+            return;
+        }
+        synchronized (UNCOVERED) {
+            for (ClassLoader loader : UNCOVERED.keySet()) {
+                if (RobotRandomness.fuelOf(loader) == stream.fuel) {
+                    stream.uncovered = true;
+                }
+            }
+        }
+        if (stream.uncovered) {
+            RobotRandomness.reportThreads();
+        }
     }
 
-    /** That caller, if it is robot code; null otherwise. */
-    private static Class<?> robotCaller() {
+    private static final Map<ClassLoader, Boolean> UNCOVERED = new java.util.WeakHashMap<>();
+    private static volatile boolean anyUncovered;
+
+    /**
+     * The robot class that starts a thread: the innermost caller outside {@code Thread}, the
+     * agent, Kotlin's helpers and the JDK's thread-starting facilities ({@code Timer},
+     * {@code java.util.concurrent}), if it is a robot class; null otherwise (the JDK starting
+     * a thread for itself, the robot host, classic).
+     */
+    private static Class<?> robotStarter() {
         return STACK.walk(frames -> frames
                 .map(StackWalker.StackFrame::getDeclaringClass)
-                .filter(c -> c != Thread.class && c != RobotThreads.class && c != DeterminismAgent.class
-                        && !c.getName().startsWith("kotlin."))
+                .filter(c -> !IdentityHashes.isRobotClassLoader(c.getClassLoader()) ? !isStarterInfrastructure(c) : true)
                 .findFirst()
                 .filter(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
                 .orElse(null));
     }
 
+    private static boolean isStarterInfrastructure(Class<?> c) {
+        String n = c.getName();
+        return c == Thread.class || isAgent(c) || n.startsWith("kotlin.") || n.equals("java.util.Timer")
+                || n.startsWith("java.util.Timer$") || n.startsWith("java.util.concurrent.")
+                || n.startsWith("jdk.internal.vm.") || n.startsWith("java.lang.System$")
+                || n.equals("java.security.AccessController");
+    }
+
+    private static boolean isAgent(Class<?> c) {
+        return c.getClassLoader() == RobotThreads.class.getClassLoader()
+                && c.getName().startsWith("io.github.nhofsted.robocodes.determinism.");
+    }
+
+    /**
+     * Whether a blocking call on a scheduled thread is the robot's: its innermost caller that
+     * isn't the JDK, Kotlin or the agent is robot code, or there is none (a thread of a
+     * {@code Timer} or an executor). The robot host's and classic's own waits on a robot's
+     * main thread (for the next turn) stay real.
+     */
+    private static boolean robotSide() {
+        return STACK.walk(frames -> frames
+                .map(StackWalker.StackFrame::getDeclaringClass)
+                .filter(c -> {
+                    if (IdentityHashes.isRobotClassLoader(c.getClassLoader())) {
+                        return true;
+                    }
+                    String n = c.getName();
+                    return !(isAgent(c) || n.startsWith("java.") || n.startsWith("jdk.") || n.startsWith("sun.")
+                            || n.startsWith("com.sun.") || n.startsWith("kotlin."));
+                })
+                .findFirst()
+                .map(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
+                .orElse(true));
+    }
+
     private static final StackWalker STACK = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
 
     /**
-     * {@code Thread.run()} and the {@code run()} of robot classes that extend {@code Thread}:
-     * a new robot thread waits for the CPU before its code runs.
+     * {@code Thread.run()} and the {@code run()} of classes that extend {@code Thread}: a new
+     * robot thread waits for the CPU before its code runs.
      */
     static void entering() {
         Task me = task(Thread.currentThread());
@@ -226,6 +338,7 @@ final class RobotThreads {
             return;
         }
         me.entered = true;
+        CURRENT.set(me);
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
             cpu.park(me);
@@ -245,6 +358,7 @@ final class RobotThreads {
         if (me == null) {
             return;
         }
+        CURRENT.remove();
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
             cpu.finish(me);
@@ -257,7 +371,7 @@ final class RobotThreads {
      */
     static void atLimit(Object f) {
         long[] fuel = (long[]) f;
-        Task me = task(Thread.currentThread());
+        Task me = current();
         if (me == null) {
             RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
             if (stream != null && stream.threads != null) {
@@ -286,8 +400,8 @@ final class RobotThreads {
      * sleeps on the virtual clock. Otherwise false: the JDK sleeps.
      */
     static boolean sleep(long millis, int nanos) throws InterruptedException {
-        Task me = task(Thread.currentThread());
-        if (me == null || !calledFromRobotCode()) {
+        Task me = current();
+        if (me == null || !robotSide()) {
             return false;
         }
         if (millis < 0) {
@@ -321,7 +435,7 @@ final class RobotThreads {
 
     /** {@code Thread.yield()} in robot code. */
     static void yieldNow() {
-        Task me = task(Thread.currentThread());
+        Task me = current();
         if (me == null) {
             Thread.yield();
             return;
@@ -335,13 +449,13 @@ final class RobotThreads {
 
     /**
      * {@code t.join(millis)} (0: without end; {@code join()} and {@code join(millis, nanos)}
-     * come here too): robot code on one of a robot's scheduled threads joins another of them.
-     * Otherwise false: the JDK joins.
+     * come here too): one of a robot's scheduled threads joins another of them. Otherwise
+     * false: the JDK joins.
      */
     static boolean join(Thread t, long millis) throws InterruptedException {
-        Task me = task(Thread.currentThread());
+        Task me = current();
         Task target = task(t);
-        if (me == null || target == null || target.cpu != me.cpu || target == me || !calledFromRobotCode()) {
+        if (me == null || target == null || target.cpu != me.cpu || target == me || !robotSide()) {
             return false;
         }
         if (millis < 0) {
@@ -373,24 +487,251 @@ final class RobotThreads {
 
     /**
      * {@code t.interrupt()}, before it sets the flag: one of a robot's threads interrupts
-     * another that sleeps or joins, which then gets the CPU in line (and throws when it runs).
+     * another that sleeps, joins, waits or parks, which then gets the CPU in line (and throws,
+     * or returns from parking, when it runs).
      */
     static void interrupting(Object o) {
         if (!any) {
             return;
         }
         Task target = task((Thread) o);
-        Task me = task(Thread.currentThread());
+        Task me = current();
         if (target == null || me == null || target.cpu != me.cpu) {
             return;
         }
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
-            if (cpu.running == me && (target.state == State.SLEEPING || target.state == State.JOINING)) {
-                cpu.makeReady(target);
+            if (cpu.running == me) {
+                cpu.wake(target);
             }
         }
     }
+
+    // ---- Monitors, wait and notify, LockSupport ----
+
+    /**
+     * Robot code enters {@code o}'s monitor (before its {@code monitorenter}): if another of
+     * the robot's threads holds it, this one gives the CPU on and waits in line, so the real
+     * monitor is free when it gets there.
+     */
+    static void monitorEnter(Object o) {
+        Task me = current();
+        if (me == null || o == null) {
+            return;
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            Monitor m = cpu.monitors.computeIfAbsent(o, k -> new Monitor());
+            if (m.owner == null) {
+                m.owner = me;
+                m.count = 1;
+            } else if (m.owner == me) {
+                m.count++;
+            } else {
+                debug("blocked, owner " + m.owner.thread.getName());
+                me.state = State.BLOCKED;
+                me.monitor = o;
+                m.entrants.addLast(me);
+                cpu.dispatch();
+                cpu.park(me);
+                me.monitor = null;
+            }
+        }
+        checkKilled(me);
+    }
+
+    /** Robot code left {@code o}'s monitor (after its {@code monitorexit}). */
+    static void monitorExit(Object o) {
+        Task me = current();
+        if (me == null || o == null) {
+            return;
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            Monitor m = cpu.monitors.get(o);
+            if (m == null || m.owner != me) {
+                return; // entered before the scheduler knew the thread
+            }
+            if (--m.count == 0) {
+                cpu.release(o, m);
+            }
+        }
+    }
+
+    /**
+     * {@code o.wait(timeout)} on a scheduled thread (robot code, or the JDK's code on a thread
+     * of the robot's {@code Timer} or executor): the thread gives up the monitor (also in the
+     * scheduler) and the CPU, and waits in line on {@code o}, first come first served, until a
+     * {@code notify}, an interrupt or its deadline on the virtual clock; then it waits for the
+     * monitor and the CPU. It waits in a real {@code o.wait()} meanwhile, so the JVM releases
+     * and restores the real monitor. Otherwise false: the JDK waits.
+     */
+    static boolean waiting(Object o, long timeout) throws InterruptedException {
+        Task me = current();
+        if (me == null || me.inRealWait || o instanceof RobotThreads || timeout < 0 || !Thread.holdsLock(o)
+                || (o instanceof Thread th && task(th) == null) || !robotSide()) {
+            return false;
+        }
+        if (Thread.interrupted()) {
+            throw new InterruptedException();
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            Monitor m = cpu.monitors.computeIfAbsent(o, k -> new Monitor());
+            // In line first: releasing an otherwise unused monitor forgets it.
+            m.waiters.addLast(me);
+            me.savedCount = m.owner == me ? m.count : 0;
+            if (m.owner == me) {
+                m.count = 0;
+                cpu.release(o, m);
+            }
+            me.monitor = o;
+            me.kickOn = o;
+            me.granted = false;
+            me.deadline = timeout == 0 ? Long.MAX_VALUE
+                    : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(
+                            timeout > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : timeout * 1_000_000));
+            me.state = State.WAITING;
+            debug("wait saved=" + me.savedCount);
+            cpu.dispatch();
+        }
+        boolean interrupted = false;
+        me.inRealWait = true;
+        try {
+            while (!me.granted) {
+                try {
+                    o.wait();
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            me.inRealWait = false;
+        }
+        me.granted = false;
+        me.monitor = null;
+        me.deadline = Long.MAX_VALUE;
+        checkKilled(me);
+        if (interrupted || Thread.interrupted()) {
+            Thread.interrupted();
+            throw new InterruptedException();
+        }
+        return true;
+    }
+
+    /**
+     * Before {@code o.notify()} or {@code notifyAll()} (robot code, and the JDK's code of
+     * {@code Timer} and {@code java.util.concurrent}): the first (or every) one of the robot's
+     * threads that waits on {@code o} waits for the monitor and the CPU instead.
+     */
+    static void notifying(Object o, boolean all) {
+        Task me = current();
+        if (me == null || o == null) {
+            return;
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            Monitor m = cpu.monitors.get(o);
+            if (m == null) {
+                return;
+            }
+            debug("notify all=" + all + " waiters=" + m.waiters.size());
+            do {
+                Task w = m.waiters.pollFirst();
+                if (w == null) {
+                    break;
+                }
+                cpu.reacquire(w, o, m);
+            } while (all);
+        }
+    }
+
+    /**
+     * {@code LockSupport.park}/{@code parkNanos}/{@code parkUntil} on a scheduled thread:
+     * parks in the scheduler, on the virtual clock. {@code nanos} below 0: without end.
+     * Otherwise false: the JDK parks.
+     */
+    static boolean parking(long nanos, boolean absoluteMillis) {
+        Task me = current();
+        if (me == null || !robotSide()) {
+            return false;
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            if (me.permit) {
+                me.permit = false;
+            } else if (!me.thread.isInterrupted()) {
+                long duration = nanos;
+                if (absoluteMillis) {
+                    long left = nanos - classicMillis(cpu);
+                    duration = left <= 0 ? 0 : left > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : left * 1_000_000;
+                }
+                if (duration != 0) {
+                    me.deadline = duration < 0 ? Long.MAX_VALUE
+                            : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(duration));
+                    me.state = State.PARKED;
+                    cpu.dispatch();
+                    cpu.park(me);
+                    me.deadline = Long.MAX_VALUE;
+                }
+            }
+        }
+        checkKilled(me);
+        return true;
+    }
+
+    /** {@code LockSupport.unpark(t)} from a scheduled thread to one of its robot's: true if done here. */
+    static boolean unparking(Thread t) {
+        Task me = current();
+        Task target = t == null ? null : task(t);
+        if (me == null || target == null || target.cpu != me.cpu) {
+            return false;
+        }
+        RobotThreads cpu = me.cpu;
+        synchronized (cpu) {
+            if (target.state == State.PARKED) {
+                cpu.makeReady(target);
+            } else {
+                target.permit = true;
+            }
+        }
+        return true;
+    }
+
+    /** {@code System.nanoTime()} in the JDK's {@code Timer} and {@code java.util.concurrent}: on a scheduled thread the virtual clock, in classic's time (ADR 0025). */
+    static long nanoTime() {
+        Task me = current();
+        if (me == null) {
+            return System.nanoTime();
+        }
+        synchronized (me.cpu) {
+            return RobotRandomness.NANO_ORIGIN + classicElapsed(me.cpu);
+        }
+    }
+
+    /** {@code System.currentTimeMillis()} there, likewise. */
+    static long currentTimeMillis() {
+        Task me = current();
+        if (me == null) {
+            return System.currentTimeMillis();
+        }
+        synchronized (me.cpu) {
+            return classicMillis(me.cpu);
+        }
+    }
+
+    private static long classicMillis(RobotThreads cpu) {
+        return RobotRandomness.EPOCH_MILLIS + classicElapsed(cpu) / 1_000_000;
+    }
+
+    /** The robot's virtual time scaled to classic's: a virtual turn is a classic turn. */
+    private static long classicElapsed(RobotThreads cpu) {
+        long now = cpu.now();
+        return now / RobotRandomness.TURN_NANOS * RobotRandomness.CLASSIC_TURN_NANOS
+                + now % RobotRandomness.TURN_NANOS * RobotRandomness.CLASSIC_TURN_NANOS / RobotRandomness.TURN_NANOS;
+    }
+
+    // ---- Turns and rounds ----
 
     /**
      * The robot's turn ends (classic's robot side executes, on the main thread): the turn's
@@ -399,13 +740,14 @@ final class RobotThreads {
      * {@link #GAP_INSTRUCTIONS}.
      */
     static void turn(RobotRandomness.Stream stream, long[] fuel) {
+        checkUncovered(stream);
         stream.cutoffAt = RobotRandomness.count(fuel) + RobotRandomness.CUTOFF_INSTRUCTIONS;
         RobotThreads cpu = stream.threads;
         if (cpu == null) {
             RobotRandomness.limit(fuel, stream.cutoffAt);
             return;
         }
-        Task me = task(Thread.currentThread());
+        Task me = current();
         synchronized (cpu) {
             if (me != null && me == cpu.main && cpu.running == me) {
                 cpu.gap(me);
@@ -444,17 +786,25 @@ final class RobotThreads {
             for (int pulse = 0; pulse < END_PULSES && cpu.hasLive(); pulse++) {
                 for (Task t : List.copyOf(cpu.tasks)) {
                     t.thread.interrupt();
-                    if (t.state == State.SLEEPING || t.state == State.JOINING) {
-                        cpu.makeReady(t);
-                    }
+                    cpu.wake(t);
                 }
                 cpu.drive();
             }
             if (cpu.hasLive()) {
                 for (Task t : List.copyOf(cpu.tasks)) {
                     t.killed = true;
-                    if (t.state == State.SLEEPING || t.state == State.JOINING) {
+                    if (t.state == State.BLOCKED) {
+                        // Waiting for a monitor: it throws before it enters.
+                        Monitor m = cpu.monitors.get(t.monitor);
+                        if (m != null) {
+                            m.entrants.remove(t);
+                        }
+                        if (t.savedCount > 0) {
+                            t.savedCount = 0;
+                        }
                         cpu.makeReady(t);
+                    } else {
+                        cpu.wake(t);
                     }
                 }
                 cpu.drive();
@@ -468,6 +818,7 @@ final class RobotThreads {
             }
             cpu.tasks.clear();
             cpu.ready.clear();
+            cpu.monitors.clear();
             cpu.driving = false;
             cpu.running = null;
             cpu.main = null;
@@ -515,12 +866,63 @@ final class RobotThreads {
         ready.addLast(t);
     }
 
-    /** Sleepers and timed joins whose deadline passed get in line, earliest first. */
+    /**
+     * A sleeping, joining, waiting or parked task's wait ends (its deadline, an interrupt, the
+     * round's end): it gets in line, a waiter first for its monitor.
+     */
+    private void wake(Task t) {
+        switch (t.state) {
+            case SLEEPING, JOINING, PARKED -> makeReady(t);
+            case WAITING -> {
+                Monitor m = monitors.get(t.monitor);
+                if (m != null) {
+                    m.waiters.remove(t);
+                    reacquire(t, t.monitor, m);
+                } else {
+                    makeReady(t);
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    /** A waiter is done waiting: it gets the monitor back (now, or in line) and then the CPU. */
+    private void reacquire(Task w, Object o, Monitor m) {
+        if (w.savedCount == 0) {
+            makeReady(w); // a monitor the scheduler doesn't own (the JDK's code)
+        } else if (m.owner == null) {
+            m.owner = w;
+            m.count = w.savedCount;
+            w.savedCount = 0;
+            makeReady(w);
+        } else {
+            w.state = State.BLOCKED;
+            m.entrants.addLast(w);
+        }
+    }
+
+    /** The owner left the monitor: the first in line gets it (and the CPU in line). */
+    private void release(Object o, Monitor m) {
+        m.owner = null;
+        Task next = m.entrants.pollFirst();
+        debug("release to " + (next == null ? null : next.thread.getName()));
+        if (next != null) {
+            m.owner = next;
+            m.count = next.savedCount > 0 ? next.savedCount : 1;
+            next.savedCount = 0;
+            makeReady(next);
+        } else if (m.waiters.isEmpty()) {
+            monitors.remove(o);
+        }
+    }
+
+    /** Sleepers and timed waits whose deadline passed get in line, earliest first. */
     private void wakeDue() {
         long now = -1;
         List<Task> due = null;
         for (Task t : tasks) {
-            if ((t.state == State.SLEEPING || t.state == State.JOINING) && t.deadline != Long.MAX_VALUE) {
+            if (timed(t)) {
                 if (now < 0) {
                     now = now();
                 }
@@ -534,8 +936,13 @@ final class RobotThreads {
         }
         if (due != null) {
             due.sort(Comparator.<Task>comparingLong(t -> t.deadline).thenComparingLong(t -> t.id));
-            due.forEach(this::makeReady);
+            due.forEach(this::wake);
         }
+    }
+
+    private static boolean timed(Task t) {
+        return (t.state == State.SLEEPING || t.state == State.JOINING || t.state == State.WAITING
+                || t.state == State.PARKED) && t.deadline != Long.MAX_VALUE;
     }
 
     private static int priority(Task t) {
@@ -557,9 +964,22 @@ final class RobotThreads {
     }
 
     private void grant(Task next) {
+        debug("grant " + next.thread.getName() + " kick=" + (next.kickOn != null));
         running = next;
         next.state = State.RUNNING;
         setLimit(next);
+        Object kick = next.kickOn;
+        if (kick != null) {
+            // It waits in a real wait on the object: wake it there. Nobody else of the robot
+            // holds that monitor now, and the waiter doesn't take this one while it holds it.
+            // The waiter only looks at granted while it holds the object's monitor: it can't
+            // go on before this hand-over is done (a real notify may have woken it already).
+            next.kickOn = null;
+            synchronized (kick) {
+                next.granted = true;
+                kick.notifyAll();
+            }
+        }
         notifyAll();
     }
 
@@ -600,11 +1020,25 @@ final class RobotThreads {
             next = gapOwner;
         }
         if (next == null && !driving) {
-            next = wakeEarly();
+            Task early = wakeEarly();
+            if (early != null) {
+                wake(early);
+                next = takeNext(Integer.MIN_VALUE);
+            }
         }
         if (next == null) {
             if (!driving && gapOwner == null && main != null && main.state != State.DONE) {
                 System.err.println("robocode-s: the robot's threads all wait for each other");
+                if (DEBUG) {
+                    for (Task t : tasks) {
+                        debug("  " + t.thread.getName() + " " + t.state + " monitor=" + t.monitor
+                                + " saved=" + t.savedCount + " kick=" + t.kickOn + " granted=" + t.granted);
+                    }
+                    monitors.forEach((k, m) -> debug("  monitor " + k + " owner="
+                            + (m.owner == null ? null : m.owner.thread.getName()) + " count=" + m.count
+                            + " entrants=" + m.entrants.size() + " waiters=" + m.waiters.size()));
+                    debug("  at " + java.util.Arrays.toString(Thread.currentThread().getStackTrace()));
+                }
             }
             notifyAll();
             return;
@@ -613,13 +1047,13 @@ final class RobotThreads {
     }
 
     /**
-     * Nothing can run: the virtual clock only moves with turns and work, so a sleeper wakes
-     * early: the main thread if it sleeps, else the earliest deadline.
+     * Nothing can run: the virtual clock only moves with turns and work, so a sleeper (or a
+     * timed wait) wakes early: the main thread if it sleeps, else the earliest deadline.
      */
     private Task wakeEarly() {
         Task best = null;
         for (Task t : tasks) {
-            if ((t.state == State.SLEEPING || t.state == State.JOINING) && t.deadline != Long.MAX_VALUE) {
+            if (timed(t)) {
                 if (t == main) {
                     best = t;
                     break;
@@ -678,6 +1112,14 @@ final class RobotThreads {
         me.state = State.DONE;
         tasks.remove(me);
         ready.remove(me);
+        for (Map.Entry<Object, Monitor> e : List.copyOf(monitors.entrySet())) {
+            Monitor m = e.getValue();
+            m.entrants.remove(me);
+            m.waiters.remove(me);
+            if (m.owner == me) {
+                release(e.getKey(), m); // left by an exception the scheduler didn't see
+            }
+        }
         for (Task t : tasks) {
             if (t.state == State.JOINING && t.joining == me) {
                 makeReady(t);

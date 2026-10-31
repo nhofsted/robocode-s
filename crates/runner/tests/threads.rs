@@ -39,10 +39,15 @@ fn robots_that_start_threads_are_reported() {
         "testbots.Threads".to_string(),
         "sample.Walls".to_string(),
         "testbots.Timers".to_string(),
+        "testbots.Monitors".to_string(),
+        "testbots.Virtual".to_string(),
     ];
     let (host, battle) = prepare(&env, &robots, config, 256).unwrap();
     let local = run_local_battle(&host, &battle, None, |_| {}).unwrap();
-    // By robot index: a Timer's thread, and only that; the scheduler runs testbots.Threads'
-    // own thread deterministically.
-    assert_eq!(local.outcome.threads, [false, false, false, true]);
+    // By robot index: the scheduler runs the threads of testbots.Threads, Timers (a Timer's) and
+    // Monitors deterministically; only testbots.Virtual's virtual thread is reported.
+    assert_eq!(
+        local.outcome.threads,
+        [false, false, false, false, false, true]
+    );
 }

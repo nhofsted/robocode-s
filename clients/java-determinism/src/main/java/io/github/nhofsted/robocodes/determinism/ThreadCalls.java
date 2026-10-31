@@ -17,6 +17,7 @@ import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
@@ -69,7 +70,7 @@ final class ThreadCalls {
     /** Rewrites the class's thread calls and adds the helpers. */
     static void patch(ClassNode node, ClassLoader loader, String fuelField) {
         if (usesUncovered(node)) {
-            RobotThreads.uncovered();
+            RobotThreads.uncovered(loader);
         }
         boolean thread = isThread(loader, node.superName);
         Map<String, MethodNode> helpers = new LinkedHashMap<>();
@@ -97,41 +98,150 @@ final class ThreadCalls {
                 method.instructions.insert(enter());
             }
         }
+        boolean frames = (node.version & 0xFFFF) >= Opcodes.V1_6;
+        for (MethodNode method : List.copyOf(node.methods)) {
+            if (method.instructions.size() > 0) {
+                syncCalls(method.instructions);
+                if ((method.access & Opcodes.ACC_SYNCHRONIZED) != 0) {
+                    synchronizedMethod(node, method, frames);
+                }
+            }
+        }
         node.methods.addAll(helpers.values());
-        node.methods.add(limitHelper(fuelField, (node.version & 0xFFFF) >= Opcodes.V1_6));
+        node.methods.add(limitHelper(fuelField, frames));
+    }
+
+    private static final String SYNC = "io/github/nhofsted/robocodes/determinism/RobotSync";
+
+    /**
+     * Monitors and notifies go through the robot's scheduler ({@link RobotSync}):
+     * {@code DUP; enter; monitorenter}, {@code DUP; monitorexit; exit}, {@code DUP; notify;
+     * o.notify()}. Stack-neutral and straight-line: the frames stay valid.
+     */
+    private static void syncCalls(InsnList instructions) {
+        for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            int op = insn.getOpcode();
+            if (op == Opcodes.MONITORENTER) {
+                InsnList before = new InsnList();
+                before.add(new InsnNode(Opcodes.DUP));
+                before.add(syncCall("enter"));
+                instructions.insertBefore(insn, before);
+            } else if (op == Opcodes.MONITOREXIT) {
+                instructions.insertBefore(insn, new InsnNode(Opcodes.DUP));
+                AbstractInsnNode after = syncCall("exit");
+                instructions.insert(insn, after);
+                insn = after;
+            } else if (insn instanceof MethodInsnNode call && op == Opcodes.INVOKEVIRTUAL && call.desc.equals("()V")
+                    && (call.name.equals("notify") || call.name.equals("notifyAll"))) {
+                InsnList before = new InsnList();
+                before.add(new InsnNode(Opcodes.DUP));
+                before.add(syncCall(call.name));
+                instructions.insertBefore(insn, before);
+            }
+        }
+    }
+
+    private static MethodInsnNode syncCall(String name) {
+        return new MethodInsnNode(Opcodes.INVOKESTATIC, SYNC, name, "(Ljava/lang/Object;)V", false);
     }
 
     /**
-     * Whether the class uses what the scheduler doesn't cover: {@code synchronized},
-     * {@code wait}/{@code notify}, and {@code java.util.concurrent} classes that can block
-     * (all but its atomics and non-blocking collections).
+     * A {@code synchronized} method takes its monitor explicitly, so the scheduler sees it:
+     * {@code enter; monitorenter} first, {@code monitorexit; exit} before every return and in
+     * a handler for everything that rethrows, as javac compiles a {@code synchronized} block.
+     * In place, so stack traces stay the same. Left alone where it can't be done safely (an
+     * instance method that stores into {@code this}'s slot): its monitor is then the JVM's
+     * only.
+     */
+    private static void synchronizedMethod(ClassNode node, MethodNode method, boolean frames) {
+        boolean isStatic = (method.access & Opcodes.ACC_STATIC) != 0;
+        if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            return;
+        }
+        if (!isStatic) {
+            for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof VarInsnNode v && v.var == 0 && v.getOpcode() >= Opcodes.ISTORE
+                        && v.getOpcode() <= Opcodes.ASTORE) {
+                    return;
+                }
+            }
+        }
+        boolean ldcClass = (node.version & 0xFFFF) >= Opcodes.V1_5;
+        method.access &= ~Opcodes.ACC_SYNCHRONIZED;
+        InsnList code = method.instructions;
+        for (AbstractInsnNode insn = code.getFirst(); insn != null; insn = insn.getNext()) {
+            int op = insn.getOpcode();
+            if (op >= Opcodes.IRETURN && op <= Opcodes.RETURN) {
+                InsnList exit = new InsnList();
+                exit.add(lock(node, isStatic, ldcClass));
+                exit.add(new InsnNode(Opcodes.MONITOREXIT));
+                exit.add(lock(node, isStatic, ldcClass));
+                exit.add(syncCall("exit"));
+                code.insertBefore(insn, exit);
+            }
+        }
+        LabelNode start = new LabelNode();
+        LabelNode end = new LabelNode();
+        LabelNode handler = new LabelNode();
+        InsnList enter = new InsnList();
+        enter.add(lock(node, isStatic, ldcClass));
+        enter.add(new InsnNode(Opcodes.DUP));
+        enter.add(syncCall("enter"));
+        enter.add(new InsnNode(Opcodes.MONITORENTER));
+        enter.add(start);
+        code.insert(enter);
+        code.add(end);
+        code.add(handler);
+        if (frames) {
+            Object[] locals = isStatic ? new Object[0] : new Object[] {node.name};
+            code.add(new FrameNode(Opcodes.F_NEW, locals.length, locals, 1, new Object[] {"java/lang/Throwable"}));
+        }
+        code.add(lock(node, isStatic, ldcClass));
+        code.add(new InsnNode(Opcodes.MONITOREXIT));
+        code.add(lock(node, isStatic, ldcClass));
+        code.add(syncCall("exit"));
+        code.add(new InsnNode(Opcodes.ATHROW));
+        method.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, null));
+    }
+
+    /** Pushes a synchronized method's monitor: {@code this}, or its class. */
+    private static InsnList lock(ClassNode node, boolean isStatic, boolean ldcClass) {
+        InsnList code = new InsnList();
+        if (!isStatic) {
+            code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        } else if (ldcClass) {
+            code.add(new LdcInsnNode(Type.getObjectType(node.name)));
+        } else {
+            code.add(new LdcInsnNode(node.name.replace('/', '.')));
+            code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Class", "forName",
+                    "(Ljava/lang/String;)Ljava/lang/Class;", false));
+        }
+        return code;
+    }
+
+    /**
+     * Whether the class uses what the scheduler doesn't cover: virtual threads, and
+     * {@code Unsafe}'s parking (which bypasses {@code LockSupport}).
      */
     static boolean usesUncovered(ClassNode node) {
         for (MethodNode method : node.methods) {
-            if ((method.access & Opcodes.ACC_SYNCHRONIZED) != 0) {
-                return true;
-            }
             for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-                if (insn.getOpcode() == Opcodes.MONITORENTER) {
+                if (insn instanceof MethodInsnNode call && uncovered(call)) {
                     return true;
-                }
-                if (insn instanceof MethodInsnNode call) {
-                    if ((call.name.equals("wait") && (call.desc.equals("()V") || call.desc.equals("(J)V")
-                            || call.desc.equals("(JI)V")))
-                            || ((call.name.equals("notify") || call.name.equals("notifyAll")) && call.desc.equals("()V"))
-                            || blocking(call.owner)) {
-                        return true;
-                    }
                 }
             }
         }
         return false;
     }
 
-    private static boolean blocking(String owner) {
-        return owner.startsWith("java/util/concurrent/") && !owner.startsWith("java/util/concurrent/atomic/")
-                && !owner.startsWith("java/util/concurrent/Concurrent") && !owner.startsWith("java/util/concurrent/CopyOnWrite")
-                && !owner.equals("java/util/concurrent/ThreadLocalRandom") && !owner.equals("java/util/concurrent/TimeUnit");
+    private static boolean uncovered(MethodInsnNode call) {
+        return (call.owner.equals("java/lang/Thread") && (call.name.equals("ofVirtual")
+                || call.name.equals("startVirtualThread")))
+                || call.owner.startsWith("java/lang/Thread$Builder")
+                || (call.owner.equals("java/util/concurrent/Executors")
+                        && call.name.equals("newVirtualThreadPerTaskExecutor"))
+                || ((call.owner.equals("sun/misc/Unsafe") || call.owner.equals("jdk/internal/misc/Unsafe"))
+                        && (call.name.equals("park") || call.name.equals("unpark")));
     }
 
     private static Call match(MethodInsnNode call) {

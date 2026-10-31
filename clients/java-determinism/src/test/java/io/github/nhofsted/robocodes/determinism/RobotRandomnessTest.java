@@ -135,10 +135,10 @@ class RobotRandomnessTest {
         assertFalse(startedIn("sample.Fire", StartsThread.class, true));
         assertFalse(startedIn("jk.mega.DrussGT 3.1.16", ExtendsThread.class, true));
         assertFalse(RobotRandomness.startedThreads());
-        // A Timer, an executor: their threads aren't scheduled.
-        assertTrue(startedIn("sample.Fire (2)", StartsTimer.class, true));
-        assertTrue(startedIn("sample.Fire (3)", StartsExecutor.class, true));
-        assertTrue(RobotRandomness.startedThreads());
+        // A Timer's thread and an executor's are the robot's too: scheduled, not reported.
+        assertFalse(startedIn("sample.Fire (2)", StartsTimer.class, true));
+        assertFalse(startedIn("sample.Fire (3)", StartsExecutor.class, true));
+        assertFalse(RobotRandomness.startedThreads());
         assertFalse(RobotRandomness.robotsWithThreads().contains("Battle"));
     }
 
