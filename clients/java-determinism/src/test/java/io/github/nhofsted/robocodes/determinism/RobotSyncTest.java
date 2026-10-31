@@ -469,6 +469,7 @@ class RobotSyncTest {
         assertTrue(turns[0] >= 5 && turns[0] <= 6, "woke after " + turns[0] + " turns");
         assertEquals(turns[0], turns[1]);
         assertEquals(waited[0], waited[1]);
+        assertTrue(waited[0] >= 40_000_000 && waited[0] < 48_000_000, "waited " + waited[0]);
     }
 
     @Test
@@ -515,9 +516,9 @@ class RobotSyncTest {
                 ran[run] = (Long) field.get(timed);
             });
         }
-        // 40 ms of classic's time: 5 turns. The robot's own clock (ADR 0014) moves 1 ms a turn.
+        // 40 ms are 5 turns; the robot's clock, the Timer's too, takes classic's 8 ms a turn.
         assertTrue(turns[0] >= 5 && turns[0] <= 6, "after " + turns[0] + " turns");
-        assertTrue(ran[0] >= 5 && ran[0] <= 6, "ran " + ran[0] + " ms of the robot's clock after scheduling");
+        assertTrue(ran[0] >= 40 && ran[0] < 48, "ran " + ran[0] + " ms of the robot's clock after scheduling");
         assertEquals(turns[0], turns[1]);
         assertEquals(ran[0], ran[1]);
     }

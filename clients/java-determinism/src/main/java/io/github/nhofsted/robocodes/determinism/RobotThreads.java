@@ -32,8 +32,10 @@ import java.util.Map;
  * equals). Monitors of robot code are owned in the scheduler too (reentrant counts), so a
  * thread only takes a real monitor when no other of the robot's threads holds it.
  * {@code Thread.sleep}, timed waits and parks wait on the robot's virtual clock (ADR 0014),
- * as many turns as in classic ({@link RobotRandomness#sleepNanos}): a sleeper wakes at the
- * first switch point after its deadline, or as soon as nothing else can run. At a round's
+ * which for a robot with threads takes classic's time per turn ({@link RobotRandomness#CLASSIC_TURN_NANOS}),
+ * so they last as many turns as in classic: a sleeper wakes at the first switch point after
+ * its deadline; when nothing else can run, the clock moves to the earliest deadline (and the
+ * main thread's turn is late for the time it waited). At a round's
  * end the robot's other threads are interrupted as in classic, given a bounded amount of
  * work to end, and then stopped.
  *
@@ -210,6 +212,7 @@ final class RobotThreads {
             }
             cpu = stream.threads;
         }
+        stream.threaded();
         synchronized (cpu) {
             Task self = task(me);
             if (self == null) {
@@ -401,7 +404,11 @@ final class RobotThreads {
      */
     static boolean sleep(long millis, int nanos) throws InterruptedException {
         Task me = current();
-        if (me == null || !robotSide()) {
+        if (millis < 0 || nanos < 0 || nanos > 999_999 || Thread.currentThread().isInterrupted()) {
+            return false; // the JDK throws, with its own stack trace
+        }
+        RobotRandomness.Stream solo = me == null ? soloMain() : null;
+        if ((me == null && solo == null) || (me != null && !robotSide())) {
             return false;
         }
         if (millis < 0) {
@@ -414,12 +421,16 @@ final class RobotThreads {
             throw new InterruptedException("sleep interrupted");
         }
         long duration = millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : millis * 1_000_000 + nanos;
+        if (solo != null) {
+            soloSleep(solo, duration);
+            return true;
+        }
         RobotThreads cpu = me.cpu;
         synchronized (cpu) {
             if (duration == 0) {
                 cpu.yieldFrom(me);
             } else {
-                me.deadline = saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(duration));
+                me.deadline = saturatedAdd(cpu.now(), duration);
                 me.state = State.SLEEPING;
                 cpu.dispatch();
                 cpu.park(me);
@@ -468,8 +479,8 @@ final class RobotThreads {
         synchronized (cpu) {
             if (target.state != State.DONE) {
                 me.deadline = millis == 0 ? Long.MAX_VALUE
-                        : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(
-                                millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : millis * 1_000_000));
+                        : saturatedAdd(cpu.now(),
+                                millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : millis * 1_000_000);
                 me.joining = target;
                 me.state = State.JOINING;
                 cpu.dispatch();
@@ -568,6 +579,15 @@ final class RobotThreads {
      */
     static boolean waiting(Object o, long timeout) throws InterruptedException {
         Task me = current();
+        if (me == null && timeout > 0 && !(o instanceof RobotThreads) && Thread.holdsLock(o)
+                && !Thread.currentThread().isInterrupted()) {
+            // A robot without threads of its own: nobody of it can notify, the wait is a sleep.
+            RobotRandomness.Stream solo = soloMain();
+            if (solo != null) {
+                soloSleep(solo, timeout > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : timeout * 1_000_000);
+                return true;
+            }
+        }
         if (me == null || me.inRealWait || o instanceof RobotThreads || timeout < 0 || !Thread.holdsLock(o)
                 || (o instanceof Thread th && task(th) == null) || !robotSide()) {
             return false;
@@ -589,8 +609,7 @@ final class RobotThreads {
             me.kickOn = o;
             me.granted = false;
             me.deadline = timeout == 0 ? Long.MAX_VALUE
-                    : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(
-                            timeout > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : timeout * 1_000_000));
+                    : saturatedAdd(cpu.now(), timeout > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : timeout * 1_000_000);
             me.state = State.WAITING;
             debug("wait saved=" + me.savedCount);
             cpu.dispatch();
@@ -653,7 +672,20 @@ final class RobotThreads {
      */
     static boolean parking(long nanos, boolean absoluteMillis) {
         Task me = current();
-        if (me == null || !robotSide()) {
+        if (me == null) {
+            // A robot without threads of its own: a timed park is a sleep; nobody of it unparks.
+            RobotRandomness.Stream solo = nanos < 0 ? null : soloMain();
+            if (solo == null) {
+                return false;
+            }
+            if (!Thread.currentThread().isInterrupted()) {
+                long duration = absoluteMillis ? millisLeft(nanos, RobotRandomness.EPOCH_MILLIS
+                        + solo.elapsedNanos(RobotRandomness.count(solo.fuel)) / 1_000_000) : nanos;
+                soloSleep(solo, duration);
+            }
+            return true;
+        }
+        if (!robotSide()) {
             return false;
         }
         RobotThreads cpu = me.cpu;
@@ -661,14 +693,9 @@ final class RobotThreads {
             if (me.permit) {
                 me.permit = false;
             } else if (!me.thread.isInterrupted()) {
-                long duration = nanos;
-                if (absoluteMillis) {
-                    long left = nanos - classicMillis(cpu);
-                    duration = left <= 0 ? 0 : left > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : left * 1_000_000;
-                }
+                long duration = absoluteMillis ? millisLeft(nanos, clockMillis(cpu)) : nanos;
                 if (duration != 0) {
-                    me.deadline = duration < 0 ? Long.MAX_VALUE
-                            : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(duration));
+                    me.deadline = duration < 0 ? Long.MAX_VALUE : saturatedAdd(cpu.now(), duration);
                     me.state = State.PARKED;
                     cpu.dispatch();
                     cpu.park(me);
@@ -698,37 +725,63 @@ final class RobotThreads {
         return true;
     }
 
-    /** {@code System.nanoTime()} in the JDK's {@code Timer} and {@code java.util.concurrent}: on a scheduled thread the virtual clock, in classic's time (ADR 0025). */
+    /**
+     * {@code System.nanoTime()} in the JDK's {@code Timer} and {@code java.util.concurrent}: the
+     * robot's virtual clock, the one its own code reads (ADR 0014, 0025), on its threads.
+     */
     static long nanoTime() {
         Task me = current();
-        if (me == null) {
-            return System.nanoTime();
+        if (me != null) {
+            synchronized (me.cpu) {
+                return RobotRandomness.NANO_ORIGIN + me.cpu.now();
+            }
         }
-        synchronized (me.cpu) {
-            return RobotRandomness.NANO_ORIGIN + classicElapsed(me.cpu);
-        }
+        RobotRandomness.Stream solo = soloMain();
+        return solo == null ? System.nanoTime()
+                : RobotRandomness.NANO_ORIGIN + solo.elapsedNanos(RobotRandomness.count(solo.fuel));
     }
 
     /** {@code System.currentTimeMillis()} there, likewise. */
     static long currentTimeMillis() {
         Task me = current();
-        if (me == null) {
-            return System.currentTimeMillis();
+        if (me != null) {
+            synchronized (me.cpu) {
+                return clockMillis(me.cpu);
+            }
         }
-        synchronized (me.cpu) {
-            return classicMillis(me.cpu);
-        }
+        RobotRandomness.Stream solo = soloMain();
+        return solo == null ? System.currentTimeMillis()
+                : RobotRandomness.EPOCH_MILLIS + solo.elapsedNanos(RobotRandomness.count(solo.fuel)) / 1_000_000;
     }
 
-    private static long classicMillis(RobotThreads cpu) {
-        return RobotRandomness.EPOCH_MILLIS + classicElapsed(cpu) / 1_000_000;
+    private static long clockMillis(RobotThreads cpu) {
+        return RobotRandomness.EPOCH_MILLIS + cpu.now() / 1_000_000;
     }
 
-    /** The robot's virtual time scaled to classic's: a virtual turn is a classic turn. */
-    private static long classicElapsed(RobotThreads cpu) {
-        long now = cpu.now();
-        return now / RobotRandomness.TURN_NANOS * RobotRandomness.CLASSIC_TURN_NANOS
-                + now % RobotRandomness.TURN_NANOS * RobotRandomness.CLASSIC_TURN_NANOS / RobotRandomness.TURN_NANOS;
+    /** Nanos from {@code nowMillis} to the absolute {@code deadlineMillis}, 0 if passed. */
+    private static long millisLeft(long deadlineMillis, long nowMillis) {
+        long left = deadlineMillis - nowMillis;
+        return left <= 0 ? 0 : left > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : left * 1_000_000;
+    }
+
+    /**
+     * The main thread of a robot without threads of its own (it has no scheduler), when it
+     * blocks for the robot's code; null otherwise.
+     */
+    private static RobotRandomness.Stream soloMain() {
+        RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
+        return stream != null && stream.threads == null && stream.fuel != null && robotSide() ? stream : null;
+    }
+
+    /**
+     * A main thread sleeps {@code nanos} with nothing else of the robot to run: its clock moves
+     * on that far at once, and its turn is late as classic's would be (ADR 0025).
+     */
+    private static void soloSleep(RobotRandomness.Stream stream, long nanos) {
+        if (nanos > 0) {
+            stream.addSleep(nanos, RobotRandomness.sleepLateness(nanos));
+            debug("main sleeps " + nanos);
+        }
     }
 
     // ---- Turns and rounds ----
@@ -793,6 +846,14 @@ final class RobotThreads {
             if (cpu.hasLive()) {
                 for (Task t : List.copyOf(cpu.tasks)) {
                     t.killed = true;
+                    // Its ThreadDeath ends it quietly: the JDK would print it on the robot's
+                    // console when the thread dies, a moment that depends on the machine.
+                    Thread.UncaughtExceptionHandler previous = t.thread.getUncaughtExceptionHandler();
+                    t.thread.setUncaughtExceptionHandler((thread, e) -> {
+                        if (!isThreadDeath(e)) {
+                            previous.uncaughtException(thread, e);
+                        }
+                    });
                     if (t.state == State.BLOCKED) {
                         // Waiting for a monitor: it throws before it enters.
                         Monitor m = cpu.monitors.get(t.monitor);
@@ -811,7 +872,7 @@ final class RobotThreads {
             }
             // Those left never run again (parked in the scheduler): the next round starts afresh.
             for (Task t : List.copyOf(cpu.tasks)) {
-                System.err.println("robocode-s: robot thread " + t.thread.getName() + " did not stop");
+                debug("robot thread " + t.thread.getName() + " did not stop");
                 synchronized (TASKS) {
                     TASKS.remove(t.thread);
                 }
@@ -854,7 +915,7 @@ final class RobotThreads {
 
     /** Virtual time of the robot, without the clock's origin. */
     private long now() {
-        return RobotRandomness.elapsedNanos(stream.turns(), RobotRandomness.count(stream.fuel));
+        return stream.elapsedNanos(RobotRandomness.count(stream.fuel));
     }
 
     private long count() {
@@ -1022,13 +1083,22 @@ final class RobotThreads {
         if (next == null && !driving) {
             Task early = wakeEarly();
             if (early != null) {
+                // Nothing runs until its deadline: the clock moves there at once. While the main
+                // thread waits for it, that time makes the robot's turn late (ADR 0025).
+                long jump = early.deadline - now();
+                if (jump > 0) {
+                    boolean mainWaits = main != null && main.state != State.GAP && main.state != State.DONE
+                            && main.state != State.READY && main.state != State.RUNNING;
+                    stream.addSleep(jump, mainWaits ? RobotRandomness.sleepLateness(jump) : 0);
+                    debug("clock jumps " + jump + (mainWaits ? ", the main thread waits" : ""));
+                }
                 wake(early);
                 next = takeNext(Integer.MIN_VALUE);
             }
         }
         if (next == null) {
             if (!driving && gapOwner == null && main != null && main.state != State.DONE) {
-                System.err.println("robocode-s: the robot's threads all wait for each other");
+                debug("the robot's threads all wait for each other");
                 if (DEBUG) {
                     for (Task t : tasks) {
                         debug("  " + t.thread.getName() + " " + t.state + " monitor=" + t.monitor
@@ -1046,29 +1116,12 @@ final class RobotThreads {
         grant(next);
     }
 
-    /**
-     * Nothing can run: the virtual clock only moves with turns and work, so a sleeper (or a
-     * timed wait) wakes early: the main thread if it sleeps, else the earliest deadline.
-     */
+    /** Nothing can run: the sleeper (or timed wait) with the earliest deadline, the first of equal ones. */
     private Task wakeEarly() {
         Task best = null;
         for (Task t : tasks) {
-            if (timed(t)) {
-                if (t == main) {
-                    best = t;
-                    break;
-                }
-                if (best == null || t.deadline < best.deadline) {
-                    best = t;
-                }
-            }
-        }
-        if (best == null && main != null && main.state == State.JOINING) {
-            // The main thread joins a thread that sleeps without end: wake the sleeper.
-            for (Task t : tasks) {
-                if (t.state == State.SLEEPING && (best == null || t.deadline < best.deadline)) {
-                    best = t;
-                }
+            if (timed(t) && (best == null || t.deadline < best.deadline)) {
+                best = t;
             }
         }
         return best;
@@ -1165,8 +1218,7 @@ final class RobotThreads {
         while (running != null) {
             long left = stuckAt - System.currentTimeMillis();
             if (left <= 0) {
-                System.err.println("robocode-s: robot thread " + running.thread.getName() + " blocks outside the "
-                        + "scheduler at the round's end");
+                debug("robot thread " + running.thread.getName() + " blocks outside the scheduler at the round's end");
                 tasks.remove(running);
                 running = null;
                 break;
@@ -1185,6 +1237,11 @@ final class RobotThreads {
         if (me != null && me.killed && Thread.currentThread() == me.thread) {
             throw newThreadDeath();
         }
+    }
+
+    @SuppressWarnings({"deprecation", "removal"})
+    private static boolean isThreadDeath(Throwable e) {
+        return e instanceof ThreadDeath;
     }
 
     @SuppressWarnings({"deprecation", "removal"})

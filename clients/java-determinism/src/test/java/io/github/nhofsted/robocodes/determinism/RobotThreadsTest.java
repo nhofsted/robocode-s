@@ -208,7 +208,21 @@ class RobotThreadsTest {
         }
     }
 
-    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Locking.class.getName(),
+    /** Robot code that times its own sleep (on a robot without threads: its main thread). */
+    public static final class TimesSleep implements Function<Object, Object> {
+        @Override
+        public Object apply(Object millis) {
+            long start = System.nanoTime();
+            try {
+                Thread.sleep((Long) millis);
+            } catch (InterruptedException e) {
+                return -1L;
+            }
+            return System.nanoTime() - start;
+        }
+    }
+
+    private static final Set<String> ROBOT_CLASSES = Set.of(TimesSleep.class.getName(), BadSleep.class.getName(), Locking.class.getName(),
             Virtual.class.getName(), Busy.class.getName(), Worker.class.getName(),
             Interleave.class.getName(), Setter.class.getName(), Spinner.class.getName(), Sleeper.class.getName(),
             Starter.class.getName(), Interrupter.class.getName(), Stubborn.class.getName());
@@ -326,7 +340,8 @@ class RobotThreadsTest {
         // virtual time: it wakes at the first turn's end past 5 ms.
         assertEquals(5, 40_000_000 / RobotRandomness.CLASSIC_TURN_NANOS);
         assertTrue(first[0] >= 5 && first[0] <= 6, "woke after " + first[0] + " turns");
-        assertTrue(first[1] >= 5_000_000, "slept " + first[1] + " virtual ns");
+        // A robot with threads has classic's 8 ms a turn on its clock: it sees what it asked for.
+        assertTrue(first[1] >= 40_000_000 && first[1] < 48_000_000, "slept " + first[1] + " virtual ns");
         assertEquals(first[0], sleep(81)[0]);
         assertEquals(first[1], sleep(82)[1]);
     }
@@ -400,6 +415,59 @@ class RobotThreadsTest {
             r.code(Interrupter.class).apply(r.code(Virtual.class).apply(null));
         });
         assertTrue(RobotRandomness.robotsWithThreads().contains("sample.Fire (132)"), "virtual threads aren't");
+    }
+
+    @Test
+    void aMainThreadsSleepMovesTheClockAndMakesItsTurnLate() throws Exception {
+        long[] seen = new long[3];
+        onRobotThread("sample.Fire (140)", () -> {
+            Robot r = new Robot();
+            Function<Object, Object> code = r.code(TimesSleep.class);
+            long work = RobotRandomness.countedWorkNanos();
+            seen[0] = (Long) code.apply(80L);
+            seen[1] = RobotRandomness.countedWorkNanos() - work;
+            seen[2] = RobotRandomness.streamOfCurrentThread().threads == null ? 0 : 1;
+        });
+        // Without threads of its own: no scheduler, and no real sleep.
+        assertEquals(0, seen[2]);
+        assertTrue(seen[0] >= 80_000_000 && seen[0] < 80_100_000, "the robot sees its 80 ms: " + seen[0]);
+        // 80 ms is 10 of classic's turns: 10 budgets of lateness, so it misses about 10 turns.
+        long late = seen[1];
+        assertTrue(late >= 10 * RobotRandomness.TURN_BUDGET_NANOS && late < 10 * RobotRandomness.TURN_BUDGET_NANOS
+                + 100_000, "lateness " + late);
+        assertEquals(10, RobotRandomness.lateTurns(late, 2), "the server skips 10 of its turns");
+    }
+
+    @Test
+    void aMainThreadsSleepWithIdleHelpersMovesTheClockToo() throws Exception {
+        long[] seen = new long[2];
+        onRobotThread("sample.Fire (141)", () -> {
+            Robot r = new Robot();
+            Object helper = r.make(Stubborn.class, new Class<?>[0]); // sleeps 1 s again and again
+            r.code(Starter.class).apply(helper);
+            long work = RobotRandomness.countedWorkNanos();
+            seen[0] = (Long) r.code(TimesSleep.class).apply(80L);
+            seen[1] = RobotRandomness.countedWorkNanos() - work;
+        });
+        assertTrue(seen[0] >= 80_000_000 && seen[0] < 81_000_000, "the robot sees its 80 ms: " + seen[0]);
+        long budgets = seen[1] / RobotRandomness.TURN_BUDGET_NANOS;
+        assertTrue(budgets >= 9 && budgets <= 10, "late by " + seen[1]);
+    }
+
+    @Test
+    void helperSleepsDontMakeTheMainThreadLate() throws Exception {
+        long[] seen = new long[1];
+        onRobotThread("sample.Fire (142)", () -> {
+            Robot r = new Robot();
+            Object sleeper = r.make(Sleeper.class, new Class<?>[] {long.class}, 40L);
+            r.code(Starter.class).apply(sleeper);
+            long work = RobotRandomness.countedWorkNanos();
+            for (int n = 0; n < 10; n++) {
+                RobotRandomness.turn();
+            }
+            seen[0] = RobotRandomness.countedWorkNanos() - work;
+        });
+        assertTrue(seen[0] < RobotRandomness.TURN_BUDGET_NANOS, "only work counts: " + seen[0]);
     }
 
     @Test
