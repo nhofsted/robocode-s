@@ -69,7 +69,7 @@ Recording costs about 1% of the battle time.
 `crates/difftest` replays recordings in the robocode-s engine: it feeds each turn's recorded commands into the engine and compares robot states, bullets, remaining values and events bit for bit, reporting the first difference.
 
 ```sh
-tools/difftest/record-samples.sh /tmp/recordings          # 9 sample battles, ~12 s
+tools/difftest/record-samples.sh /tmp/recordings          # 11 sample and test-robot battles, ~15 s
 cargo run --release -p robocode-s-difftest --bin replay -- /tmp/recordings/*.jsonl.gz
 ROBOCODES_RECORDINGS=/tmp/recordings cargo test -p robocode-s-difftest
 ```
@@ -83,7 +83,7 @@ CI records the sample corpus and replays it on every push (job "Engine replay ag
 The server replay (`cargo test -p robocode-s-difftest --test server_replay`) drives the server with scripted robots that send classic's commands; a robot that classic recorded as late answers late, with as much counted work as makes the server hold its answer until the turn classic woke it in, and checks the events it then gets (the critical ones of the turns it skipped, then its `SkippedTurnEvent`s).
 
 ```sh
-./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
+./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar :robots:testbots:jar
 cargo run --release -p robocode-s-difftest --bin live -- /tmp/recordings/*.jsonl.gz
 ```
 
