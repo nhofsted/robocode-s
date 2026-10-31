@@ -11,6 +11,53 @@ use std::path::{Path, PathBuf};
 /// The pinned release.
 pub const RELEASE: &str = "jdk-21.0.12.1+1";
 
+/// What the pinned release's `release` file says it is (`IMPLEMENTOR_VERSION`).
+pub fn pinned_implementor_version() -> String {
+    format!("Temurin-{}", RELEASE.trim_start_matches("jdk-"))
+}
+
+/// Whether `java` is the pinned Temurin release (ADR 0025): its `release` file, next to
+/// `bin/`, names Eclipse Adoptium and the pinned version. The rumble needs every robot to run
+/// on the same JVM: another build of the same version (a distribution's OpenJDK) may compile
+/// and round differently in ways that change battles.
+pub fn check_pinned(java: &Path) -> Result<(), String> {
+    let resolved = fs::canonicalize(java).map_err(|e| format!("{}: {e}", java.display()))?;
+    let home = resolved
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| format!("{}: not in a Java runtime's bin/", resolved.display()))?;
+    let release = fs::read_to_string(home.join("release"))
+        .map_err(|e| format!("{}: no release file ({e})", home.display()))?;
+    let value = |key: &str| {
+        release.lines().find_map(|line| {
+            line.strip_prefix(key)
+                .and_then(|v| v.strip_prefix('='))
+                .map(|v| v.trim().trim_matches('"').to_string())
+        })
+    };
+    let implementor = value("IMPLEMENTOR").unwrap_or_default();
+    let version = value("IMPLEMENTOR_VERSION").unwrap_or_default();
+    let wanted = pinned_implementor_version();
+    if implementor == "Eclipse Adoptium" && version == wanted {
+        return Ok(());
+    }
+    let found = if version.is_empty() {
+        value("JAVA_RUNTIME_VERSION").unwrap_or_else(|| "unknown".into())
+    } else {
+        version
+    };
+    Err(format!(
+        "{} is {} {found}; the rumble runs robots on {wanted} (Eclipse Adoptium) only: leave \
+         --java and $ROBOCODES_JAVA unset to use the pinned JRE",
+        java.display(),
+        if implementor.is_empty() {
+            "a Java"
+        } else {
+            &implementor
+        },
+    ))
+}
+
 /// One downloadable JRE package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Package {
@@ -135,6 +182,48 @@ fn find_java(dir: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fake Java runtime: `bin/java` and a `release` file with `lines`.
+    fn fake_java(name: &str, lines: &str) -> PathBuf {
+        let home =
+            std::env::temp_dir().join(format!("robocode-s-jre-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(home.join("bin")).unwrap();
+        fs::write(home.join("bin").join("java"), "").unwrap();
+        fs::write(home.join("release"), lines).unwrap();
+        home.join("bin").join("java")
+    }
+
+    #[test]
+    fn only_the_pinned_temurin_is_accepted() {
+        let pinned = fake_java(
+            "pinned",
+            &format!(
+                "IMPLEMENTOR=\"Eclipse Adoptium\"\nIMPLEMENTOR_VERSION=\"{}\"\n",
+                pinned_implementor_version()
+            ),
+        );
+        assert_eq!(pinned_implementor_version(), "Temurin-21.0.12.1+1");
+        assert_eq!(check_pinned(&pinned), Ok(()));
+        // The same version of another build (a distribution's OpenJDK).
+        let ubuntu = fake_java(
+            "ubuntu",
+            "IMPLEMENTOR=\"Ubuntu\"\nJAVA_RUNTIME_VERSION=\"21.0.12.1+1-1-26.04.4-Ubuntu\"\n",
+        );
+        let why = check_pinned(&ubuntu).unwrap_err();
+        assert!(
+            why.contains("Ubuntu 21.0.12.1+1-1-26.04.4-Ubuntu")
+                && why.contains("Temurin-21.0.12.1+1"),
+            "{why}"
+        );
+        // Another Temurin release.
+        let older = fake_java(
+            "older",
+            "IMPLEMENTOR=\"Eclipse Adoptium\"\nIMPLEMENTOR_VERSION=\"Temurin-21.0.4+7\"\n",
+        );
+        assert!(check_pinned(&older).is_err());
+        assert!(check_pinned(Path::new("/no/such/java")).is_err());
+    }
 
     #[test]
     fn verify_checks_sha256() {

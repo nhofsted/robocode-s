@@ -740,6 +740,12 @@ impl Contributor {
                  has {slots}); add slots with --parallel, or choose 1v1"
             )));
         }
+        // Rumble battles run on the pinned JRE (a container brings its own, the same release).
+        if let Some(java) = &config.options.env.java
+            && !config.options.env.sandbox.is_container()
+        {
+            robocode_s_runner::jre::check_pinned(java).map_err(Fatal::Host)?;
+        }
         let runner = Runner::new(config.options.clone()).map_err(Fatal::Sandbox)?;
         let me = api.me().map_err(|e| {
             fatal_of(&e)
