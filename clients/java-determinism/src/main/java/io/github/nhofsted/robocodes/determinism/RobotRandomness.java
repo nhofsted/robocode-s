@@ -153,7 +153,8 @@ public final class RobotRandomness {
      * method, so callers get this jar's value, not one javac copied into them.
      */
     public static int rulesVersion() {
-        return 1;
+        // 2: robots' own threads on one virtual CPU per robot, sleeps on the virtual clock (ADR 0025).
+        return 2;
     }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
@@ -519,6 +520,29 @@ public final class RobotRandomness {
     }
 
     /**
+     * Reports the robot of the current thread as starting threads that aren't reproducible
+     * (ADR 0024): its threads use what the scheduler doesn't cover (ADR 0025).
+     */
+    static void reportThreads() {
+        RobotRandomness randomness = current;
+        if (randomness == null) {
+            return;
+        }
+        for (ThreadGroup group = Thread.currentThread().getThreadGroup(); group != null; group = group.getParent()) {
+            String name = group.getName();
+            if (randomness.isRobot(name)) {
+                if (THREAD_STARTERS.add(name)) {
+                    Runnable listener = threadListener;
+                    if (listener != null) {
+                        listener.run();
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    /**
      * Whether the robot's own code asked for the thread being started: the innermost frame
      * that is neither {@code Thread} nor one of the JDK's thread-starting facilities
      * ({@code Timer}, executors) is a class of a robot class loader. The JDK starts threads
@@ -776,6 +800,8 @@ public final class RobotRandomness {
         volatile long cutoffAt;
         /** Count when its main thread's last turn ended, for the turn's spare budget (ADR 0025). */
         long turnStart;
+        /** Whether a class of the robot uses what its threads' scheduler doesn't cover (ADR 0025). */
+        volatile boolean uncovered;
         /** Calibration: clock reads, and the CPU time of the robot's threads at its turns. */
         long clockReads;
         long cpuNanos;

@@ -119,15 +119,26 @@ final class RobotThreads {
      * {@code Thread.start()} (any thread): robot code on one of a robot's threads starts a
      * thread. The new thread joins the robot's CPU and waits in line; the starting thread,
      * which holds the CPU, goes on.
+     *
+     * @return whether the scheduler took the thread (then it isn't reported, ADR 0024): a
+     *     robot that also uses what the scheduler doesn't cover is reported here instead
      */
-    static void starting(Object o) {
+    static boolean starting(Object o) {
         Thread t = (Thread) o;
         if (t.getState() != Thread.State.NEW) {
-            return; // start() throws
+            return false; // start() throws
         }
         RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
-        if (stream == null || stream.fuel == null || !calledFromRobotCode()) {
-            return;
+        Class<?> caller = stream == null ? null : robotCaller();
+        if (caller == null) {
+            return false;
+        }
+        if (stream.fuel == null) {
+            // The robot's classes were initialized on another thread: its counter by its loader.
+            RobotRandomness.fuel(caller.getClassLoader());
+        }
+        if (stream.uncovered) {
+            RobotRandomness.reportThreads();
         }
         Thread me = Thread.currentThread();
         RobotThreads cpu;
@@ -143,7 +154,7 @@ final class RobotThreads {
                 if (cpu.running != null) {
                     // Another of the robot's threads holds the CPU: this one runs outside the
                     // scheduler (robot code on a thread it didn't start), so does its child.
-                    return;
+                    return false;
                 }
                 self = cpu.register(me);
                 self.entered = true;
@@ -156,11 +167,29 @@ final class RobotThreads {
                     }
                 }
             } else if (self.cpu != cpu || cpu.running != self) {
-                return;
+                return false;
             }
             Task task = cpu.register(t);
             cpu.ready.addLast(task);
             cpu.setLimit(self);
+        }
+        return true;
+    }
+
+    /**
+     * A robot class that uses what the scheduler doesn't cover (monitors, {@code wait} and
+     * {@code notify}, blocking {@code java.util.concurrent} classes) was loaded on one of the
+     * robot's threads: its threads may block outside the scheduler, so a robot with threads is
+     * reported as not reproducible (ADR 0024, 0025), now or when it starts one.
+     */
+    static void uncovered() {
+        RobotRandomness.Stream stream = RobotRandomness.streamOfCurrentThread();
+        if (stream == null) {
+            return;
+        }
+        stream.uncovered = true;
+        if (stream.threads != null) {
+            RobotRandomness.reportThreads();
         }
     }
 
@@ -171,13 +200,18 @@ final class RobotThreads {
      * in ways the scheduler doesn't see.
      */
     private static boolean calledFromRobotCode() {
+        return robotCaller() != null;
+    }
+
+    /** That caller, if it is robot code; null otherwise. */
+    private static Class<?> robotCaller() {
         return STACK.walk(frames -> frames
                 .map(StackWalker.StackFrame::getDeclaringClass)
                 .filter(c -> c != Thread.class && c != RobotThreads.class && c != DeterminismAgent.class
                         && !c.getName().startsWith("kotlin."))
                 .findFirst()
-                .map(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
-                .orElse(false));
+                .filter(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
+                .orElse(null));
     }
 
     private static final StackWalker STACK = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);

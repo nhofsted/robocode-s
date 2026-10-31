@@ -139,12 +139,12 @@ public final class DeterminismAgent {
         System.getProperties().put(ThreadCalls.CALL_KEY, (Consumer<Object[]>) DeterminismAgent::threadCall);
         System.getProperties().put(ThreadCalls.LIMIT_KEY, (Consumer<Object>) RobotThreads::atLimit);
         System.getProperties().put(ThreadCalls.ENTER_KEY, (Runnable) RobotThreads::entering);
-        // Robot threads are reported (ADR 0024); those started by robot code with start() are
-        // also scheduled (start(ThreadContainer) is how the JDK's executors start theirs).
+        // Threads robot code starts with start() are scheduled (ADR 0025); the others are
+        // reported as not reproducible (ADR 0024): start(ThreadContainer) is how the JDK's
+        // executors start theirs, and Timer's thread is started from JDK code.
         System.getProperties().put(RobotRandomness.THREAD_START_KEY, (Consumer<Object[]>) a -> {
-            RobotRandomness.threadStart(a[0]);
-            if (a.length == 1) {
-                RobotThreads.starting(a[0]);
+            if (a.length != 1 || !RobotThreads.starting(a[0])) {
+                RobotRandomness.threadStart(a[0]);
             }
         });
         System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object[]>) a -> RobotThreads.entering());

@@ -184,7 +184,17 @@ class RobotThreadsTest {
         }
     }
 
-    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Busy.class.getName(), Worker.class.getName(),
+    /** Robot code with a monitor, which the scheduler doesn't cover, that starts a thread. */
+    public static final class Locking implements Function<Object, Object> {
+        @Override
+        public synchronized Object apply(Object ignored) {
+            Thread t = new Thread(new Worker(new ArrayList<>(), "l"));
+            t.start();
+            return t;
+        }
+    }
+
+    private static final Set<String> ROBOT_CLASSES = Set.of(BadSleep.class.getName(), Locking.class.getName(), Busy.class.getName(), Worker.class.getName(),
             Interleave.class.getName(), Setter.class.getName(), Spinner.class.getName(), Sleeper.class.getName(),
             Starter.class.getName(), Interrupter.class.getName(), Stubborn.class.getName());
 
@@ -353,6 +363,21 @@ class RobotThreadsTest {
         assertEquals("java.lang.Thread", stack[0].getClassName());
         assertEquals("sleep", stack[0].getMethodName());
         assertEquals(BadSleep.class.getName(), stack[1].getClassName(), "no frames of the agent");
+    }
+
+    @Test
+    void scheduledThreadsArentReportedButUncoveredOnesAre() throws Exception {
+        onRobotThread("sample.Fire (130)", () -> {
+            Robot r = new Robot();
+            Object thread = r.code(Starter.class).apply(r.make(Sleeper.class, new Class<?>[] {long.class}, 0L));
+            r.code(Interrupter.class).apply(thread); // joins it, from robot code
+        });
+        assertFalse(RobotRandomness.robotsWithThreads().contains("sample.Fire (130)"), "scheduled: reproducible");
+        onRobotThread("sample.Fire (131)", () -> {
+            Robot r = new Robot();
+            r.code(Interrupter.class).apply(r.code(Locking.class).apply(null));
+        });
+        assertTrue(RobotRandomness.robotsWithThreads().contains("sample.Fire (131)"), "it uses a monitor too");
     }
 
     @Test

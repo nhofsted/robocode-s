@@ -130,9 +130,12 @@ class RobotRandomnessTest {
         assertFalse(startedIn("sample.Fire", StartsThread.class, false));
         inGroup("Battle", () -> new StartsThread().get());
         assertFalse(RobotRandomness.startedThreads());
-        // The robot's code: directly, a subclass of Thread, a Timer, an executor.
-        assertTrue(startedIn("sample.Fire", StartsThread.class, true));
-        assertTrue(startedIn("jk.mega.DrussGT 3.1.16", ExtendsThread.class, true));
+        // The robot's code, directly or with a subclass of Thread: the scheduler runs those
+        // threads deterministically (ADR 0025), so they aren't reported.
+        assertFalse(startedIn("sample.Fire", StartsThread.class, true));
+        assertFalse(startedIn("jk.mega.DrussGT 3.1.16", ExtendsThread.class, true));
+        assertFalse(RobotRandomness.startedThreads());
+        // A Timer, an executor: their threads aren't scheduled.
         assertTrue(startedIn("sample.Fire (2)", StartsTimer.class, true));
         assertTrue(startedIn("sample.Fire (3)", StartsExecutor.class, true));
         assertTrue(RobotRandomness.startedThreads());

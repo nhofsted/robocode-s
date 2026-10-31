@@ -68,6 +68,9 @@ final class ThreadCalls {
 
     /** Rewrites the class's thread calls and adds the helpers. */
     static void patch(ClassNode node, ClassLoader loader, String fuelField) {
+        if (usesUncovered(node)) {
+            RobotThreads.uncovered();
+        }
         boolean thread = isThread(loader, node.superName);
         Map<String, MethodNode> helpers = new LinkedHashMap<>();
         for (MethodNode method : List.copyOf(node.methods)) {
@@ -96,6 +99,39 @@ final class ThreadCalls {
         }
         node.methods.addAll(helpers.values());
         node.methods.add(limitHelper(fuelField, (node.version & 0xFFFF) >= Opcodes.V1_6));
+    }
+
+    /**
+     * Whether the class uses what the scheduler doesn't cover: {@code synchronized},
+     * {@code wait}/{@code notify}, and {@code java.util.concurrent} classes that can block
+     * (all but its atomics and non-blocking collections).
+     */
+    static boolean usesUncovered(ClassNode node) {
+        for (MethodNode method : node.methods) {
+            if ((method.access & Opcodes.ACC_SYNCHRONIZED) != 0) {
+                return true;
+            }
+            for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.MONITORENTER) {
+                    return true;
+                }
+                if (insn instanceof MethodInsnNode call) {
+                    if ((call.name.equals("wait") && (call.desc.equals("()V") || call.desc.equals("(J)V")
+                            || call.desc.equals("(JI)V")))
+                            || ((call.name.equals("notify") || call.name.equals("notifyAll")) && call.desc.equals("()V"))
+                            || blocking(call.owner)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean blocking(String owner) {
+        return owner.startsWith("java/util/concurrent/") && !owner.startsWith("java/util/concurrent/atomic/")
+                && !owner.startsWith("java/util/concurrent/Concurrent") && !owner.startsWith("java/util/concurrent/CopyOnWrite")
+                && !owner.equals("java/util/concurrent/ThreadLocalRandom") && !owner.equals("java/util/concurrent/TimeUnit");
     }
 
     private static Call match(MethodInsnNode call) {
