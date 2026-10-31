@@ -3,7 +3,7 @@ title: Getting started
 description: Install robocode-s, run a battle, write a robot and see where to go next.
 ---
 
-> **Status:** version 0.2.3 is out for Windows, Linux and macOS.
+> **Status:** version 0.2.4 is out for Windows, Linux and macOS.
 
 ## 1. Install robocode-s
 
