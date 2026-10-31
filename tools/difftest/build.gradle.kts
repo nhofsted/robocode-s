@@ -45,6 +45,17 @@ val oracleJvmArgs = listOf(
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
     "-XX:+UnlockDiagnosticVMOptions",
     "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow",
+    // The robot JVM's environment in robocode-s (crates/runner NEUTRAL_FLAGS, DETERMINISTIC_FLAGS):
+    // robots see the same locale, time zone, encodings, user name and processor count here.
+    "-Duser.language=en",
+    "-Duser.country=US",
+    "-Duser.timezone=UTC",
+    "-Dfile.encoding=UTF-8",
+    "-Dstdout.encoding=UTF-8",
+    "-Dstderr.encoding=UTF-8",
+    "-Duser.name=robocode-s",
+    "-XX:ActiveProcessorCount=1",
+    "-Xms512M",
     "-Ddebug=true",
 )
 

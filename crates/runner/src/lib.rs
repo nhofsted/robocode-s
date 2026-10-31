@@ -100,9 +100,36 @@ pub const STRICT_MATH_FLAGS: [&str; 2] = [
     "-XX:DisableIntrinsic=_dsin,_dcos,_dtan,_datan2,_dexp,_dlog,_dlog10,_dpow",
 ];
 
+/// What a robot's JVM looks like from inside, the same on every machine (ADR 0025): its
+/// locale (classic's on an English system, as the difftest oracle's), time zone, text
+/// encodings and user name. Robots format numbers, read the date or their user name; on a
+/// Dutch or a German system `String.format("%.2f")` writes a comma, which `Double.parseDouble`
+/// then refuses. Robots in classic mode get it too: their numbers shouldn't depend on the
+/// machine either.
+pub const NEUTRAL_FLAGS: [&str; 7] = [
+    "-Duser.language=en",
+    "-Duser.country=US",
+    "-Duser.timezone=UTC",
+    "-Dfile.encoding=UTF-8",
+    "-Dstdout.encoding=UTF-8",
+    "-Dstderr.encoding=UTF-8",
+    "-Duser.name=robocode-s",
+];
+
+/// Deterministic mode (ADR 0025): one processor (`Runtime.availableProcessors()`, the
+/// common pool's parallelism, the GC's choice: Serial), and the heap's size fixed from the
+/// start, so `totalMemory()` and `freeMemory()` don't follow the machine's RAM. The robot's
+/// threads run one at a time anyway.
+pub const DETERMINISTIC_FLAGS: [&str; 1] = ["-XX:ActiveProcessorCount=1"];
+
 /// The JVM arguments for a robot.
 pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
     let mut args = vec![format!("-Xmx{}m", launch.memory_mb)];
+    args.extend(NEUTRAL_FLAGS.map(String::from));
+    if launch.deterministic {
+        args.push(format!("-Xms{}m", launch.memory_mb));
+        args.extend(DETERMINISTIC_FLAGS.map(String::from));
+    }
     if host.sandbox != Sandbox::None {
         args.extend(sandbox::jvm_flags(&launch.home));
     } else {
@@ -406,6 +433,10 @@ mod tests {
         };
         let args = jvm_args(&host, &launch);
         assert!(args.contains(&STRICT_MATH_FLAGS[1].to_string()));
+        for flag in NEUTRAL_FLAGS.iter().chain(&DETERMINISTIC_FLAGS) {
+            assert!(args.contains(&flag.to_string()), "{flag}");
+        }
+        assert!(args.contains(&"-Xms256m".to_string()) && args.contains(&"-Xmx256m".to_string()));
         assert!(args.contains(&"-javaagent:/opt/agent.jar".to_string()));
         assert!(args.windows(2).any(|w| w[0] == "--seed" && w[1] == "42"));
         assert!(!args.iter().any(|a| a == "--token" || a == "t"));
@@ -416,11 +447,11 @@ mod tests {
         assert!(!args.contains(&"--server".to_string()));
         launch.deterministic = false;
         let args = jvm_args(&host, &launch);
-        assert!(
-            !args
-                .iter()
-                .any(|a| a.contains("DisableIntrinsic") || a.contains("javaagent"))
-        );
+        assert!(!args.iter().any(|a| a.contains("DisableIntrinsic")
+            || a.contains("javaagent")
+            || a.contains("ActiveProcessorCount")
+            || a.starts_with("-Xms")));
+        assert!(args.contains(&"-Duser.timezone=UTC".to_string()));
         // Without a sandbox it may have a display, except on macOS (a Dock icon each).
         assert_eq!(
             args.iter().any(|a| a.contains("headless")),
