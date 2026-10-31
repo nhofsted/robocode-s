@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "robocode-s-engine"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "robocode-s-fdlibm",
  "robocode-s-geom",
@@ -1821,25 +1821,25 @@ dependencies = [
 
 [[package]]
 name = "robocode-s-fdlibm"
-version = "0.2.3"
+version = "0.2.4"
 
 [[package]]
 name = "robocode-s-geom"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "robocode-s-fdlibm",
 ]
 
 [[package]]
 name = "robocode-s-java-random"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "robocode-s-fdlibm",
 ]
 
 [[package]]
 name = "robocode-s-rumble-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "base64 0.23.1",
  "flate2",
