@@ -40,6 +40,8 @@ pub struct Key {
     agent_jar: Option<PathBuf>,
     memory_mb: u32,
     deterministic: bool,
+    /// Our diagnostics properties ([`JavaHost::properties`]).
+    properties: Vec<crate::RobotProperty>,
 }
 
 impl Key {
@@ -57,6 +59,7 @@ impl Key {
             agent_jar: deterministic.then(|| absolute(&host.agent_jar)),
             memory_mb,
             deterministic,
+            properties: host.properties.clone(),
         }
     }
 }
@@ -328,6 +331,7 @@ mod tests {
             lib_dir: "/opt/host/lib".into(),
             agent_jar: "/opt/agent.jar".into(),
             sandbox,
+            properties: Vec::new(),
         }
     }
 
@@ -360,6 +364,11 @@ mod tests {
         };
         assert_ne!(key(&h, 256, true), key(&other, 256, true), "agent");
         assert_eq!(key(&h, 256, false), key(&other, 256, false));
+        let other = JavaHost {
+            properties: vec![crate::RobotProperty::parse("meterWork=false").unwrap()],
+            ..h.clone()
+        };
+        assert_ne!(key(&h, 256, true), key(&other, 256, true), "diagnostics");
     }
 
     #[test]

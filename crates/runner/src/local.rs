@@ -722,6 +722,9 @@ pub struct Environment {
     /// Robots start with no data files and keep none (`ROBOCODES_FRESH_DATA`, `--fresh-data`):
     /// for battles that must not depend on the ones before (design §6.5).
     pub fresh_data: bool,
+    /// Our diagnostics for the robot JVMs ([`JavaHost::properties`]): `robocode-s battle
+    /// --robot-property` only, no environment variable, so the rumble never has them.
+    pub robot_properties: Vec<crate::RobotProperty>,
 }
 
 impl Environment {
@@ -764,6 +767,7 @@ impl Environment {
             sandbox: Sandbox::default(),
             fresh_data: std::env::var_os("ROBOCODES_FRESH_DATA")
                 .is_some_and(|v| !v.is_empty() && v != "0"),
+            robot_properties: Vec::new(),
         }
     }
 
@@ -807,6 +811,7 @@ impl Environment {
             lib_dir: self.host_lib.clone(),
             agent_jar: self.agent_jar.clone(),
             sandbox: self.sandbox,
+            properties: self.robot_properties.clone(),
         })
     }
 }

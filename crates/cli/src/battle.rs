@@ -5,6 +5,7 @@
 use crate::results;
 use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, server_message};
+use robocode_s_runner::RobotProperty;
 use robocode_s_runner::housekeeping::keep_battles;
 use robocode_s_runner::ide::{CLI_MARKER, marker, run_configuration};
 use robocode_s_runner::local::{Environment, prepare_ide, random_seed, run_local_battle_with};
@@ -67,6 +68,12 @@ Robots and runtime:
   --java PATH            Java executable ($ROBOCODES_JAVA; default: pinned JRE)
   --host-lib DIR         robot host lib directory ($ROBOCODES_HOST_LIB)
   --agent-jar PATH       determinism agent ($ROBOCODES_AGENT_JAR)
+  --robot-property NAME=VALUE
+                         a robocode-s diagnostics property for the robot JVMs
+                         (-Drobocodes.NAME=VALUE; repeatable), e.g.
+                         traceDeterminism=trace.txt, traceRobots=asd.Cthulhu,
+                         meterWork=false. Relative files are in each robot's
+                         home: keep them with ROBOCODES_KEEP_BATTLES=1
   --sandbox KIND         what robots run in (ADR 0019): os (Linux: seccomp, and
                          Landlock where the kernel has it; Windows: an
                          AppContainer and a Job Object), bwrap (bubblewrap,
@@ -214,6 +221,10 @@ impl Options {
                 "--java" => o.env.java = Some(value(arg)?.into()),
                 "--host-lib" => o.env.host_lib = value(arg)?.into(),
                 "--agent-jar" => o.env.agent_jar = value(arg)?.into(),
+                "--robot-property" => o.env.robot_properties.push(
+                    RobotProperty::parse(&value(arg)?)
+                        .map_err(|e| format!("--robot-property: {e}"))?,
+                ),
                 "--sandbox" => {
                     o.env.sandbox = value(arg)?.parse().map_err(|e| format!("--sandbox: {e}"))?
                 }
@@ -546,6 +557,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "threads": threads,
             "hardLimit": hard_limits,
+            "robotProperties": host.properties.iter().map(RobotProperty::jvm_arg).collect::<Vec<_>>(),
             "results": results::json(&rows),
         });
         println!("{out}");
@@ -561,6 +573,10 @@ pub fn run(o: &Options) -> Result<(), String> {
             robocode_s_engine::ENGINE_VERSION,
             host.sandbox.report()
         );
+        if !host.properties.is_empty() {
+            let flags: Vec<String> = host.properties.iter().map(RobotProperty::jvm_arg).collect();
+            println!("Robot JVMs with diagnostics: {}\n", flags.join(" "));
+        }
         if debug {
             println!(
                 "Debug battle: robots from your IDE were not timed, so the results are not \
