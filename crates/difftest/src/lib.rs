@@ -2,10 +2,13 @@
 
 //! Replays classic Robocode recordings in the robocode-s engine.
 //!
-//! A recording (format 3, `tools/difftest`) holds, per turn, the command state classic
+//! A recording (format 3 or 4, `tools/difftest`) holds, per turn, the command state classic
 //! loaded for every robot, and the resulting robot states, bullets, remaining values and
-//! events. The replay feeds the same commands into the engine and compares everything,
-//! bit for bit. It stops at the first difference and describes it.
+//! events; format 4 also which robots answered late (`late`: the turn each last executed
+//! in). The replay feeds the same commands into the engine, lets robots that answered late
+//! skip turns as the server does ([`robocode_s_server::skipped`]) and compares everything,
+//! bit for bit. It stops at the first difference and describes it. A format 3 recording
+//! has no lateness: it replays only battles in which no robot skipped a turn.
 
 pub mod live;
 
@@ -114,7 +117,7 @@ fn replay_turns(lines: &[Value]) -> Result<Summary, Mismatch> {
         .first()
         .filter(|h| h["type"] == "header")
         .ok_or_else(|| fail(0, 0, "no header"))?;
-    if header["format"].as_i64() != Some(3) {
+    if !matches!(header["format"].as_i64(), Some(3 | 4)) {
         return Err(fail(
             0,
             0,
@@ -128,6 +131,8 @@ fn replay_turns(lines: &[Value]) -> Result<Summary, Mismatch> {
     );
     let mut summary = Summary::default();
     let mut started = false;
+    // Classic's `isIORobot`: once a robot did file I/O, for the battle.
+    let mut io = vec![false; battle.robots.len()];
     for line in &lines[1..] {
         let round = line["round"].as_i64().unwrap_or(-1);
         let turn = line["turn"].as_i64().unwrap_or(-1);
@@ -161,7 +166,9 @@ fn replay_turns(lines: &[Value]) -> Result<Summary, Mismatch> {
                     .ok_or_else(|| fail(round, turn, "no commands"))?;
                 for (i, c) in commands.iter().enumerate() {
                     if !c.is_null() {
-                        battle.set_commands(i, parse_commands(c));
+                        let commands = parse_commands(c);
+                        io[i] |= commands.io;
+                        battle.set_commands(i, commands);
                     }
                 }
                 battle.step();
@@ -177,7 +184,8 @@ fn replay_turns(lines: &[Value]) -> Result<Summary, Mismatch> {
                 // robot threads may drain or disable their robot; the snapshot and the
                 // events come after it.
                 compare_remaining(&battle, line).map_err(|m| fail(round, turn, &m))?;
-                apply_actions(&mut battle, line).map_err(|m| fail(round, turn, &m))?;
+                let disabled = skip_turns(&mut battle, line, turn, &io);
+                apply_actions(&mut battle, line, &disabled).map_err(|m| fail(round, turn, &m))?;
                 compare_state(&battle, line).map_err(|m| fail(round, turn, &m))?;
                 summary.events +=
                     compare_events(&mut battle, line).map_err(|m| fail(round, turn, &m))?;
@@ -337,16 +345,68 @@ pub fn describe(d: f64) -> String {
     format!("{d:?} (bits {:016x})", d.to_bits())
 }
 
+/// The robots that answered late (`late`, format 4) wake in `turn` as the server wakes
+/// them: their `SkippedTurnEvent`s after the turn's events, and a disable past the limit
+/// (pending commands dropped, thread stopped). Returns which robots were disabled so.
+fn skip_turns(battle: &mut Battle, line: &Value, turn: i64, io: &[bool]) -> Vec<bool> {
+    let mut disabled = vec![false; battle.robots.len()];
+    let Some(late) = line["late"].as_array() else {
+        return disabled;
+    };
+    for (i, last) in late.iter().enumerate().take(disabled.len()) {
+        let Some(answered) = last.as_i64() else {
+            continue;
+        };
+        let skipped =
+            robocode_s_server::skipped::skipped(answered, turn, battle.robots[i].is_alive(), io[i]);
+        battle.robots[i]
+            .events
+            .extend(skipped.events.map(|turn| Event::SkippedTurn { turn }));
+        if skipped.disable {
+            battle.disable(i);
+            battle.stop(i);
+            disabled[i] = true;
+        }
+    }
+    disabled
+}
+
+/// Classic's reason for a disable after too many skipped turns (`BadBehavior`).
+const SKIPPED_TOO_MANY_TURNS: &str = "disable:SKIPPED_TOO_MANY_TURNS";
+
 /// What robot threads did to their robot while handling the turn (`actions`, only
-/// present when something happened): `drainEnergy` or `disable:<reason>`.
-fn apply_actions(battle: &mut Battle, line: &Value) -> Result<(), String> {
-    let Some(actions) = line["actions"].as_array() else {
+/// present when something happened): `drainEnergy` or `disable:<reason>`. A disable for
+/// skipped turns must be the one [`skip_turns`] did (`disabled`), in a recording with
+/// lateness (format 4); a format 3 recording has none, and its disables are applied.
+fn apply_actions(battle: &mut Battle, line: &Value, disabled: &[bool]) -> Result<(), String> {
+    let lateness = line["late"].is_array();
+    let actions = line["actions"].as_array();
+    for (i, &by_skips) in disabled.iter().enumerate() {
+        let recorded = actions
+            .and_then(|a| a.get(i))
+            .and_then(Value::as_array)
+            .is_some_and(|a| a.iter().any(|x| x == SKIPPED_TOO_MANY_TURNS));
+        if by_skips && !recorded {
+            return Err(format!(
+                "robot {i} ({}) skipped too many turns: the engine disabled it, classic didn't",
+                battle.robots[i].setup.name
+            ));
+        }
+        if recorded && lateness && !by_skips {
+            return Err(format!(
+                "robot {i} ({}) skipped too many turns: classic disabled it, the engine didn't",
+                battle.robots[i].setup.name
+            ));
+        }
+    }
+    let Some(actions) = actions else {
         return Ok(());
     };
     for (i, robot) in actions.iter().enumerate() {
         for action in robot.as_array().into_iter().flatten() {
             match action.as_str() {
                 Some("drainEnergy") => battle.drain_energy(i),
+                Some(SKIPPED_TOO_MANY_TURNS) if disabled.get(i) == Some(&true) => {}
                 Some(a) if a.starts_with("disable:") => battle.disable(i),
                 _ => return Err(format!("robot {i}: unknown action {action}")),
             }
@@ -823,5 +883,66 @@ mod race_tests {
             None,
             "only the same round counts"
         );
+    }
+}
+
+#[cfg(test)]
+mod lateness_tests {
+    use super::*;
+
+    fn battle() -> Battle {
+        let header = json!({"robotInfo": [{"name": "a.A 1"}, {"name": "b.B 1"}]});
+        let mut battle = Battle::new(BattleRules::default(), setups(&header), 1);
+        battle.start_round();
+        for _ in 0..50 {
+            battle.step();
+        }
+        battle
+    }
+
+    #[test]
+    fn a_late_robot_gets_its_skipped_turns_after_the_turns_events() {
+        let mut battle = battle();
+        battle.take_events(1);
+        let line = json!({"late": [null, 45]});
+        let disabled = skip_turns(&mut battle, &line, 50, &[false, false]);
+        assert_eq!(disabled, [false, false]);
+        let skipped: Vec<Event> = battle.take_events(1);
+        assert_eq!(
+            skipped,
+            (46..50)
+                .map(|turn| Event::SkippedTurn { turn })
+                .collect::<Vec<_>>()
+        );
+        assert!(apply_actions(&mut battle, &line, &disabled).is_ok());
+    }
+
+    #[test]
+    fn a_disable_for_skipped_turns_must_match_classics() {
+        // 31 skipped turns: disabled, and classic must have done the same.
+        let mut battle = battle();
+        let line = json!({"late": [18, null]});
+        let disabled = skip_turns(&mut battle, &line, 50, &[false, false]);
+        assert_eq!(disabled, [true, false]);
+        assert!(!battle.robots[0].is_alive());
+        let err = apply_actions(&mut battle, &line, &disabled).unwrap_err();
+        assert!(err.contains("classic didn't"), "{err}");
+        let with = json!({"late": [18, null], "actions": [[SKIPPED_TOO_MANY_TURNS], []]});
+        assert!(apply_actions(&mut battle, &with, &disabled).is_ok());
+        // Classic disabled a robot the engine kept: an I/O robot may skip 240.
+        let mut battle = self::battle();
+        let disabled = skip_turns(&mut battle, &with, 50, &[true, false]);
+        assert_eq!(disabled, [false, false]);
+        let err = apply_actions(&mut battle, &with, &disabled).unwrap_err();
+        assert!(err.contains("the engine didn't"), "{err}");
+    }
+
+    #[test]
+    fn format_3_recordings_apply_their_disables() {
+        let mut battle = battle();
+        let line = json!({"actions": [[SKIPPED_TOO_MANY_TURNS], []]});
+        let disabled = skip_turns(&mut battle, &line, 50, &[false, false]);
+        apply_actions(&mut battle, &line, &disabled).unwrap();
+        assert!(!battle.robots[0].is_alive());
     }
 }

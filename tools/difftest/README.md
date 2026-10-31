@@ -37,7 +37,7 @@ The oracle checks 1, 2, 4 and 5 at startup and refuses to run without them. The 
 
 Classic's security mode stays on, as in the RoboRumble. On Java 21 that means class-loading and thread checks only: there is no `SecurityManager` sandbox anymore, so only run robots you would also run in a RoboRumble client.
 
-### Format (version 2)
+### Format (version 4)
 
 One JSON object per line:
 
@@ -51,7 +51,11 @@ A state contains, per robot (in index order): `state`, `x`, `y`, `energy`, `velo
 Each `turn` line also has, per robot (in index order), what classic's engine did in that turn. These come from `ClassicPatches` hooks in `RobotPeer` (`OracleHooks`), which only observe:
 - `commands`: the command state loaded at the start of the turn (`performLoadCommands`, engine-spec §11.1). This includes the remaining values, adjust flags, max velocity and turn rate, `scan`, `io`, bullet commands (`id`, `power`, fire assist, `consumed`) and team messages (`sender`, `recipient`, `bytes`). A replay of these drives the robocode-s engine without real robots. `null` for robots that are dead: their thread may still be finishing its last `execute` and replaces the command state at an unpredictable moment (this made CI fail). Classic ignores a dead robot's commands.
 - `remaining`: the remaining body/gun/radar turn and distance reported back at the end of the turn (`publishStatus`); `null` for dead robots, for the same reason.
-- `events`: every event the engine generates for the robot, in order, with all fields (radians; bullets with id, owner, victim, position, power and active flag). Classic only queues an event while the robot's thread runs, which is timing-dependent shortly after a death; delivery is the server's job in robocode-s.
+- `events`: every event the engine generates for the robot, in order, with all fields (radians; bullets with id, owner, victim, position, power and active flag). Classic only queues an event while the robot's thread runs, which is timing-dependent shortly after a death; delivery is the server's job in robocode-s. A late robot's `SkippedTurnEvent`s are among them, in the turn it woke in, after that turn's other events.
+- `actions` (only when something happened): what robot threads did to their robot in the turn, `drainEnergy` or `disable:<reason>` (`disable:SKIPPED_TOO_MANY_TURNS` for a robot over the skipped-turn limit).
+- `late` (format 4, only when a robot answered late): per robot, the turn it last executed in, or `null`. It is what classic's `checkSkippedTurn` started from when the battle woke the robot (`currentExecutionTime`), so the replay can apply the same lateness to the engine and check the server's logic (`robocode_s_server::skipped`) against classic's events and disables. The deterministic oracle makes a robot late by its counted work and its main thread's sleeps (ADR 0018, 0025).
+
+Format 3 recordings (without `late`) still replay, but only battles in which no robot skipped a turn.
 
 Recording costs about 1% of the battle time.
 
@@ -74,7 +78,9 @@ CI records the sample corpus and replays it on every push (job "Engine replay ag
 
 ## Live battles
 
-`live` fights the battle of each recording with real robot processes: the server, the runner and one robot-host JVM per robot. It then compares every turn with the recording. The result must be identical.
+`live` fights the battle of each recording with real robot processes: the server, the runner and one robot-host JVM per robot. It then compares every turn with the recording, and the turns each robot skipped (the server's `BattleOutcome::skipped_turns` against classic's `SkippedTurnEvent`s). The result must be identical.
+
+The server replay (`cargo test -p robocode-s-difftest --test server_replay`) drives the server with scripted robots that send classic's commands; a robot that classic recorded as late answers late, with as much counted work as makes the server hold its answer until the turn classic woke it in, and checks the events it then gets (the critical ones of the turns it skipped, then its `SkippedTurnEvent`s).
 
 ```sh
 ./gradlew :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
@@ -120,5 +126,7 @@ The runner works in two phases:
 - **`ORACLE-NONDETERMINISTIC`:** classic itself isn't reproducible for this battle; reported with `--check-oracle`, which records every battle twice.
 
 Robots that make classic itself nondeterministic are kept in the manifest with an `exclude` reason and left out of the plan. So are robots that can loop forever without an action: classic only ends that through wall-clock skipped turns, which become reproducible with CPU budgets (#15).
+
+Robots with threads of their own are reproducible since ADR 0025 (one virtual CPU per robot, in classic too), and robots that skip turns can be checked since format 4. On 2026-10-31 TNT.TNT 0.99.1, rapture.Rapture 2.13, florent.test.Toad 0.14t, seed.Anastasia 1.0 (duels against lancel.Lynx 1.09) and techdude.forest.FlamingForest 1.1 (in a melee with TNT) were identical in both classic runs and live, the turns they skipped included (Anastasia 3989), so they are back in the plan; mn.nano.SkippedTurns 1.1.0, disabled for skipped turns every round, too.
 
 To fight some battles of an earlier run again, e.g. after a fix: `--plan <out>/plan.json --only 25-duel,31-melee`.

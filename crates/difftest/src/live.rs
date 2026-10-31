@@ -2,7 +2,8 @@
 
 //! A live battle: the server, and every robot as its own JVM through the runner and the
 //! Java robot host, compared with a classic recording of the same battle. In
-//! deterministic mode the result must be identical to classic.
+//! deterministic mode the result must be identical to classic: every turn's state, and the
+//! turns each robot skipped (its `SkippedTurnEvent`s).
 
 use crate::{RACE, classic_race, compare_snapshot, load, rounds, rules, setups, states};
 use robocode_s_protocol::v1::{self, server_message};
@@ -134,6 +135,25 @@ pub fn live_battle(
             snapshots.len()
         ));
     }
+    let skipped = skipped_turns(&lines, names.len());
+    for (i, (classic, server)) in skipped.iter().zip(&local.outcome.skipped_turns).enumerate() {
+        if classic != server {
+            let first = classic
+                .iter()
+                .zip(server)
+                .position(|(c, s)| c != s)
+                .unwrap_or(classic.len().min(server.len()));
+            return Err(format!(
+                "robot {i} ({}) skipped {} turns in classic, {} live; first difference at #{first}: classic {:?}, live {:?}{stderr}",
+                names[i],
+                classic.len(),
+                server.len(),
+                classic.get(first),
+                server.get(first)
+            ));
+        }
+    }
+    let total: usize = skipped.iter().map(Vec::len).sum();
     let scores: Vec<String> = local
         .outcome
         .results
@@ -141,8 +161,27 @@ pub fn live_battle(
         .map(|r| format!("{} {:.0}", r.name, r.score.unwrap_or_default()))
         .collect();
     Ok(format!(
-        "{} turns identical; scores: {}",
+        "{} turns identical, {total} skipped turns identical; scores: {}",
         snapshots.len(),
         scores.join(", ")
     ))
+}
+
+/// The (round, turn)s each robot got a `SkippedTurnEvent` for in classic's recording, in order.
+fn skipped_turns(lines: &[serde_json::Value], robots: usize) -> Vec<Vec<(i32, i64)>> {
+    let mut skipped = vec![Vec::new(); robots];
+    for line in lines.iter().filter(|l| l["type"] == "turn") {
+        let round = line["round"].as_i64().unwrap_or(-1) as i32;
+        for (i, events) in line["events"].as_array().into_iter().flatten().enumerate() {
+            for e in events.as_array().into_iter().flatten() {
+                if e["type"] == "SkippedTurnEvent"
+                    && let Some(turn) = e["skippedTurn"].as_i64()
+                    && i < robots
+                {
+                    skipped[i].push((round, turn));
+                }
+            }
+        }
+    }
+    skipped
 }
