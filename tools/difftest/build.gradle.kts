@@ -55,6 +55,7 @@ val oracleJvmArgs = listOf(
     "-Dstderr.encoding=UTF-8",
     "-Duser.name=robocode-s",
     "-XX:ActiveProcessorCount=1",
+    "-Dline.separator=\n",
     "-Xms512M",
     "-Ddebug=true",
 )

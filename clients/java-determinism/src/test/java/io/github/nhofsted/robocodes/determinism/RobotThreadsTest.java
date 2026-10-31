@@ -222,7 +222,21 @@ class RobotThreadsTest {
         }
     }
 
-    private static final Set<String> ROBOT_CLASSES = Set.of(TimesSleep.class.getName(), BadSleep.class.getName(), Locking.class.getName(),
+    /** Robot code that reads its environment and system properties. */
+    public static final class ReadsSystem implements Function<Object, Object> {
+        @Override
+        public Object apply(Object ignored) {
+            java.util.Properties all = System.getProperties();
+            boolean hooks = all.stringPropertyNames().stream().anyMatch(k -> k.startsWith("robocodes."))
+                    || all.keySet().stream().anyMatch(k -> String.valueOf(k).startsWith("robocodes."));
+            return System.getenv().size() + "|" + System.getenv("PATH") + "|" + System.getProperty("user.name")
+                    + "|" + System.getProperty("user.home") + "|" + System.getProperty("os.name", "x") + "|"
+                    + System.getProperty("file.separator") + "|" + System.lineSeparator().length() + "|" + hooks
+                    + "|" + all.getProperty("user.dir");
+        }
+    }
+
+    private static final Set<String> ROBOT_CLASSES = Set.of(ReadsSystem.class.getName(), TimesSleep.class.getName(), BadSleep.class.getName(), Locking.class.getName(),
             Virtual.class.getName(), Busy.class.getName(), Worker.class.getName(),
             Interleave.class.getName(), Setter.class.getName(), Spinner.class.getName(), Sleeper.class.getName(),
             Starter.class.getName(), Interrupter.class.getName(), Stubborn.class.getName());
@@ -468,6 +482,15 @@ class RobotThreadsTest {
             seen[0] = RobotRandomness.countedWorkNanos() - work;
         });
         assertTrue(seen[0] < RobotRandomness.TURN_BUDGET_NANOS, "only work counts: " + seen[0]);
+    }
+
+    @Test
+    void robotCodeSeesNoEnvironmentAndNeutralProperties() throws Exception {
+        Object[] seen = new Object[1];
+        onRobotThread("sample.Fire (150)", () -> seen[0] = new Robot().code(ReadsSystem.class).apply(null));
+        assertEquals("0|null|robocode-s|/home/robot|Linux|" + java.io.File.separator + "|1|false|/home/robot", seen[0]);
+        // The test's own code (not a robot's) sees the real ones.
+        assertTrue(!System.getenv().isEmpty());
     }
 
     @Test

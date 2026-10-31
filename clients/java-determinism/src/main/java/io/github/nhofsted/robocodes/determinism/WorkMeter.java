@@ -79,8 +79,10 @@ final class WorkMeter {
             if (method.instructions.size() > 0) {
                 // Counting first: a clock call costs one JDK call, not the hook's code.
                 if (meter) {
+                    List<MethodInsnNode> system = systemCalls(method.instructions);
                     count(node.name, method, (node.version & 0xFFFF) >= Opcodes.V1_6);
                     replaceClockCalls(node.name, method.instructions);
+                    replaceSystemCalls(method.instructions, system);
                 }
                 IdentityHashes.replaceHashCalls(method.instructions);
                 dropUnplacedLocals(method);
@@ -256,6 +258,38 @@ final class WorkMeter {
             instructions.insert(insn, replacement);
             instructions.remove(insn);
             insn = last;
+        }
+    }
+
+    /** The {@code System} calls {@link RobotSystem} answers for robot code, by name and descriptor. */
+    private static final Set<String> SYSTEM_CALLS = Set.of("getenv(Ljava/lang/String;)Ljava/lang/String;",
+            "getenv()Ljava/util/Map;", "getProperty(Ljava/lang/String;)Ljava/lang/String;",
+            "getProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            "getProperties()Ljava/util/Properties;", "lineSeparator()Ljava/lang/String;");
+
+    /**
+     * Robot code's own calls to {@code System.getenv}, {@code getProperty},
+     * {@code getProperties} and {@code lineSeparator}: not the agent's, which look up their
+     * hooks with {@code System.getProperties().get("robocodes...")}.
+     */
+    private static List<MethodInsnNode> systemCalls(InsnList instructions) {
+        List<MethodInsnNode> calls = new ArrayList<>();
+        for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESTATIC
+                    && call.owner.equals("java/lang/System") && SYSTEM_CALLS.contains(call.name + call.desc)
+                    && !(call.getNext() instanceof LdcInsnNode ldc && ldc.cst instanceof String key
+                            && key.startsWith("robocodes."))) {
+                calls.add(call);
+            }
+        }
+        return calls;
+    }
+
+    /** They call {@link RobotSystem} instead (ADR 0025); after the counting, so they cost the same. */
+    private static void replaceSystemCalls(InsnList instructions, List<MethodInsnNode> calls) {
+        for (MethodInsnNode call : calls) {
+            instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC,
+                    "io/github/nhofsted/robocodes/determinism/RobotSystem", call.name, call.desc, false));
         }
     }
 

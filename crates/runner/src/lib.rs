@@ -119,8 +119,9 @@ pub const NEUTRAL_FLAGS: [&str; 7] = [
 /// Deterministic mode (ADR 0025): one processor (`Runtime.availableProcessors()`, the
 /// common pool's parallelism, the GC's choice: Serial), and the heap's size fixed from the
 /// start, so `totalMemory()` and `freeMemory()` don't follow the machine's RAM. The robot's
-/// threads run one at a time anyway.
-pub const DETERMINISTIC_FLAGS: [&str; 1] = ["-XX:ActiveProcessorCount=1"];
+/// threads run one at a time anyway. Lines end in `\n` on every platform, in the files a
+/// robot writes and reads back too (the agent answers robot code's `System` calls likewise).
+pub const DETERMINISTIC_FLAGS: [&str; 2] = ["-XX:ActiveProcessorCount=1", "-Dline.separator=\n"];
 
 /// The JVM arguments for a robot.
 pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
@@ -347,7 +348,17 @@ pub(crate) fn sandboxed(
     memory_mb: u32,
 ) -> io::Result<sandbox::Sandboxed> {
     if host.sandbox == Sandbox::None {
-        return Ok(sandbox::Sandboxed::plain(&host.java));
+        // No sandbox, but the fixed environment all the same (ADR 0025): `java` is found on
+        // the user's `PATH` first, as the robot's isn't it.
+        let (java, runtime) = sandbox::java_runtime(&host.java)
+            .unwrap_or_else(|_| (host.java.clone(), PathBuf::new()));
+        let grants = sandbox::Grants {
+            runtime,
+            read,
+            home: home.to_path_buf(),
+            memory_mb,
+        };
+        return sandbox::command(Sandbox::None, &java, &grants);
     }
     if host.sandbox.is_container() {
         // The container has its own Java.
