@@ -290,7 +290,7 @@ class RobotThreadsTest {
         long[] seen = new long[2];
         onRobotThread("sample.Fire (" + robot + ")", () -> {
             Robot r = new Robot();
-            Object sleeper = r.make(Sleeper.class, new Class<?>[] {long.class}, 5L);
+            Object sleeper = r.make(Sleeper.class, new Class<?>[] {long.class}, 40L);
             r.code(Starter.class).apply(sleeper);
             Field slept = sleeper.getClass().getDeclaredField("slept");
             int turns = 0;
@@ -307,7 +307,9 @@ class RobotThreadsTest {
     @Test
     void sleepWaitsOnTheVirtualClock() throws Exception {
         long[] first = sleep(80);
-        // A turn is 1 ms of virtual time: it wakes in the first turn's end past 5 ms.
+        // 40 ms last as many turns as in classic, 5 (CLASSIC_TURN_NANOS); a turn is 1 ms of
+        // virtual time: it wakes at the first turn's end past 5 ms.
+        assertEquals(5, 40_000_000 / RobotRandomness.CLASSIC_TURN_NANOS);
         assertTrue(first[0] >= 5 && first[0] <= 6, "woke after " + first[0] + " turns");
         assertTrue(first[1] >= 5_000_000, "slept " + first[1] + " virtual ns");
         assertEquals(first[0], sleep(81)[0]);

@@ -112,6 +112,15 @@ public final class RobotRandomness {
     public static final long PICOS_PER_INSTRUCTION = 160;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
+    /**
+     * Classic's wall time per turn in the battles of robots that sleep in threads of their own,
+     * on the machine the clock was calibrated on (ADR 0014): measured 2026-10-31 with the
+     * classic oracle (1v1 TNT, Rapture and FlamingForest against lancel.Lynx 1.09: 7.2-9.5 ms,
+     * median 8.3). A robot thread's {@code Thread.sleep} and timed joins last as many turns as
+     * they did there ({@link #sleepNanos}, ADR 0025).
+     */
+    public static final long CLASSIC_TURN_NANOS = 8_000_000;
+
     /** Value of the virtual {@code nanoTime()} before the robot did anything. */
     public static final long NANO_ORIGIN = 1_000_000_000_000L;
     /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
@@ -688,6 +697,14 @@ public final class RobotRandomness {
                 turns.newCommands = null;
             }
         }
+    }
+
+    /**
+     * Virtual time a scheduled robot thread's sleep (or timed join) of {@code nanos} lasts: a
+     * virtual turn ({@link #TURN_NANOS}) for every turn classic took ({@link #CLASSIC_TURN_NANOS}).
+     */
+    static long sleepNanos(long nanos) {
+        return nanos / CLASSIC_TURN_NANOS * TURN_NANOS + nanos % CLASSIC_TURN_NANOS * TURN_NANOS / CLASSIC_TURN_NANOS;
     }
 
     /** Virtual time a robot has spent: its turns and its counted work. */

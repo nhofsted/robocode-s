@@ -27,7 +27,7 @@ import java.util.Map;
  * </ul>
  * The next thread is the first waiting one of the highest priority (round-robin among
  * equals). {@code Thread.sleep} and timed joins wait on the robot's virtual clock (ADR
- * 0014): a sleeper wakes at the first switch point after its deadline, or as soon as
+ * 0014), as many turns as in classic ({@link RobotRandomness#sleepNanos}): a sleeper wakes at the first switch point after its deadline, or as soon as
  * nothing else can run. At a round's end the robot's other threads are interrupted as in
  * classic, given a bounded amount of work to end, and then stopped.
  *
@@ -305,7 +305,7 @@ final class RobotThreads {
             if (duration == 0) {
                 cpu.yieldFrom(me);
             } else {
-                me.deadline = saturatedAdd(cpu.now(), duration);
+                me.deadline = saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(duration));
                 me.state = State.SLEEPING;
                 cpu.dispatch();
                 cpu.park(me);
@@ -354,8 +354,8 @@ final class RobotThreads {
         synchronized (cpu) {
             if (target.state != State.DONE) {
                 me.deadline = millis == 0 ? Long.MAX_VALUE
-                        : saturatedAdd(cpu.now(), millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE
-                                : millis * 1_000_000);
+                        : saturatedAdd(cpu.now(), RobotRandomness.sleepNanos(
+                                millis > Long.MAX_VALUE / 1_000_000 ? Long.MAX_VALUE : millis * 1_000_000));
                 me.joining = target;
                 me.state = State.JOINING;
                 cpu.dispatch();
