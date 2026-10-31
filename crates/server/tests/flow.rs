@@ -295,6 +295,8 @@ fn deterministic_mode_disables_robots_over_the_hard_limit() {
     assert!(saw_death && saw_win, "death {saw_death}, win {saw_win}");
     assert_eq!(outcome.results[0].firsts, 1);
     assert_eq!(outcome.results[1].firsts, 0);
+    // Reported: that depends on the machine (ADR 0025).
+    assert_eq!(outcome.hard_limits, vec![false, true]);
 }
 
 /// A deterministic two-robot battle in which `b.B` reports `work` for its turn `at` (and

@@ -35,7 +35,7 @@ The client for [the rumble](/docs/rumble): volunteers run its battles. You need 
 | `--batches N` | Stop after N batches have been posted (default: go on). |
 | `--json` | Print the events as JSON lines instead of one line per battle and per post. |
 | `--data DIR` | The data folder: Java runtime, jar cache, pending batches, log (`$ROBOCODES_DATA`). |
-| `--java PATH`, `--host-lib DIR`, `--agent-jar PATH` | See [shared options](/docs/cli#shared-options). |
+| `--java PATH`, `--host-lib DIR`, `--agent-jar PATH` | See [shared options](/docs/cli#shared-options). The rumble only runs on the pinned Java runtime (Eclipse Temurin, the release `robocode-s` downloads): another `--java` or `$ROBOCODES_JAVA` is refused, so all volunteers' battles run alike. Leave them out to use the downloaded one; Docker and Podman bring their own. |
 
 The upload token is in the settings folder's `rumble.json`, or in `$ROBOCODES_RUMBLE_TOKEN`. Results that could not be posted wait in `<data>/rumble/pending` and are posted at the next start. `<data>/rumble/log.txt` keeps the last 1 MiB of log.
 

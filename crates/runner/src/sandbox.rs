@@ -266,31 +266,18 @@ pub(crate) fn jvm_flags(home: &Path) -> [String; 3] {
     ]
 }
 
-/// The environment variables a sandboxed program keeps: the user's others may hold
-/// secrets (tokens, keys), and the display's.
-#[cfg(not(windows))]
-fn kept(name: &str) -> bool {
-    matches!(name, "PATH" | "HOME" | "LANG" | "LANGUAGE" | "TZ") || name.starts_with("LC_")
-}
-
-/// On Windows, whatever their case, with what its programs need: the system's folders
-/// and the processors. `PATH`, `TEMP` and `TMP` are the sandbox's own.
+/// On Windows, whatever their case, what its programs need of the user's environment: the
+/// system's folders and the processor's kind. `PATH`, `TEMP` and `TMP` are the sandbox's own.
 #[cfg(windows)]
 fn kept(name: &str) -> bool {
-    const KEPT: [&str; 10] = [
+    const KEPT: [&str; 5] = [
         "SystemRoot",
         "windir",
         "SystemDrive",
-        "NUMBER_OF_PROCESSORS",
         "PROCESSOR_ARCHITECTURE",
         "LOCALAPPDATA",
-        "HOME",
-        "LANG",
-        "LANGUAGE",
-        "TZ",
     ];
     KEPT.iter().any(|k| k.eq_ignore_ascii_case(name))
-        || name.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("LC_"))
 }
 
 /// A program to start in a sandbox ([`command`]): its arguments, environment and
@@ -456,7 +443,9 @@ pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::
         return Err(io::Error::new(io::ErrorKind::Unsupported, why));
     }
     if sandbox == Sandbox::None {
-        return Ok(Sandboxed::plain(program));
+        let mut plain = Sandboxed::plain(program);
+        fixed_environment(&mut plain.command, grants);
+        return Ok(plain);
     }
     std::fs::create_dir_all(grants.home.join("tmp"))?;
     if let Some(engine) = sandbox.engine() {
@@ -484,18 +473,71 @@ pub(crate) fn command(sandbox: Sandbox, program: &Path, grants: &Grants) -> io::
         },
         _ => Sandboxed::plain(program),
     };
-    sandboxed
-        .command
-        .env_clear()
-        .envs(std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(kept)));
-    #[cfg(windows)]
-    windows::environment(&mut sandboxed.command, grants);
+    fixed_environment(&mut sandboxed.command, grants);
     Ok(sandboxed)
 }
+
+/// The environment a robot's JVM (or a program run for it) starts with, whatever runs it:
+/// a fixed one, not the user's (ADR 0025). The user's may hold secrets (tokens, keys) and
+/// names them (paths), and a robot that reads it would behave by the machine.
+fn fixed_environment(command: &mut Command, grants: &Grants) {
+    command.env_clear();
+    #[cfg(not(windows))]
+    command.envs(FIXED_ENVIRONMENT).env("HOME", &grants.home);
+    #[cfg(windows)]
+    {
+        command.envs(std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(kept)));
+        windows::environment(command, grants);
+    }
+}
+
+/// The fixed environment, but for `HOME` (the robot's own folder).
+#[cfg(not(windows))]
+pub(crate) const FIXED_ENVIRONMENT: [(&str, &str); 3] = [
+    ("PATH", "/usr/bin:/bin"),
+    ("LANG", "C.UTF-8"),
+    ("TZ", "UTC"),
+];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No path gives a robot the user's environment: only the fixed one, with its own home.
+    #[test]
+    #[cfg(not(windows))]
+    fn robots_get_a_fixed_environment() {
+        let home = std::env::temp_dir().join(format!("robocode-s-env-{}", std::process::id()));
+        let grants = Grants {
+            runtime: "/opt/java".into(),
+            read: vec![],
+            home: home.clone(),
+            memory_mb: 64,
+        };
+        let mut sandboxes = vec![Sandbox::None];
+        #[cfg(target_os = "linux")]
+        sandboxes.extend([Sandbox::Os, Sandbox::Bwrap]);
+        for sandbox in sandboxes {
+            let Ok(sandboxed) = command(sandbox, Path::new("/opt/java/bin/java"), &grants) else {
+                continue; // not available here
+            };
+            let mut env: Vec<(String, String)> = sandboxed
+                .command
+                .get_envs()
+                .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+                .collect();
+            env.sort();
+            let mut want: Vec<(String, String)> = FIXED_ENVIRONMENT
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .chain([("HOME".to_string(), home.display().to_string())])
+                .collect();
+            want.sort();
+            // Exactly these: none of the user's (USER, their PATH, tokens, keys).
+            assert_eq!(env, want, "{sandbox}");
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
 
     #[test]
     fn platforms_refuse_the_sandboxes_they_lack() {

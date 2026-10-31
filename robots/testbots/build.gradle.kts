@@ -13,3 +13,8 @@ repositories {
 dependencies {
     compileOnly(libs.robocode.classic.api)
 }
+
+// Test robots run on the robot host's JDK 21 only (testbots.Virtual starts a virtual thread).
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 21
+}

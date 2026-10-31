@@ -61,8 +61,9 @@ pub const DETERMINISTIC_BUDGET_NANOS: u64 = 3_200_000;
 pub const FIRST_TURN_BUDGETS: u64 = 7;
 
 /// Version of the deterministic rules (`RobotRandomness.rulesVersion()` on the Java side):
-/// deterministic battles need a robot host that follows the same ones.
-pub const DETERMINISTIC_RULES: u32 = 1;
+/// deterministic battles need a robot host that follows the same ones. Version 2: robots'
+/// own threads run on one virtual CPU per robot (ADR 0025).
+pub const DETERMINISTIC_RULES: u32 = 2;
 
 /// How many turns late a robot's `Execute` for `turn` counts in deterministic mode, after
 /// `work` nanoseconds of counted work. As classic, which waits a budget for each robot each
@@ -176,6 +177,10 @@ pub struct BattleOutcome {
     /// (`Execute.threads`), which makes its battles not reproducible (ADR 0024). Empty
     /// where that isn't known (a battle watched from elsewhere, [`watch`]).
     pub threads: Vec<bool>,
+    /// Per robot, by robot index: whether the hard limit disabled it (deterministic mode: a
+    /// turn took longer than [`ServerConfig::hard_limit`] in real time, which depends on the
+    /// machine, ADR 0025). Empty where that isn't known.
+    pub hard_limits: Vec<bool>,
 }
 
 /// What became of a robot's connection in a battle.
@@ -302,6 +307,8 @@ struct Link {
     debug: bool,
     /// The robot said it started threads of its own (`Execute.threads`).
     threads: bool,
+    /// The hard limit disabled the robot.
+    hard_limit: bool,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -871,6 +878,7 @@ impl<'a> BattleLoop<'a> {
             })
             .collect();
         let threads = self.links.iter().map(|l| l.threads).collect();
+        let hard_limits = self.links.iter().map(|l| l.hard_limit).collect();
         self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
             aborted,
             rounds,
@@ -899,6 +907,7 @@ impl<'a> BattleLoop<'a> {
             aborted,
             connections,
             threads,
+            hard_limits,
         })
     }
 
@@ -1082,6 +1091,7 @@ impl<'a> BattleLoop<'a> {
                 if self.expecting(i) && !self.links[i].debug {
                     self.engine.input(Entry::Disable(i as i32));
                     self.links[i].awaiting = None;
+                    self.links[i].hard_limit = true;
                 }
             }
         }

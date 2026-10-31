@@ -285,8 +285,9 @@ pub enum Outcome {
     /// (a CloudWatch metric filter turns it into an alarm). Nobody is penalized. `flagged` are
     /// the versions this disagreement made nondeterministic (§11.5).
     Disagreement { log: String, flagged: Vec<u32> },
-    /// A bot of the item is flagged nondeterministic (§11.5): the item is deleted, a held
-    /// record released, nobody credited or penalized.
+    /// A bot of the item is flagged nondeterministic (§11.5), or the run hit the hard limit
+    /// ([`settle_hard_limit`]): the item is deleted, a held record released, nobody credited
+    /// or penalized.
     NoFault,
 }
 
@@ -660,6 +661,32 @@ fn confirm_colors<S: Store + ?Sized>(store: &S, bots: &[u32], a: &Run, b: &Run) 
         }
     }
     Ok(())
+}
+
+/// A verifier's run of the item in which a robot was disabled by the hard limit (ADR 0025):
+/// how far it got depends on the machine, so the run proves nothing either way. The item ends
+/// without judging anyone, as for a flagged bot; the bot isn't flagged, since that is the
+/// machine's doing, not the bot's (`resolve`'s checks of the claim apply).
+pub fn settle_hard_limit<S: Store + ?Sized>(
+    store: &S,
+    engine: u32,
+    sort: &str,
+    uid: &str,
+    now_ms: u64,
+) -> StoreResult<Outcome> {
+    let Some(item) = store.get_verify(engine, sort)? else {
+        return Ok(Outcome::Ignored);
+    };
+    if item.claimant.as_deref() != Some(uid)
+        || item.uids.iter().any(|u| u == uid)
+        || item.kind == VerifyKind::Probation
+        || item.runs.is_empty()
+        || !delete_claimed(store, engine, sort, uid)?
+    {
+        return Ok(Outcome::Ignored);
+    }
+    release_unproven(store, &item, now_ms)?;
+    Ok(Outcome::NoFault)
 }
 
 /// Deletes the item if it is still claimed by `uid`; `false` if it isn't.

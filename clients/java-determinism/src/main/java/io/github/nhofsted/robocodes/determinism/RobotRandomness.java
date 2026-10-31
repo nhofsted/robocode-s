@@ -112,6 +112,17 @@ public final class RobotRandomness {
     public static final long PICOS_PER_INSTRUCTION = 160;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
+    /**
+     * Classic's wall time per turn in the battles of robots that sleep in threads of their own,
+     * on the machine the clock was calibrated on (ADR 0014): measured 2026-10-31 with the
+     * classic oracle (1v1 TNT, Rapture and FlamingForest against lancel.Lynx 1.09: 7.2-9.5 ms,
+     * median 8.3). A robot with threads of its own takes this long per turn on its clock, so
+     * its threads' sleeps, timed waits and parks last as many turns as they did there; a main
+     * thread's sleep makes its turn late by a turn's budget for every such turn
+     * ({@link #sleepLateness}, ADR 0025).
+     */
+    public static final long CLASSIC_TURN_NANOS = 8_000_000;
+
     /** Value of the virtual {@code nanoTime()} before the robot did anything. */
     public static final long NANO_ORIGIN = 1_000_000_000_000L;
     /** Value of the virtual {@code currentTimeMillis()} before the robot did anything: 2026-01-01T00:00Z. */
@@ -153,7 +164,8 @@ public final class RobotRandomness {
      * method, so callers get this jar's value, not one javac copied into them.
      */
     public static int rulesVersion() {
-        return 1;
+        // 2: robots' own threads on one virtual CPU per robot, sleeps on the virtual clock (ADR 0025).
+        return 2;
     }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
@@ -374,7 +386,19 @@ public final class RobotRandomness {
                 instructions += count(fuel);
             }
         }
-        return elapsedNanos(0, instructions);
+        RobotRandomness randomness = current;
+        return elapsedNanos(0, instructions) + (randomness == null ? 0 : randomness.lateNanos());
+    }
+
+    /** The lateness the robots of this battle's main threads took by sleeping (ADR 0025). */
+    private long lateNanos() {
+        long late = 0;
+        synchronized (streams) {
+            for (Stream stream : streams.values()) {
+                late += stream.late();
+            }
+        }
+        return late;
     }
 
     /** Next value for a robot's {@code Math.random()}, or NaN outside robot threads. */
@@ -400,6 +424,12 @@ public final class RobotRandomness {
     private Random utilsRandom() {
         Stream stream = currentStream();
         return stream == null ? null : stream.utils;
+    }
+
+    /** The stream of the robot whose thread this is, or null (no battle, not a robot thread). */
+    static Stream streamOfCurrentThread() {
+        RobotRandomness randomness = current;
+        return randomness == null ? null : randomness.currentStream();
     }
 
     private Stream currentStream() {
@@ -459,6 +489,13 @@ public final class RobotRandomness {
     }
 
     /** The work counter of the robot whose classes {@code loader} defines. */
+    /** The work counter of the robot whose classes {@code loader} defines, if it has one yet. */
+    static long[] fuelOf(ClassLoader loader) {
+        synchronized (FUEL) {
+            return FUEL.get(loader);
+        }
+    }
+
     static Object fuel(Object loader) {
         long[] fuel;
         synchronized (FUEL) {
@@ -471,6 +508,9 @@ public final class RobotRandomness {
         Stream stream = randomness == null ? null : randomness.currentStream();
         if (stream != null) {
             stream.fuel = fuel;
+            if (stream.cutoffAt == 0) {
+                stream.cutoffAt = fuel[0];
+            }
         }
         return fuel;
     }
@@ -510,6 +550,29 @@ public final class RobotRandomness {
     }
 
     /**
+     * Reports the robot of the current thread as starting threads that aren't reproducible
+     * (ADR 0024): its threads use what the scheduler doesn't cover (ADR 0025).
+     */
+    static void reportThreads() {
+        RobotRandomness randomness = current;
+        if (randomness == null) {
+            return;
+        }
+        for (ThreadGroup group = Thread.currentThread().getThreadGroup(); group != null; group = group.getParent()) {
+            String name = group.getName();
+            if (randomness.isRobot(name)) {
+                if (THREAD_STARTERS.add(name)) {
+                    Runnable listener = threadListener;
+                    if (listener != null) {
+                        listener.run();
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    /**
      * Whether the robot's own code asked for the thread being started: the innermost frame
      * that is neither {@code Thread} nor one of the JDK's thread-starting facilities
      * ({@code Timer}, executors) is a class of a robot class loader. The JDK starts threads
@@ -522,7 +585,8 @@ public final class RobotRandomness {
         return java.security.AccessController.doPrivileged((java.security.PrivilegedAction<Boolean>) () ->
                 StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk(frames -> frames
                         .map(StackWalker.StackFrame::getDeclaringClass)
-                        .filter(c -> c != RobotRandomness.class && !isThreadStarter(c.getName()))
+                        .filter(c -> c != RobotRandomness.class && c != DeterminismAgent.class
+                                && !isThreadStarter(c.getName()))
                         .findFirst()
                         .map(c -> IdentityHashes.isRobotClassLoader(c.getClassLoader()))
                         .orElse(false)));
@@ -558,8 +622,9 @@ public final class RobotRandomness {
             stream.turn();
             long[] fuel = stream.fuel;
             if (fuel != null) {
-                // Classic's robot side, in robocode-s too: its work until the next turn.
-                limit(fuel, count(fuel) + CUTOFF_INSTRUCTIONS);
+                // Classic's robot side, in robocode-s too: its work until the next turn. A
+                // robot with threads of its own runs them now (ADR 0025).
+                RobotThreads.turn(stream, fuel);
             }
             if (CALIBRATE != null) {
                 stream.measureCpu();
@@ -599,7 +664,7 @@ public final class RobotRandomness {
         var published = (java.util.concurrent.atomic.AtomicReference<Object>) args[2];
         RobotRandomness randomness = current;
         Stream stream = randomness == null ? null : randomness.currentStream();
-        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, count(stream.fuel));
+        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, count(stream.fuel)) + stream.late();
         synchronized (PEERS) {
             PeerTurns turns = PEERS.computeIfAbsent(peer, p -> new PeerTurns());
             long work = turns.work < 0 ? 0 : Math.max(0, now - turns.work);
@@ -655,6 +720,16 @@ public final class RobotRandomness {
         }
     }
 
+    /**
+     * Lateness a main thread's sleep (or an idle stretch it waits out) of {@code nanos} costs
+     * the robot's turn: a turn's budget for every turn classic takes meanwhile
+     * ({@link #CLASSIC_TURN_NANOS}), so it misses about {@code nanos} / 8 ms turns (ADR 0025).
+     */
+    static long sleepLateness(long nanos) {
+        return nanos / CLASSIC_TURN_NANOS * TURN_BUDGET_NANOS
+                + nanos % CLASSIC_TURN_NANOS * TURN_BUDGET_NANOS / CLASSIC_TURN_NANOS;
+    }
+
     /** Virtual time a robot has spent: its turns and its counted work. */
     public static long elapsedNanos(long turns, long instructions) {
         return turns * TURN_NANOS + instructions * PICOS_PER_INSTRUCTION / 1000;
@@ -663,7 +738,7 @@ public final class RobotRandomness {
     private static long elapsedNanos(Object fuel) {
         RobotRandomness randomness = current;
         Stream stream = randomness == null ? null : randomness.currentStream();
-        return elapsedNanos(stream == null ? 0 : stream.turns(), count((long[]) fuel));
+        return stream == null ? elapsedNanos(0, count((long[]) fuel)) : stream.elapsedNanos(count((long[]) fuel));
     }
 
     /** Counts a robot's clock reads, for the calibration (robots that read it are left out). */
@@ -749,16 +824,30 @@ public final class RobotRandomness {
     }
 
     /** One robot's streams. */
-    private static final class Stream {
+    static final class Stream {
         private final long base;
         private final Random math;
         final Random utils;
         private long created;
         private long hashed;
         private long turns;
+        /** Its clock's turns: {@link #TURN_NANOS} each, {@link #CLASSIC_TURN_NANOS} once threaded. */
+        private long turnClock;
+        private boolean threaded;
+        /** Clock time slept with nothing else running, and the lateness that cost its turns (ADR 0025). */
+        private long slept;
+        private long late;
         private long tabled;
-        /** The robot's work counter, for the trace and the calibration only. */
+        /** The robot's work counter: for its threads (ADR 0025), the trace and the calibration. */
         volatile long[] fuel;
+        /** Its threads' scheduler, once robot code started a thread (ADR 0025); reset each round. */
+        RobotThreads threads;
+        /** Count at which the robot's code throws (ADR 0018); its limit may be lower, for its threads. */
+        volatile long cutoffAt;
+        /** Count when its main thread's last turn ended, for the turn's spare budget (ADR 0025). */
+        long turnStart;
+        /** Whether a class of the robot uses what its threads' scheduler doesn't cover (ADR 0025). */
+        volatile boolean uncovered;
         /** Calibration: clock reads, and the CPU time of the robot's threads at its turns. */
         long clockReads;
         long cpuNanos;
@@ -813,6 +902,31 @@ public final class RobotRandomness {
 
         synchronized void turn() {
             turns++;
+            turnClock += threaded ? CLASSIC_TURN_NANOS : TURN_NANOS;
+        }
+
+        /**
+         * The robot's virtual time with {@code instructions} counted (ADR 0014): its turns (a
+         * turn is 1 ms, 8 ms once it has threads of its own, ADR 0025), its counted work and
+         * the time its threads slept while nothing else ran.
+         */
+        synchronized long elapsedNanos(long instructions) {
+            return turnClock + slept + instructions * PICOS_PER_INSTRUCTION / 1000;
+        }
+
+        /** Time passes that nobody worked: the clock moves on, and the turn is {@code lateNanos} later. */
+        synchronized void addSleep(long clockNanos, long lateNanos) {
+            slept += clockNanos;
+            late += lateNanos;
+        }
+
+        synchronized long late() {
+            return late;
+        }
+
+        /** From now on its turns take classic's time (ADR 0025): it has threads of its own. */
+        synchronized void threaded() {
+            threaded = true;
         }
 
         synchronized long turns() {

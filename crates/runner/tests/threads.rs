@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Robots that start threads of their own are reported (ADR 0024); robots that don't, aren't.
+//! Robots that start threads of their own that the scheduler doesn't run deterministically
+//! (ADR 0025) are reported (ADR 0024); other robots aren't.
 //! Needs Java and the built robot host, agent and robots (`./gradlew
 //! :clients:java-compat:installDist :clients:java-determinism:jar :robots:samples:jar
 //! :robots:testbots:jar`), so it is ignored by default: run it with `cargo test -p
@@ -38,9 +39,15 @@ fn robots_that_start_threads_are_reported() {
         "testbots.Threads".to_string(),
         "sample.Walls".to_string(),
         "testbots.Timers".to_string(),
+        "testbots.Monitors".to_string(),
+        "testbots.Virtual".to_string(),
     ];
     let (host, battle) = prepare(&env, &robots, config, 256).unwrap();
     let local = run_local_battle(&host, &battle, None, |_| {}).unwrap();
-    // By robot index: a thread of the robot's own (also a Timer's), and only those.
-    assert_eq!(local.outcome.threads, [false, true, false, true]);
+    // By robot index: the scheduler runs the threads of testbots.Threads, Timers (a Timer's) and
+    // Monitors deterministically; only testbots.Virtual's virtual thread is reported.
+    assert_eq!(
+        local.outcome.threads,
+        [false, false, false, false, false, true]
+    );
 }

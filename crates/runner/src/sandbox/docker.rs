@@ -343,6 +343,12 @@ fn run_args(engine: Engine, name: &str, user: &User, grants: &Grants) -> io::Res
         HOME,
         "--env",
         &format!("HOME={HOME}"),
+        // A fixed environment (ADR 0025): the pinned image's, and the time zone and host name
+        // of the other sandboxes, not the container's id.
+        "--env",
+        "TZ=UTC",
+        "--hostname",
+        "robocode-s",
     ]
     .into_iter()
     .map(OsString::from)
@@ -458,7 +464,7 @@ mod tests {
         ] {
             assert!(!a.iter().any(|x| x == flag), "{flag} in {a:?}");
         }
-        assert_eq!(a.iter().filter(|x| *x == "--env").count(), 1);
+        assert_eq!(a.iter().filter(|x| *x == "--env").count(), 2); // HOME, TZ
         assert!(a.ends_with(&[IMAGE.to_string(), "java".to_string()]));
     }
 

@@ -310,6 +310,24 @@ fn an_engine_mismatch_refuses_to_start() {
 }
 
 #[test]
+fn a_java_other_than_the_pinned_one_refuses_to_start() {
+    let (_fake, server) = Fake::new(1, 1).start();
+    let data = temp("java");
+    // A Java runtime of another build of the same version (a distribution's OpenJDK).
+    let home = data.join("other-jdk");
+    std::fs::create_dir_all(home.join("bin")).unwrap();
+    std::fs::write(home.join("bin").join("java"), "").unwrap();
+    std::fs::write(home.join("release"), "IMPLEMENTOR=\"Ubuntu\"\n").unwrap();
+    let mut config = light(&server, &data, 1);
+    config.options.env.java = Some(home.join("bin").join("java"));
+    config.options.env.sandbox = Sandbox::None;
+    let Err(Fatal::Host(why)) = Contributor::new(config) else {
+        panic!("started");
+    };
+    assert!(why.contains("Temurin-"), "{why}");
+}
+
+#[test]
 fn an_unknown_token_asks_for_a_login() {
     let (fake, server) = Fake::new(1, 1).start();
     fake.unauthorized.store(true, Ordering::SeqCst);

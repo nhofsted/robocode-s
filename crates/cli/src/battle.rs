@@ -527,6 +527,13 @@ pub fn run(o: &Options) -> Result<(), String> {
         .filter(|(_, started)| **started)
         .map(|(s, _)| s.name.as_str())
         .collect();
+    // Robots disabled by the hard limit: that depends on the machine (ADR 0025).
+    let hard_limits: Vec<&str> = statics
+        .iter()
+        .zip(&local.outcome.hard_limits)
+        .filter(|(_, hit)| **hit)
+        .map(|(s, _)| s.name.as_str())
+        .collect();
     if o.json {
         let out = serde_json::json!({
             "seed": seed,
@@ -538,6 +545,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "agents": placements,
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "threads": threads,
+            "hardLimit": hard_limits,
             "results": results::json(&rows),
         });
         println!("{out}");
@@ -570,6 +578,14 @@ pub fn run(o: &Options) -> Result<(), String> {
             println!(
                 "\nStarted threads of their own, so this battle isn't reproducible: {}",
                 threads.join(", ")
+            );
+        }
+        if !hard_limits.is_empty() {
+            println!(
+                "\nDisabled by the hard limit (a turn took longer than {} s on this machine), so \
+                 this battle may end differently elsewhere: {}",
+                ServerConfig::default().hard_limit.as_secs(),
+                hard_limits.join(", ")
             );
         }
     }
