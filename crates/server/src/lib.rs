@@ -1314,9 +1314,14 @@ impl<'a> BattleLoop<'a> {
             // the robot learns of its skipped turns and is then disabled.
             let disabled = skipped.as_ref().is_some_and(|s| s.disable);
             let mut turn_events = Vec::new();
+            // Classic's robot gets the status published at the end of the turn, before the
+            // disable.
+            let mut published = None;
             if let Some(skipped) = &skipped {
                 if skipped.disable {
-                    turn_events = self.engine.driver.battle.take_events(i);
+                    let battle = &mut self.engine.driver.battle;
+                    published = Some(convert::status(&battle.status(i)));
+                    turn_events = battle.take_events(i);
                     self.engine.input(Entry::DiscardCommands(i as i32));
                     self.engine.input(Entry::Disable(i as i32));
                     // Classic then stops the robot's thread: its code doesn't run again.
@@ -1336,7 +1341,7 @@ impl<'a> BattleLoop<'a> {
             // died (not halted; a disabled robot is both dead and halted, and has stopped).
             let final_execute = !round_over && (alive || !robot.is_halted());
             let should_wait = battle.aborted || (battle.is_last_round() && robot.is_winner());
-            let status = convert::status(&battle.status(i));
+            let status = published.unwrap_or_else(|| convert::status(&battle.status(i)));
             let commands = convert::commands_copy(&robot.commands, &driver.passthrough[i]);
             let link = &mut self.links[i];
             if !link.active {
