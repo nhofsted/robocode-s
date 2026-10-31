@@ -369,6 +369,11 @@ pub struct RobotResult {
     /// The robot started threads of its own: its battles aren't reproducible (ADR 0014).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub threads: bool,
+    /// The robot was disabled by the hard limit: a turn took it longer than the limit in
+    /// real time (deterministic mode, ADR 0025). That depends on the machine, not only on the
+    /// battle, so the battle is never verified (ADR 0023).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hard_limit: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

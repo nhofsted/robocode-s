@@ -379,6 +379,7 @@ mod tests {
             rank: 1,
             colors: None,
             threads: false,
+            hard_limit: false,
         }
     }
 

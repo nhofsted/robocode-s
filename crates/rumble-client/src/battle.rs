@@ -360,6 +360,7 @@ impl Runner {
             .map(|(i, r)| RobotResult {
                 colors: observer.colors.get(i).cloned().flatten(),
                 threads: ran.outcome.threads.get(i).copied().unwrap_or(false),
+                hard_limit: ran.outcome.hard_limits.get(i).copied().unwrap_or(false),
                 ..robot_result(r)
             })
             .collect();
@@ -445,6 +446,7 @@ fn robot_result(r: &v1::Results) -> RobotResult {
         rank: r.rank.max(0) as u32,
         colors: None,
         threads: false,
+        hard_limit: false,
     }
 }
 

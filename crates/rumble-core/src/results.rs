@@ -344,6 +344,8 @@ pub fn apply_results<S: Store + ?Sized>(
     let mut seeds = Vec::new();
     let mut checks = Vec::new();
     let mut runs = Vec::new();
+    // Verification runs in which a robot hit the hard limit: no fault (ADR 0025).
+    let mut hard_limited = Vec::new();
     let mut finished = Vec::new();
     let mut given_back = Vec::new();
     let mut slot_battles = Vec::new();
@@ -358,6 +360,8 @@ pub fn apply_results<S: Store + ?Sized>(
         let battle = by_index[&index];
         let assigned = &payload.b[index as usize];
         let ran = matches!(battle.status, BattleStatus::Ok | BattleStatus::RobotFailed);
+        // A robot disabled by the hard limit: how far it got depends on the machine (ADR 0025).
+        let hard_limit = battle.robots.iter().flatten().any(|r| r.hard_limit);
         if ran {
             for (vid, robot) in assigned.vids.iter().zip(battle.robots.iter().flatten()) {
                 if robot.threads {
@@ -388,6 +392,9 @@ pub fn apply_results<S: Store + ?Sized>(
                     continue;
                 };
                 match record() {
+                    Ok(_) if ran && state == UserState::New && hard_limit => {
+                        hard_limited.push(sort.clone())
+                    }
                     Ok(record) if ran && state == UserState::New => runs.push((
                         index,
                         sort.clone(),
@@ -431,7 +438,10 @@ pub fn apply_results<S: Store + ?Sized>(
                     }
                 }
                 let wanted = held || (state == UserState::New && random.chance(rate));
-                if wanted && verify::any_nondeterministic(store, &assigned.vids, &mut flags)? {
+                if wanted
+                    && (hard_limit
+                        || verify::any_nondeterministic(store, &assigned.vids, &mut flags)?)
+                {
                     // Nobody can be proven wrong by it: a held record is released at once.
                     if held {
                         unheld.push((index, assigned.seed, record.to_bytes()));
@@ -534,6 +544,9 @@ pub fn apply_results<S: Store + ?Sized>(
     }
     for sort in &given_back {
         verify::release_claim(store, engine, sort, &user.uid)?;
+    }
+    for sort in &hard_limited {
+        verify::settle_hard_limit(store, engine, sort, &user.uid, now_ms)?;
     }
     for (index, sort, run) in runs {
         let origin = format!("{}.{index}", payload.id);
@@ -781,6 +794,7 @@ mod tests {
             rank: 1,
             colors: None,
             threads: false,
+            hard_limit: false,
         }
     }
 
@@ -1266,6 +1280,58 @@ mod tests {
     }
 
     #[test]
+    fn battles_with_a_hard_limit_are_not_verified_and_flag_nobody() {
+        let mut always = config();
+        always.rep.start_rate = 1.0;
+        always.rep.floor_rate = 1.0;
+        let p = payload(
+            "g1",
+            vec![assigned(BattleKind::Normal, 1, &[5, 9], None); 2],
+        );
+        // Robot 1 (vid 9) was disabled by the hard limit in battle 0.
+        let mut slow = ok(0, 1);
+        slow.robots.as_mut().unwrap()[1].hard_limit = true;
+        let r = request(&p, vec![slow, ok(1, 2)]);
+        let (store, user) = setup(0, UserState::New);
+        let out = post_with(&store, &user, &always, &|_, _| false, &r, NOW_MS).unwrap();
+        // Only battle 1 is checked; battle 0 counts.
+        let items = store.verify_items(1);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].sort.ends_with(".1"), "{}", items[0].sort);
+        assert_eq!(store.log_items(1)[0].battles, 2);
+        // The machine's doing, not the robot's: no flag, no alert.
+        for vid in [5, 9] {
+            assert_eq!(
+                store.get_version(vid).unwrap().unwrap().nondeterministic,
+                None
+            );
+        }
+        assert!(out.log.is_empty());
+        assert!(store.list_alerts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_quarantined_users_battles_with_a_hard_limit_are_released_at_once() {
+        let (store, user) = setup(0, UserState::Quarantined);
+        let p = payload("g1", vec![assigned(BattleKind::Normal, 1, &[5, 9], None)]);
+        let mut slow = ok(0, 1);
+        slow.robots.as_mut().unwrap()[0].hard_limit = true;
+        post_with(
+            &store,
+            &user,
+            &config(),
+            &|_, _| false,
+            &request(&p, vec![slow]),
+            NOW_MS,
+        )
+        .unwrap();
+        assert!(store.verify_items(1).is_empty(), "nothing to verify");
+        let logs = store.log_items(1);
+        assert_eq!(logs.len(), 2);
+        assert!(logs[0].held && !logs[1].held, "released");
+    }
+
+    #[test]
     fn a_quarantined_users_flagged_battles_are_released_at_once() {
         let (store, user) = setup(0, UserState::Quarantined);
         store
@@ -1404,6 +1470,91 @@ mod tests {
         // g1's log item holds the probation battle only: the verify run isn't counted again.
         assert_eq!(logs[0].seeds, [6]);
         assert_eq!(logs[1].seeds, [5]);
+    }
+
+    #[test]
+    fn a_verification_run_with_a_hard_limit_judges_nobody() {
+        let (store, user) = setup(60, UserState::New);
+        store
+            .create_user(&User {
+                uid: "g2".into(),
+                ..User::default()
+            })
+            .unwrap();
+        let theirs = ok(0, 7);
+        let record =
+            Record::from_battle(Division::OneVsOne, "g2", &[5, 9], &theirs, false).unwrap();
+        store
+            .put_verify(&VerifyItem {
+                engine: 1,
+                sort: "0000000000001#x.0".into(),
+                division: Division::OneVsOne,
+                seed: 5,
+                bots: vec![5, 9],
+                rounds: ROUNDS,
+                uids: vec!["g2".into()],
+                runs: vec![Run {
+                    uid: "g2".into(),
+                    hash: Some(hex(7)),
+                    record: record.to_bytes(),
+                    held: true,
+                    colors: Vec::new(),
+                }],
+                stage: 1,
+                claimant: None,
+                claim_until: None,
+                kind: VerifyKind::Check,
+                ttl: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            verify::take_work(&store, 1, "g1", 5, NOW + 3600, NOW)
+                .unwrap()
+                .len(),
+            1
+        );
+        let p = payload(
+            "g1",
+            vec![assigned(
+                BattleKind::Verify,
+                5,
+                &[5, 9],
+                Some("0000000000001#x.0"),
+            )],
+        );
+        // A different result, but a robot hit the hard limit on g1's machine.
+        let mut slow = ok(0, 99);
+        slow.robots.as_mut().unwrap()[0].hard_limit = true;
+        let mut never = config();
+        never.rep.start_rate = 0.0;
+        never.rep.floor_rate = 0.0;
+        let out = post_with(
+            &store,
+            &user,
+            &never,
+            &|_, _| false,
+            &request(&p, vec![slow]),
+            NOW_MS,
+        )
+        .unwrap();
+        assert!(store.verify_items(1).is_empty(), "settled");
+        assert!(out.log.is_empty());
+        assert!(store.list_alerts().unwrap().is_empty(), "no penalty");
+        assert_eq!(store.get_user("g1").unwrap().unwrap().reputation.rep, 60);
+        assert_eq!(store.get_user("g2").unwrap().unwrap().reputation.rep, 0);
+        // g2's held record was never proven wrong: released.
+        let logs = store.log_items(1);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(
+            (logs[0].uid.as_str(), logs[0].seeds.as_slice()),
+            ("g2", &[5][..])
+        );
+        for vid in [5, 9] {
+            assert_eq!(
+                store.get_version(vid).unwrap().unwrap().nondeterministic,
+                None
+            );
+        }
     }
 
     #[test]
