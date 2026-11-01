@@ -25,13 +25,13 @@ use rumble_core::Config;
 use rumble_core::cleanup::recording_group;
 use rumble_core::cleanup::{
     CleanupState, PURGE_ALERT, Pending, PurgeCursor, ban_corrections, ban_cursor, correction_items,
-    correction_prefix, dead_versions, doomed, parse_purge_reference, previous_hour,
-    purge_correction_prefix, purge_corrections, purge_cursor, version_dir,
+    correction_prefix, dead_versions, died_before_rumble, doomed, parse_purge_reference,
+    previous_hour, purge_correction_prefix, purge_corrections, purge_cursor, version_dir,
 };
 use rumble_core::ids::Division;
 use rumble_core::plan::Plan;
 use rumble_core::recordings::{entry_key, legacy_entries, listing, version_names};
-use rumble_core::store::{LogItem, StoreError, UserState, VersionState, hour_key};
+use rumble_core::store::{LogItem, StoreError, UserState, VersionItem, VersionState, hour_key};
 use rumble_core::verify::BAN_ALERT;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -87,7 +87,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<CleanupReport, String> {
     let key = cleanup_key(engine);
     let mut state: CleanupState = batch.read_json(Bucket::State, &key)?.unwrap_or_default();
     let mut report = CleanupReport::default();
-    dead_versions_cleanup(batch, engine, &mut state, &mut report, start_ms)?;
+    dead_versions_cleanup(batch, engine, &key, &mut state, &mut report, start_ms)?;
     batch.write_state_json(&key, &state)?;
     bans(batch, engine, &key, &mut state, &mut report, start_ms)?;
     batch.write_state_json(&key, &state)?;
@@ -168,17 +168,39 @@ fn reopen_without_order(
     Ok(())
 }
 
+/// Dead versions cleaned per step: their slot items are looked up 1.5 RCU each, paced, so a
+/// chunk takes about a minute at most; the cleaned set is saved after each.
+const DEAD_CHUNK: usize = 5;
+
+/// Cleans the dead versions within the time budget, a chunk at a time, saving the cleaned set
+/// after each chunk: a backlog (2026-10-26: 3,793 retired versions from the archives) is
+/// worked off over several runs instead of timing out every run. Versions that died before
+/// the rumble began are only marked ([`died_before_rumble`]).
 fn dead_versions_cleanup(
     batch: &Batch,
     engine: u32,
+    key: &str,
     state: &mut CleanupState,
     report: &mut CleanupReport,
     start_ms: u64,
 ) -> Result<(), String> {
     let store = batch.store();
     let versions = store.list_versions().map_err(|e| e.to_string())?;
-    let dead = dead_versions(&versions, state);
-    if dead.is_empty() {
+    let (historic, recent): (Vec<&VersionItem>, Vec<&VersionItem>) =
+        dead_versions(&versions, state)
+            .into_iter()
+            .partition(|v| died_before_rumble(v));
+    if !historic.is_empty() {
+        for version in &historic {
+            state.cleaned.insert(version.vid);
+        }
+        println!(
+            "cleanup: {} versions that died before the rumble began marked cleaned",
+            historic.len()
+        );
+        batch.write_state_json(key, state)?;
+    }
+    if recent.is_empty() {
         return Ok(());
     }
     let keys = batch
@@ -194,41 +216,54 @@ fn dead_versions_cleanup(
                 .unwrap_or_default(),
             _ => Default::default(),
         };
-    let (recordings, slots) = doomed(&keys, engine, &versions, &dead, &top, &slot_pairs);
-    let removed_dirs: Vec<String> = dead
-        .iter()
-        .filter(|v| v.state == VersionState::Removed)
-        .map(|v| format!("/{}/", version_dir(v)))
-        .collect();
+    // At least a chunk a run, then up to half the budget, checked between chunks (a chunk is
+    // short: about 40 s paced), so a backlog leaves the ban removals and purges their time.
+    let over = || batch.now_ms().saturating_sub(start_ms) > batch.budget_ms / 2;
     let mut paths = Vec::new();
-    for key in &recordings {
-        batch.objects().delete(Bucket::Jars, key)?;
-        report.recordings_deleted += 1;
-        if removed_dirs.iter().any(|d| key.contains(d.as_str())) {
-            paths.push(format!("/{key}"));
-        }
-    }
     let mut pace = Pace::new(batch, READ_RATE);
-    for (division, slot_key) in &slots {
-        pace.take(1.5);
-        if store
-            .get_slots(engine, *division, slot_key)
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            store
-                .delete_slots(engine, *division, slot_key)
-                .map_err(|e| e.to_string())?;
-            report.slot_items_deleted += 1;
+    for (n, chunk) in recent.chunks(DEAD_CHUNK).enumerate() {
+        if n > 0 && over() {
+            break;
         }
-    }
-    for version in dead.iter().filter(|v| v.state == VersionState::Removed) {
-        let jar = jar_key(&version.sha256);
-        if batch.objects().exists(Bucket::Jars, &jar)? {
-            batch.objects().delete(Bucket::Jars, &jar)?;
-            report.jars_deleted += 1;
-            paths.push(format!("/{jar}"));
+        let (recordings, slots) = doomed(&keys, engine, &versions, chunk, &top, &slot_pairs);
+        let removed_dirs: Vec<String> = chunk
+            .iter()
+            .filter(|v| v.state == VersionState::Removed)
+            .map(|v| format!("/{}/", version_dir(v)))
+            .collect();
+        for key in &recordings {
+            batch.objects().delete(Bucket::Jars, key)?;
+            report.recordings_deleted += 1;
+            if removed_dirs.iter().any(|d| key.contains(d.as_str())) {
+                paths.push(format!("/{key}"));
+            }
         }
+        for (division, slot_key) in &slots {
+            pace.take(1.5);
+            if store
+                .get_slots(engine, *division, slot_key)
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                store
+                    .delete_slots(engine, *division, slot_key)
+                    .map_err(|e| e.to_string())?;
+                report.slot_items_deleted += 1;
+            }
+        }
+        for version in chunk.iter().filter(|v| v.state == VersionState::Removed) {
+            let jar = jar_key(&version.sha256);
+            if batch.objects().exists(Bucket::Jars, &jar)? {
+                batch.objects().delete(Bucket::Jars, &jar)?;
+                report.jars_deleted += 1;
+                paths.push(format!("/{jar}"));
+            }
+        }
+        for version in chunk {
+            state.cleaned.insert(version.vid);
+            report.versions_cleaned.push(version.vid);
+        }
+        batch.write_state_json(key, state)?;
     }
     if !paths.is_empty() {
         batch
@@ -237,11 +272,7 @@ fn dead_versions_cleanup(
             .invalidate(&paths, &format!("cleanup-{start_ms}"))?;
         println!("cleanup: invalidated {} paths", paths.len());
     }
-    report.invalidated = paths;
-    for version in &dead {
-        state.cleaned.insert(version.vid);
-        report.versions_cleaned.push(version.vid);
-    }
+    report.invalidated.extend(paths);
     Ok(())
 }
 

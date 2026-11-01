@@ -107,6 +107,17 @@ pub fn version_dir(version: &VersionItem) -> String {
     format!("{}_{sha16}", version.bot)
 }
 
+/// The first battles of the rumble (engine version 1): 2026-10-24T00:00Z.
+pub const RUMBLE_START: u64 = 1_792_800_000;
+
+/// A dead version that died before the rumble began (the archives' history, §16.6: retired
+/// at the date the RoboWiki lists dropped it) can't have recordings or slot items, so
+/// cleaning it is only marking it. A removed one still has a jar to delete.
+pub fn died_before_rumble(version: &VersionItem) -> bool {
+    version.state != VersionState::Removed
+        && version.retired.unwrap_or(version.created) < RUMBLE_START
+}
+
 /// Versions that are retired, failed or removed and not cleaned yet.
 pub fn dead_versions<'a>(
     versions: &'a [VersionItem],
@@ -647,6 +658,27 @@ mod tests {
         let decoded = Record::decode_all(&items[0].records, SYSTEM_UID).unwrap();
         assert!(decoded.iter().all(|r| r.weight == -1));
         assert_eq!(previous_hour(2026102400), 2026102323);
+    }
+
+    #[test]
+    fn versions_that_died_before_the_rumble_have_nothing_to_clean() {
+        let mut old = version(1, "a.A", VersionState::Retired);
+        old.created = RUMBLE_START - 400 * DAY;
+        old.retired = Some(RUMBLE_START - 100 * DAY);
+        assert!(died_before_rumble(&old));
+        let mut never_retired = old.clone();
+        never_retired.state = VersionState::Failed;
+        never_retired.retired = None;
+        assert!(died_before_rumble(&never_retired), "by its registration");
+        let mut taken_down = old.clone();
+        taken_down.state = VersionState::Removed;
+        assert!(
+            !died_before_rumble(&taken_down),
+            "its jar goes all the same"
+        );
+        let mut recent = old.clone();
+        recent.retired = Some(RUMBLE_START + DAY);
+        assert!(!died_before_rumble(&recent));
     }
 
     #[test]
