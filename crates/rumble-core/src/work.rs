@@ -229,6 +229,7 @@ impl WorkServer {
                 wanted.div_ceil(2),
                 deadline,
                 now,
+                config.rep.settle_before,
             )?;
             if items.is_empty() {
                 self.queue_empty_until

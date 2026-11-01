@@ -275,11 +275,14 @@ pub fn correction_prefix(started_ms: u64, uid: &str, source: u32) -> String {
     format!("{started_ms:013}#ban.{uid}.{source}.")
 }
 
-/// A purge (§12.4): the battles of some versions up to an hour are taken out of the pairing
-/// state, so that they are fought again; for battles whose results a change of the
-/// deterministic rules changed (#15). The log is walked backwards like a ban's, from `until`
-/// down to the oldest purged version's registration (at most the log's 400 days), and every
-/// counted record with a purged version gets a correction (weight −1, uid `system`).
+/// A purge (§12.4): the battles of some versions are taken out of the pairing state, so that
+/// they are fought again; for battles whose results a change of the deterministic rules
+/// changed (#15). `until` is the hour of that change, over before the purge starts. The log
+/// is walked backwards like a ban's, from the hour the purge starts (so records released
+/// meanwhile, of items queued before the change, are caught too; the few battles fought
+/// with the new rules in between are fought again) down to the oldest purged version's
+/// registration (at most the log's 400 days), and every counted record with a purged
+/// version gets a correction (weight −1, uid `system`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PurgeCursor {
     pub started_ms: u64,
@@ -294,19 +297,37 @@ pub struct PurgeCursor {
     pub cancelled: Vec<String>,
     pub pending: Option<Pending>,
     pub corrected: u64,
+    /// Every recording (track and slot item) goes too: after a rules change none can be
+    /// shown to be what the robots would do now (§12.4).
+    #[serde(default)]
+    pub recordings: bool,
+    #[serde(default)]
+    pub recordings_done: bool,
 }
 
 /// The `kind` of the alert that asks for a purge (`POST admin/purge`).
 pub const PURGE_ALERT: &str = "purge";
 
-/// What a purge alert's `reference` holds: `<id> <until hour> <vid>,<vid>,...`.
-pub fn purge_reference(id: &str, until: u32, vids: &BTreeSet<u32>) -> String {
+/// What a purge alert's `reference` holds: `<id> <until hour> <vid>,<vid>,...`, and ` rec`
+/// if every recording goes too.
+pub fn purge_reference(id: &str, until: u32, vids: &BTreeSet<u32>, recordings: bool) -> String {
     let vids: Vec<String> = vids.iter().map(u32::to_string).collect();
-    format!("{id} {until} {}", vids.join(","))
+    let rec = if recordings { " rec" } else { "" };
+    format!("{id} {until} {}{rec}", vids.join(","))
 }
 
-/// The id, the last hour and the versions of a purge alert's `reference`.
-pub fn parse_purge_reference(reference: &str) -> Option<(String, u32, BTreeSet<u32>)> {
+/// A purge alert's `reference`, read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PurgeAsked {
+    pub id: String,
+    pub until: u32,
+    pub vids: BTreeSet<u32>,
+    pub recordings: bool,
+}
+
+/// The id, the switch's hour, the versions and whether every recording goes, of a purge
+/// alert's `reference`.
+pub fn parse_purge_reference(reference: &str) -> Option<PurgeAsked> {
     let mut parts = reference.split(' ');
     let id = parts.next()?.to_string();
     let until = parts.next()?.parse().ok()?;
@@ -315,15 +336,25 @@ pub fn parse_purge_reference(reference: &str) -> Option<(String, u32, BTreeSet<u
         .split(',')
         .map(|v| v.parse().ok())
         .collect::<Option<BTreeSet<u32>>>()?;
-    (!id.is_empty() && !vids.is_empty() && parts.next().is_none()).then_some((id, until, vids))
+    let recordings = match parts.next() {
+        None => false,
+        Some("rec") => true,
+        Some(_) => return None,
+    };
+    (!id.is_empty() && !vids.is_empty() && parts.next().is_none()).then_some(PurgeAsked {
+        id,
+        until,
+        vids,
+        recordings,
+    })
 }
 
-/// A new purge's cursor: from `until` down to the oldest of `versions` (their records
-/// can't be older), or the log's 400 days, whichever is later.
+/// A new purge's cursor: from the hour it starts down to the oldest of `versions` (their
+/// records can't be older), or the log's 400 days, whichever is later.
 pub fn purge_cursor(
     vids: BTreeSet<u32>,
     reason: &str,
-    until: u32,
+    recordings: bool,
     versions: &[VersionItem],
     now_ms: u64,
 ) -> PurgeCursor {
@@ -339,11 +370,13 @@ pub fn purge_cursor(
         vids,
         reason: reason.to_string(),
         queue_done: false,
-        next: until,
+        next: hour_key(now),
         stop: hour_key(oldest.max(now.saturating_sub(LOG_TTL + DAY))),
         cancelled: Vec::new(),
         pending: None,
         corrected: 0,
+        recordings,
+        recordings_done: false,
     }
 }
 
@@ -619,12 +652,19 @@ mod tests {
     #[test]
     fn purge_references_round_trip() {
         let vids: BTreeSet<u32> = [3, 17, 900].into();
-        let reference = purge_reference("rules3", 2026110312, &vids);
+        let reference = purge_reference("rules3", 2026110312, &vids, false);
         assert_eq!(reference, "rules3 2026110312 3,17,900");
-        assert_eq!(
-            parse_purge_reference(&reference),
-            Some(("rules3".to_string(), 2026110312, vids))
-        );
+        let asked = |recordings| PurgeAsked {
+            id: "rules3".to_string(),
+            until: 2026110312,
+            vids: vids.clone(),
+            recordings,
+        };
+        assert_eq!(parse_purge_reference(&reference), Some(asked(false)));
+        let reference = purge_reference("rules3", 2026110312, &vids, true);
+        assert_eq!(reference, "rules3 2026110312 3,17,900 rec");
+        assert_eq!(parse_purge_reference(&reference), Some(asked(true)));
+        assert_eq!(parse_purge_reference("x 2026110312 1 tracks"), None);
         assert_eq!(parse_purge_reference("x 2026110312 "), None);
         assert_eq!(parse_purge_reference("x 2026110312 1,a"), None);
         assert_eq!(parse_purge_reference("x"), None);
@@ -636,8 +676,8 @@ mod tests {
             version(1, "a.A", VersionState::Active),
             version(2, "b.B", VersionState::Active),
         ];
-        let mut cursor = purge_cursor([1].into(), "rules 3", 2026102412, &versions, NOW * 1000);
-        assert_eq!((cursor.next, cursor.stop), (2026102412, hour_key(NOW)));
+        let mut cursor = purge_cursor([1].into(), "rules 3", false, &versions, NOW * 1000);
+        assert_eq!((cursor.next, cursor.stop), (hour_key(NOW), hour_key(NOW)));
         // A later partition: a verification corrected a record of version 1 (the original
         // with weight -1, the majority's +1, both system's).
         let later = log(
@@ -677,7 +717,7 @@ mod tests {
         assert_eq!(out, vec![(from("g8", record(3, 1, 20.0)), 8)]);
         assert!(cursor.cancelled.is_empty());
         // A correction and its original in the same partition cancel each other.
-        let mut cursor = purge_cursor([2].into(), "rules 3", 2026102412, &versions, NOW * 1000);
+        let mut cursor = purge_cursor([2].into(), "rules 3", false, &versions, NOW * 1000);
         let same = vec![
             log("g7", &[(record(1, 2, 70.0), 5)], false),
             log(SYSTEM_UID, &[(record(1, 2, 70.0).negated(), 5)], false),

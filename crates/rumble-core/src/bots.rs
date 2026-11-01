@@ -798,7 +798,7 @@ pub fn purge<S: Store + ?Sized>(
     }
     if store.list_alerts()?.iter().any(|a| {
         a.kind == PURGE_ALERT
-            && parse_purge_reference(&a.reference).is_some_and(|(id, _, _)| id == request.id)
+            && parse_purge_reference(&a.reference).is_some_and(|p| p.id == request.id)
     }) {
         return Err(conflict(format!("purge {} exists", request.id)));
     }
@@ -825,12 +825,17 @@ pub fn purge<S: Store + ?Sized>(
             sort: format!("{now_ms:013}#purge.{}", request.id),
             kind: PURGE_ALERT.to_string(),
             text: format!(
-                "purge {}: battles of {} versions up to {}: {reason}",
+                "purge {}: battles of {} versions{}, rules changed in {}: {reason}",
                 request.id,
                 vids.len(),
+                if request.all_recordings {
+                    " and every recording"
+                } else {
+                    ""
+                },
                 request.until
             ),
-            reference: purge_reference(&request.id, request.until, &vids),
+            reference: purge_reference(&request.id, request.until, &vids, request.all_recordings),
             ttl: now_ms / 1000 + ALERT_TTL,
         })?;
     }
@@ -1610,6 +1615,7 @@ mod tests {
             ],
             until,
             reason: "rules 3".into(),
+            all_recordings: false,
             dry_run,
         };
         let now_ms = NOW * 1000;
@@ -1624,14 +1630,10 @@ mod tests {
         assert!(stored.stored);
         let alerts = store.list_alerts().unwrap();
         assert_eq!(alerts.len(), 1);
-        assert_eq!(
-            parse_purge_reference(&alerts[0].reference),
-            Some((
-                "rules3".to_string(),
-                past,
-                dry.vids.iter().copied().collect()
-            ))
-        );
+        let asked = parse_purge_reference(&alerts[0].reference).unwrap();
+        assert_eq!((asked.id.as_str(), asked.until), ("rules3", past));
+        assert_eq!(asked.vids, dry.vids.iter().copied().collect());
+        assert!(!asked.recordings);
         let code = |r: &PurgeRequest| purge(&store, r, now_ms).unwrap_err().code;
         assert_eq!(
             code(&request("rules3", past, false)),

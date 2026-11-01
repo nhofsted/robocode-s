@@ -70,6 +70,7 @@ All tunables are one struct, `rumble_core::Config`, with the defaults below in c
 | `rep.recheckOnPenalty` | 20 | Recent battles re-verified when a user is penalized. |
 | `rep.banMismatches` | 3 | Confirmed mismatches within `rep.banWindowDays` (90) that ban. |
 | `rep.ndDisagreements` | 3 | Three-way disagreements after which the version that stands out is flagged nondeterministic (§11.5); 0 turns the automatic flag off. |
+| `rep.settleBefore` | 0 | Unix ms: verification items queued before it are settled without judging anyone (held records released), when served or resolved; set with `minClient` when the deterministic rules change (§12.4). 0: off. |
 | `probation.battles` | 10 | Battles before a new version is ranked. |
 | `probation.failShare` | 0.8 | Share of failed battles that fails probation (and deactivates an active bot over its last 20). |
 | `slots.top` | 50 | Matchups with a bot ranked this high or better get recording slots (1v1 also each bot's best, worst and problem pairings, §12.5). |
@@ -552,21 +553,32 @@ The client runs the same validation before it uploads (import, and `rumble submi
 
 A retired version's pairings leave the pairing state at the next plan; its history stays in its bot file. Its recordings are deleted by `cleanup` (S3 deletes are free), its slot items are deleted (1 WCU each). A **delisted** version (§16.5) is not dead: its pairings stay in the state, frozen (it is not planned, and rankings only use pairings between members), and its recordings, slot items and jar stay, so it is back as it was when it is listed again.
 
-**Purge** (2026-11-01, #15): `POST admin/purge` takes the battles of some versions up to an
-hour out of the pairing state, so that they are fought again: for battles a change of the
-deterministic rules (`DETERMINISTIC_RULES`, without an engine version change) would have
-ended differently, e.g. new work prices. It stores a `purge` alert (`reference`: `<id>
-<until> <vid>,...`; a used id is refused, and `until` must be over); `cleanup` then works
-like a ban removal (§11.3): it deletes the open verification items with one of the versions
-(a verifier with the new rules would disagree, and a correction after the purge would
-cancel a record twice), and walks the log backwards from `until` down to the oldest
-version's registration (at most 400 days), writing for every counted record (any uid, not
-held, not a failure) with one of the versions a correction (weight −1, uid `system`, sort
-`<start>#purge.<id>.<source hour>.<n>`), except records a correction in a later hour
-already cancelled. Resumable through `state/e<E>/cleanup.json` (`purges`, `purged`). Use:
-once `minClient` requires the release with the new rules, purge the versions the rules
-change up to the hour of that switch, after the hour is over. Their pairings start from the
-battles since, and the planner refills them first (coverage).
+**Purge** (2026-11-01, #15): `POST admin/purge` takes the battles of some versions out of
+the pairing state, so that they are fought again: for battles a change of the deterministic
+rules (`DETERMINISTIC_RULES`, without an engine version change) would have ended
+differently, e.g. new work prices. It stores a `purge` alert (`reference`: `<id> <until>
+<vid>,...[ rec]`; a used id is refused, and `until`, the hour of the switch, must be over);
+`cleanup` then works like a ban removal (§11.3). First it deletes the open verification items
+with one of the versions (a correction after the purge would cancel a record twice). With
+`allRecordings` it deletes every recording of the engine version next: the slot items of
+every track, the tracks, the slot items once more (a slot filled meanwhile opens again),
+publish's recordings cache, and it invalidates `/rec/e<E>/*`. No recording can be shown to
+be what the robots would do under the new rules (a track has no work or clock data), so all
+are filled again. Then it walks the log backwards from the hour the purge starts down to the
+oldest version's registration (at most 400 days), writing for every counted record (any
+uid, not held, not a failure) with one of the versions a correction (weight −1, uid
+`system`, sort `<start>#purge.<id>.<source hour>.<n>`), except records a correction in a
+later hour already cancelled. Starting at the purge rather than at `until` also catches
+records released meanwhile and the few new-rules battles fought in between (they are fought
+again). Resumable through `state/e<E>/cleanup.json` (`purges`, `purged`).
+
+**A rules change, step by step:** release the client with the new rules; in one config
+change set `minClient` to it and `rep.settleBefore` to now (every verification item queued
+before is settled without fault: a verifier with the new rules can't judge a run of the old
+ones); deploy the backend reporting the new rules; once that hour is over, purge the versions
+the new rules change (`tools/difftest/corpus/rules-impact.py` finds them) with
+`allRecordings`. Their pairings start from the battles since, and the planner refills them
+first (coverage).
 
 ### 12.5 Recording slots (§12.7)
 

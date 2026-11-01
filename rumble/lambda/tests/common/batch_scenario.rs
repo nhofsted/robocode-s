@@ -754,10 +754,37 @@ pub fn run(world: &World, data_dir: &Path) {
         }],
         until,
         reason: "rules 3".into(),
+        all_recordings: true,
         dry_run: false,
     };
     let answer = bots::purge(store, &request, world.now_ms()).unwrap();
     assert_eq!(answer.vids, vec![purged]);
+    // A track and its slot item, of versions that aren't purged: they go all the same.
+    assert!(world.objects.exists(Bucket::Jars, &rec_other).unwrap());
+    let other_slot = "1v1.9.9.a.0".to_string();
+    store
+        .update_slots(
+            1,
+            Division::OneVsOne,
+            "9#9",
+            &[(other_slot.clone(), None)],
+            &[(
+                other_slot,
+                SlotEntry {
+                    status: SlotStatus::Filled,
+                    batch: "b-y".into(),
+                    index: 0,
+                    round: 0,
+                    sha256_b64: "y".into(),
+                    size: 5,
+                    claim_until: 0,
+                    seed: 2,
+                    order: vec![9, 9],
+                },
+            )],
+            false,
+        )
+        .unwrap();
     world.tick.store(50, Ordering::SeqCst);
     let mut runs = 0;
     let purge = loop {
@@ -776,6 +803,21 @@ pub fn run(world: &World, data_dir: &Path) {
     };
     world.tick.store(0, Ordering::SeqCst);
     assert!(purge.finished && runs > 1, "{runs} runs");
+    assert!(
+        world
+            .objects
+            .list(Bucket::Jars, "rec/e1/")
+            .unwrap()
+            .is_empty(),
+        "every recording is gone"
+    );
+    assert!(
+        store
+            .get_slots(1, Division::OneVsOne, "9#9")
+            .unwrap()
+            .is_none()
+    );
+    assert!(world.cdn.paths().contains(&"/rec/e1/*".to_string()));
     let counted = posted
         .records
         .iter()

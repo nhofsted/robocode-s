@@ -111,11 +111,14 @@ Admin commands (an admin account; they print the server's answer):
   admin bot nd <id> <version> on [--reason TEXT] | off
                          flag a version as not reproducible (its battles are never
                          verified, nobody is penalized by them) or clear the flag
-  admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--apply]
+  admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--all-recordings]
+              [--apply]
                          take the battles of the versions in FILE (one <id> <version>
                          a line) up to that hour (UTC, over) out of the rankings, to be
                          fought again (docs/rumble-backend.md 12.4); shows which
-                         versions there are and stores nothing without --apply
+                         versions there are and stores nothing without --apply;
+                         --all-recordings deletes every recording too (to be filled
+                         again)
   admin alerts           the open alerts (verification mismatches and the like)
   admin config get       print the configuration overrides
   admin config set FILE  replace them with the JSON in FILE
@@ -158,6 +161,7 @@ pub enum Command {
         until: u32,
         versions: PathBuf,
         reason: String,
+        all_recordings: bool,
         apply: bool,
     },
     Alerts,
@@ -498,8 +502,9 @@ fn parse_repair(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_purge(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--apply]";
+    const USAGE: &str = "admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--all-recordings] [--apply]";
     let (mut id, mut until, mut versions, mut reason, mut apply) = (None, None, None, None, false);
+    let mut all_recordings = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let mut value = || args.next().cloned().ok_or(format!("{arg} needs a value"));
@@ -508,6 +513,7 @@ fn parse_purge(args: &[String]) -> Result<Command, String> {
             "--versions" => versions = Some(PathBuf::from(value()?)),
             "--reason" => reason = Some(value()?),
             "--apply" => apply = true,
+            "--all-recordings" => all_recordings = true,
             a if a.starts_with("--") => return Err(format!("admin purge: unknown option {a}")),
             a if id.is_none() => id = Some(a.to_string()),
             _ => return Err(USAGE.into()),
@@ -520,6 +526,7 @@ fn parse_purge(args: &[String]) -> Result<Command, String> {
                 until,
                 versions,
                 reason,
+                all_recordings,
                 apply,
             })
         }
@@ -625,6 +632,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
             until,
             versions,
             reason,
+            all_recordings,
             apply,
         } => {
             let text = std::fs::read_to_string(versions)
@@ -648,6 +656,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 versions: list,
                 until: *until,
                 reason: reason.clone(),
+                all_recordings: *all_recordings,
                 dry_run: !apply,
             };
             let (api, _) = signed_in(&parsed)?;
@@ -1396,6 +1405,7 @@ mod tests {
                 until: 2026110312,
                 versions: "v.txt".into(),
                 reason: "x".into(),
+                all_recordings: false,
                 apply: false
             }
         );

@@ -824,6 +824,9 @@ pub struct PurgeRequest {
     pub versions: Vec<PurgeVersion>,
     pub until: u32,
     pub reason: String,
+    /// Every recording goes too (tracks and slot items, to be filled again).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all_recordings: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
 }

@@ -22,6 +22,7 @@ use super::{Batch, Pace, READ_RATE, WRITE_RATE, read_units};
 use crate::routes::{jar_key, plan_key};
 use crate::s3::{Bucket, Fetched};
 use rumble_core::Config;
+use rumble_core::cleanup::recording_group;
 use rumble_core::cleanup::{
     CleanupState, PURGE_ALERT, Pending, PurgeCursor, ban_corrections, ban_cursor, correction_items,
     correction_prefix, dead_versions, doomed, parse_purge_reference, previous_hour,
@@ -33,7 +34,7 @@ use rumble_core::recordings::{entry_key, legacy_entries, listing, version_names}
 use rumble_core::store::{LogItem, StoreError, UserState, VersionState, hour_key};
 use rumble_core::verify::BAN_ALERT;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub fn cleanup_key(engine: u32) -> String {
     format!("state/e{engine}/cleanup.json")
@@ -386,20 +387,26 @@ fn purges(
         if alert.kind != PURGE_ALERT {
             continue;
         }
-        let Some((id, until, vids)) = parse_purge_reference(&alert.reference) else {
+        let Some(asked) = parse_purge_reference(&alert.reference) else {
             println!("cleanup: unreadable purge alert {}", alert.sort);
             continue;
         };
-        if !state.purged.contains(&id) && !state.purges.contains_key(&id) {
-            new.push((id, until, vids, alert.text));
+        if !state.purged.contains(&asked.id) && !state.purges.contains_key(&asked.id) {
+            new.push((asked, alert.text));
         }
     }
     if !new.is_empty() {
         let versions = store.list_versions().map_err(|e| e.to_string())?;
-        for (id, until, vids, text) in new {
-            println!("cleanup: purge {id}: {text}");
-            let cursor = purge_cursor(vids, &text, until, &versions, batch.now_ms());
-            state.purges.insert(id, cursor);
+        for (asked, text) in new {
+            println!("cleanup: purge {}: {text}", asked.id);
+            let cursor = purge_cursor(
+                asked.vids,
+                &text,
+                asked.recordings,
+                &versions,
+                batch.now_ms(),
+            );
+            state.purges.insert(asked.id, cursor);
         }
         batch.write_state_json(key, state)?;
     }
@@ -419,6 +426,20 @@ fn purges(
                 }
             }
             cursor.queue_done = true;
+            state.purges.insert(id.clone(), cursor.clone());
+            batch.write_state_json(key, state)?;
+        }
+        if cursor.recordings && !cursor.recordings_done {
+            if !all_recordings(batch, engine, start_ms, report)? {
+                report.purges.push(PurgeReport {
+                    id: id.clone(),
+                    corrected: cursor.corrected,
+                    next: cursor.next,
+                    finished: false,
+                });
+                continue;
+            }
+            cursor.recordings_done = true;
             state.purges.insert(id.clone(), cursor.clone());
             batch.write_state_json(key, state)?;
         }
@@ -499,4 +520,75 @@ fn purges(
         }
     }
     Ok(())
+}
+
+/// A purge's recordings (§12.4): every track of the engine version and the slot items they
+/// are in, so that the slots fill again; publish's recordings cache, so that the index is
+/// built anew. Slot items first (a filled entry without its track would never fill again),
+/// then the tracks, then the slot items once more (a slot filled meanwhile opens again; its
+/// new track is gone). Each step can be repeated; false: the time budget ran out first.
+fn all_recordings(
+    batch: &Batch,
+    engine: u32,
+    start_ms: u64,
+    report: &mut CleanupReport,
+) -> Result<bool, String> {
+    let store = batch.store();
+    let versions = store.list_versions().map_err(|e| e.to_string())?;
+    let dirs: HashMap<String, u32> = versions.iter().map(|v| (version_dir(v), v.vid)).collect();
+    let prefix = format!("rec/e{engine}/");
+    let keys = batch.objects().list(Bucket::Jars, &prefix)?;
+    let groups: BTreeSet<(Division, String)> = keys
+        .iter()
+        .filter_map(|k| recording_group(k, engine, &dirs))
+        .map(|g| (g.division(), g.key()))
+        .collect();
+    let over = || batch.now_ms().saturating_sub(start_ms) > batch.budget_ms;
+    let mut writes = Pace::new(batch, WRITE_RATE);
+    let mut delete_slots = |report: &mut CleanupReport| -> Result<bool, String> {
+        for (division, slot_key) in &groups {
+            if over() {
+                return Ok(false);
+            }
+            writes.take(1.0);
+            store
+                .delete_slots(engine, *division, slot_key)
+                .map_err(|e| e.to_string())?;
+            report.slot_items_deleted += 1;
+        }
+        Ok(true)
+    };
+    if !delete_slots(report)? {
+        return Ok(false);
+    }
+    for key in &keys {
+        if over() {
+            return Ok(false);
+        }
+        batch.objects().delete(Bucket::Jars, key)?;
+        report.recordings_deleted += 1;
+    }
+    if !delete_slots(report)? {
+        return Ok(false);
+    }
+    for division in [Division::OneVsOne, Division::Melee] {
+        batch.objects().delete(
+            Bucket::State,
+            &rumble_core::recordings::cache_key(engine, division),
+        )?;
+    }
+    if !keys.is_empty() {
+        let path = format!("/{prefix}*");
+        batch
+            .services
+            .cdn
+            .invalidate(std::slice::from_ref(&path), &format!("purge-{start_ms}"))?;
+        report.invalidated.push(path);
+    }
+    println!(
+        "cleanup: purge: {} recordings and {} slot groups deleted",
+        keys.len(),
+        groups.len()
+    );
+    Ok(true)
 }

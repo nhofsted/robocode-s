@@ -163,11 +163,25 @@ pub fn take_work<S: Store + ?Sized>(
     until: u64,
     now: u64,
 ) -> StoreResult<Vec<VerifyItem>> {
-    take_work_in(store, engine, uid, None, max, until, now)
+    take_work_in(store, engine, uid, None, max, until, now, 0)
+}
+
+/// Whether the item was queued before `settle_before` (Unix ms; 0: never): its runs follow
+/// older deterministic rules (§12.4). The sort key starts with the queueing time.
+pub fn queued_before(item: &VerifyItem, settle_before: u64) -> bool {
+    settle_before > 0
+        && item
+            .sort
+            .split('#')
+            .next()
+            .and_then(|ms| ms.parse::<u64>().ok())
+            .is_some_and(|ms| ms < settle_before)
 }
 
 /// [`take_work`] restricted to one division (a batch is one division, §10.4): items of
-/// other divisions in the page are skipped.
+/// other divisions in the page are skipped. Items queued before `settle_before`
+/// ([`queued_before`]) are settled instead of served.
+#[allow(clippy::too_many_arguments)]
 pub fn take_work_in<S: Store + ?Sized>(
     store: &S,
     engine: u32,
@@ -176,6 +190,7 @@ pub fn take_work_in<S: Store + ?Sized>(
     max: usize,
     until: u64,
     now: u64,
+    settle_before: u64,
 ) -> StoreResult<Vec<VerifyItem>> {
     let mut taken = Vec::new();
     if max == 0 {
@@ -197,10 +212,11 @@ pub fn take_work_in<S: Store + ?Sized>(
             {
                 continue;
             }
-            // A bot was flagged after the item was queued: no verifier's work is spent on it
-            // (§11.5).
+            // A bot was flagged after the item was queued, or the rules changed: no verifier's
+            // work is spent on it (§11.5, §12.4).
             if item.kind != VerifyKind::Probation
-                && any_nondeterministic(store, &item.bots, &mut flags)?
+                && (queued_before(&item, settle_before)
+                    || any_nondeterministic(store, &item.bots, &mut flags)?)
             {
                 settle_no_fault(store, &item, now * 1000)?;
                 continue;
@@ -316,8 +332,11 @@ pub fn resolve<S: Store + ?Sized>(
     {
         return Ok(Outcome::Ignored);
     }
-    // §11.5: a flagged robot's battle can't be proven wrong, so nobody is judged by it.
-    if any_nondeterministic(store, &item.bots, &mut HashMap::new())? {
+    // §11.5: a flagged robot's battle can't be proven wrong, so nobody is judged by it; nor
+    // one of older rules than the verifier's (§12.4).
+    if queued_before(&item, config.rep.settle_before)
+        || any_nondeterministic(store, &item.bots, &mut HashMap::new())?
+    {
         if !delete_claimed(store, engine, sort, &uid)? {
             return Ok(Outcome::Ignored);
         }
@@ -560,7 +579,7 @@ fn count_disagreement<S: Store + ?Sized>(
 }
 
 /// Ends an item with a flagged bot (§11.5) without judging anyone, as when it is served.
-fn settle_no_fault<S: Store + ?Sized>(
+pub fn settle_no_fault<S: Store + ?Sized>(
     store: &S,
     item: &VerifyItem,
     now_ms: u64,
@@ -1693,6 +1712,52 @@ mod tests {
         let items = store.verify_items(1);
         assert_eq!(items.len(), 1, "the flagged item is gone");
         assert_eq!(store.log_items(1).len(), 1, "its held record is released");
+    }
+
+    #[test]
+    fn items_queued_before_a_rules_change_are_settled_without_fault() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::Quarantined);
+        let mut old = check_item(run("g1", "x", 2000.0, true));
+        old.sort = "0000000001000#b0.0".to_string();
+        let mut new = check_item(run("g1", "x", 2000.0, false));
+        new.sort = "0000000003000#b1.0".to_string();
+        store.put_verify(&old).unwrap();
+        store.put_verify(&new).unwrap();
+        assert!(queued_before(&old, 2000) && !queued_before(&new, 2000));
+        assert!(!queued_before(&old, 0), "0: off");
+        let taken = take_work_in(&store, 1, "g2", None, 5, 100, 0, 2000).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].sort, new.sort);
+        assert_eq!(store.verify_items(1).len(), 1, "the old item is gone");
+        assert_eq!(store.log_items(1).len(), 1, "its held record is released");
+        // One claimed before the change and resolved after: nobody is judged.
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        let mut item = check_item(run("g1", "x", 2000.0, false));
+        item.sort = "0000000001000#b0.0".to_string();
+        store.put_verify(&item).unwrap();
+        claim(&store, "g2");
+        let mut config = Config::default();
+        config.rep.settle_before = 2000;
+        let outcome = resolve(
+            &store,
+            &config,
+            1,
+            &item.sort,
+            run("g2", "y", 1.0, false),
+            "o",
+            5000,
+        )
+        .unwrap();
+        assert_eq!(outcome, Outcome::NoFault);
+        assert!(store.verify_items(1).is_empty());
+        for (uid, rep) in [("g1", 30), ("g2", 60)] {
+            assert_eq!(rep_of(&store, uid).rep, rep);
+        }
     }
 
     #[test]
