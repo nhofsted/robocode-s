@@ -73,6 +73,13 @@ pub trait Objects: Send + Sync {
     /// HeadObject with `ChecksumMode=ENABLED`: `None` if missing, else its `ChecksumSHA256`.
     fn head_checksum(&self, bucket: Bucket, key: &str) -> S3Result<Option<Option<String>>>;
     fn delete(&self, bucket: Bucket, key: &str) -> S3Result<()>;
+    /// Deletes `keys` (missing ones too): S3 in DeleteObjects requests of 1,000 keys.
+    fn delete_many(&self, bucket: Bucket, keys: &[String]) -> S3Result<()> {
+        for key in keys {
+            self.delete(bucket, key)?;
+        }
+        Ok(())
+    }
     /// ListObjectsV2 of a prefix, all pages: the keys in key order.
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>>;
     /// Like [`list`](Objects::list), with each object's ETag (the same listing request).
@@ -110,6 +117,9 @@ impl<O: Objects + ?Sized> Objects for std::sync::Arc<O> {
     }
     fn delete(&self, bucket: Bucket, key: &str) -> S3Result<()> {
         (**self).delete(bucket, key)
+    }
+    fn delete_many(&self, bucket: Bucket, keys: &[String]) -> S3Result<()> {
+        (**self).delete_many(bucket, keys)
     }
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {
         (**self).list(bucket, prefix)
@@ -326,6 +336,40 @@ impl Objects for S3Objects {
                 .map(|_| ())
                 .map_err(|e| format!("S3 DELETE {key}: {}", describe(&e)))
         })
+    }
+
+    fn delete_many(&self, bucket: Bucket, keys: &[String]) -> S3Result<()> {
+        use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+        for chunk in keys.chunks(1000) {
+            let objects = chunk
+                .iter()
+                .map(|k| ObjectIdentifier::builder().key(k).build())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("S3 DeleteObjects: {e}"))?;
+            let delete = Delete::builder()
+                .set_objects(Some(objects))
+                .quiet(true)
+                .build()
+                .map_err(|e| format!("S3 DeleteObjects: {e}"))?;
+            let errors = block_on(async {
+                self.client
+                    .delete_objects()
+                    .bucket(self.bucket(bucket))
+                    .delete(delete)
+                    .send()
+                    .await
+                    .map_err(|e| format!("S3 DeleteObjects: {}", describe(&e)))
+            })?;
+            if let Some(e) = errors.errors().first() {
+                return Err(format!(
+                    "S3 DeleteObjects: {} errors, first {}: {}",
+                    errors.errors().len(),
+                    e.key().unwrap_or("?"),
+                    e.message().unwrap_or("?")
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn list(&self, bucket: Bucket, prefix: &str) -> S3Result<Vec<String>> {

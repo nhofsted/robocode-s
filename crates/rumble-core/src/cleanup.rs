@@ -314,6 +314,13 @@ pub struct PurgeCursor {
     pub recordings: bool,
     #[serde(default)]
     pub recordings_done: bool,
+    /// The recordings' tracks are deleted (their slot groups saved first, in
+    /// `state/e<E>/purge-<id>-groups.json`).
+    #[serde(default)]
+    pub tracks_done: bool,
+    /// Slot groups of that list deleted so far.
+    #[serde(default)]
+    pub slots_done: usize,
 }
 
 /// The `kind` of the alert that asks for a purge (`POST admin/purge`).
@@ -388,12 +395,20 @@ pub fn purge_cursor(
         corrected: 0,
         recordings,
         recordings_done: false,
+        tracks_done: false,
+        slots_done: 0,
     }
 }
 
 impl PurgeCursor {
+    /// The log walk is done.
     pub fn finished(&self) -> bool {
         self.next < self.stop
+    }
+
+    /// The log walk and, if asked for, the recordings are done.
+    pub fn complete(&self) -> bool {
+        self.finished() && (!self.recordings || self.recordings_done)
     }
 }
 
