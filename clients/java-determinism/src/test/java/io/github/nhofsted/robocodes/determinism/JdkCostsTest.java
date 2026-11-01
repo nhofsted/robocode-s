@@ -251,7 +251,7 @@ class JdkCostsTest {
     private static void assertGrowth(String what, long expected, Result small, Result big) {
         assertNull(small.thrown(), what);
         assertNull(big.thrown(), what);
-        assertEquals(expected, big.work() - small.work(), what);
+        assertEquals(expected * WorkPrices.INSTRUCTION, big.work() - small.work(), what);
     }
 
     @Test
@@ -390,11 +390,12 @@ class JdkCostsTest {
         // The throw skips the robot's code after the call, so compare throws with throws.
         Result smallNegative = ops(ARRAYCOPY, new int[4], new int[4], -1);
         assertEquals(smallNegative.work(), negative.work(), "a negative length charges nothing, whatever its size");
-        assertTrue(negative.work() >= zero.work() - 10, "the count did not drop: " + negative.work() + " vs " + zero.work());
+        assertTrue(negative.work() >= zero.work() - 10 * WorkPrices.INSTRUCTION,
+                "the count did not drop: " + negative.work() + " vs " + zero.work());
         // Too long for the arrays still throws at the same point, and charges its length.
         Result tooLong = ops(ARRAYCOPY, new int[4], new int[4], 50);
         assertInstanceOf(IndexOutOfBoundsException.class, tooLong.thrown());
-        assertEquals(negative.work() + 50, tooLong.work());
+        assertEquals(negative.work() + 50 * WorkPrices.INSTRUCTION, tooLong.work());
     }
 
     @Test

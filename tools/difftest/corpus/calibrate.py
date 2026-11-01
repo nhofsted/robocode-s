@@ -13,11 +13,16 @@ b is the time per counted instruction (PICOS_PER_INSTRUCTION = 1000 * b); a is c
 robot-side work per turn (event dispatch, executeImpl), which isn't counted.
 
   calibrate.py --plan <out>/plan.json --manifest corpus.json --jars DIR --out DIR [--only 00-duel,...]
+               [--extra-jar robots/testbots/build/libs/testbots-*.jar] [--jobs N]
+
+The metered run also writes each robot's work profile (WorkProfile: instructions by kind,
+JDK calls by method); `samples.jsonl` keeps it with the CPU time for fit-costs.py, which
+fits a price per kind. Neither run skips turns, so heavy robots aren't left out.
 
 Run it on an otherwise idle machine: CPU time is measured per robot thread, but caches
 and frequency scaling still feel the load.
 """
-import argparse, json, os, subprocess, sys
+import argparse, concurrent.futures, json, os, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -54,8 +59,12 @@ def oracle(battle, jars, out, meter):
 def read(report):
     rows = {}
     for line in report.read_text().splitlines():
-        name, turns, fuel, clock, cpu = line.split("\t")
-        rows[name] = (int(turns), int(fuel), int(clock), int(cpu))
+        name, turns, fuel, clock, cpu, *rest = line.split("\t")
+        profile = {}
+        for item in (rest[0].split(",") if rest and rest[0] else []):
+            key, _, n = item.rpartition("=")
+            profile[key] = int(n)
+        rows[name] = (int(turns), int(fuel), int(clock), int(cpu), profile)
     return rows
 
 
@@ -78,9 +87,12 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--only", help="comma-separated battle names")
     p.add_argument("--limit", type=int, default=0, help="at most this many battles per plan")
+    p.add_argument("--extra-jar", action="append", default=[], help="more robot jars (calibration benchmarks)")
+    p.add_argument("--jobs", type=int, default=1, help="battles at a time (CPU time is per thread)")
     args = p.parse_args()
     jar_dir = Path(args.jars).resolve()
     jars = sorted({jar_dir / r["file"] for m in args.manifest for r in json.loads(Path(m).read_text())["robots"]})
+    jars += [Path(j).resolve() for j in args.extra_jar]
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     battles = []
@@ -94,24 +106,32 @@ def main():
         if args.limit:
             chosen = chosen[:args.limit]
         battles += chosen
-    samples, kept, dropped = [], [], 0
-    for i, battle in enumerate(battles):
-        metered = oracle(battle, jars, out, True)
-        cpu = oracle(battle, jars, out, False)
-        if not metered or not cpu:
-            continue
-        m, c = read(metered), read(cpu)
-        for name, (turns, fuel, clock, _) in m.items():
-            if name not in c or clock or c[name][0] != turns or turns == 0 or fuel == 0:
-                dropped += 1
+    samples, kept, profiles, dropped = [], [], [], 0
+
+    def both(battle):
+        return oracle(battle, jars, out, True), oracle(battle, jars, out, False)
+
+    with concurrent.futures.ThreadPoolExecutor(max(1, args.jobs)) as pool:
+        for i, (battle, (metered, cpu)) in enumerate(zip(battles, pool.map(both, battles))):
+            if not metered or not cpu:
                 continue
-            samples.append((turns, fuel, c[name][3]))
-            kept.append((battle["name"], name, turns, fuel, c[name][3]))
-        print(f"[{i + 1}/{len(battles)}] {battle['name']}: {len(samples)} robots so far", flush=True)
+            m, c = read(metered), read(cpu)
+            for name, (turns, fuel, clock, _, profile) in m.items():
+                # Robots that budget their work by the clock do other work in the two runs;
+                # a few reads (timing a round, logging) don't matter.
+                if name not in c or clock > turns / 20 or c[name][0] != turns or turns == 0 or fuel == 0:
+                    dropped += 1
+                    continue
+                samples.append((turns, fuel, c[name][3]))
+                kept.append((battle["name"], name, turns, fuel, c[name][3]))
+                profiles.append({"battle": battle["name"], "robot": name, "turns": turns, "fuel": fuel,
+                                 "cpu": c[name][3], "clock": clock, "profile": profile})
+            print(f"[{i + 1}/{len(battles)}] {battle['name']}: {len(samples)} robots so far", flush=True)
     if len(samples) < 2:
         sys.exit("not enough robots to fit")
     a, b = fit(samples)
     (out / "samples.tsv").write_text("".join("\t".join(map(str, k)) + "\n" for k in kept))
+    (out / "samples.jsonl").write_text("".join(json.dumps(r) + "\n" for r in profiles))
     ratios = sorted(c / f for t, f, c in samples)
     print(f"\n{len(samples)} robots ({dropped} left out: clock readers or diverged)")
     print(f"fit: {a:.0f} ns per turn + {b * 1000:.0f} ps per counted instruction")

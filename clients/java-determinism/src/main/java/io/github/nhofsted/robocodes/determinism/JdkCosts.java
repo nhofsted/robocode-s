@@ -23,11 +23,11 @@ import java.util.Set;
 
 /**
  * The work of JDK calls that grows with their arguments (#15, ADR 0018). Every JDK call
- * counts {@link WorkMeter#JDK_CALL_COST}; a {@code System.arraycopy} of a million elements
+ * counts its price ({@link WorkPrices}); a {@code System.arraycopy} of a million elements
  * or a sort of ten thousand would then cost as little as {@code Math.abs}, which budgets
  * would make unfair and robots could game. These calls also count per element (per
- * n·log2 n for sorts), as measured on the calibration machine at
- * {@link RobotRandomness#PICOS_PER_INSTRUCTION}: copies and fills about 1 instruction per
+ * n·log2 n for sorts), in instructions of rules 2 ({@link WorkPrices#sized}), as measured on
+ * the calibration machine at 160 ps per instruction: copies and fills about 1 instruction per
  * element, copies that allocate about 4, primitive sorts about 20 and object sorts about 50
  * per n·log2 n, linear list searches about 3.
  *
@@ -152,11 +152,23 @@ final class JdkCosts {
     /**
      * Routes the class's sized JDK calls through helpers that count their size; adds the
      * helpers to the class. Call after the counting, so a call still counts as one JDK call.
+     * New arrays pass their length through a helper that counts it too.
      */
     static void charge(ClassNode node, String fuelField) {
         Map<String, MethodNode> helpers = new LinkedHashMap<>();
+        boolean itf = (node.access & Opcodes.ACC_INTERFACE) != 0;
         for (MethodNode method : List.copyOf(node.methods)) {
             for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                int op = insn.getOpcode();
+                if ((op == Opcodes.NEWARRAY || op == Opcodes.ANEWARRAY)
+                        && (WorkPrices.arrayElement(op == Opcodes.NEWARRAY) != 0 || WorkProfile.ON)) {
+                    String kind = op == Opcodes.NEWARRAY ? "primitive" : "reference";
+                    MethodNode helper = helpers.computeIfAbsent("alloc " + kind,
+                            k -> arrayHelper(node.name, fuelField, PREFIX + helpers.size(), kind));
+                    method.instructions.insertBefore(insn, new MethodInsnNode(Opcodes.INVOKESTATIC, node.name,
+                            helper.name, helper.desc, itf));
+                    continue;
+                }
                 if (!(insn instanceof MethodInsnNode call)) {
                     continue;
                 }
@@ -238,15 +250,72 @@ final class JdkCosts {
         // A negative size throws in the call; it must not lower the count.
         code.add(new InsnNode(Opcodes.LCONST_0));
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Math", "max", "(JJ)J", false));
-        code.add(new LdcInsnNode(cost.perUnit()));
-        code.add(new InsnNode(Opcodes.LMUL));
-        code.add(new InsnNode(Opcodes.LADD));
-        code.add(new InsnNode(Opcodes.LASTORE));
+        if (WorkProfile.ON) {
+            // Calibration: the units also go to the call's profile slot.
+            int units = params.length == 0 ? 0 : slots[params.length - 1] + params[params.length - 1].getSize();
+            code.add(new InsnNode(Opcodes.DUP2));
+            code.add(new VarInsnNode(Opcodes.LSTORE, units));
+            code.add(new LdcInsnNode(WorkPrices.sized(cost.perUnit())));
+            code.add(new InsnNode(Opcodes.LMUL));
+            code.add(new InsnNode(Opcodes.LADD));
+            code.add(new InsnNode(Opcodes.LASTORE));
+            code.add(new FieldInsnNode(Opcodes.GETSTATIC, className, fuelField, "[J"));
+            code.add(new LdcInsnNode(WorkProfile.slot("sized:" + call.owner + "." + call.name + call.desc)));
+            code.add(new InsnNode(Opcodes.DUP2));
+            code.add(new InsnNode(Opcodes.LALOAD));
+            code.add(new VarInsnNode(Opcodes.LLOAD, units));
+            code.add(new InsnNode(Opcodes.LADD));
+            code.add(new InsnNode(Opcodes.LASTORE));
+        } else {
+            code.add(new LdcInsnNode(WorkPrices.sized(cost.perUnit())));
+            code.add(new InsnNode(Opcodes.LMUL));
+            code.add(new InsnNode(Opcodes.LADD));
+            code.add(new InsnNode(Opcodes.LASTORE));
+        }
         for (int i = 0; i < params.length; i++) {
             code.add(new VarInsnNode(params[i].getOpcode(Opcodes.ILOAD), slots[i]));
         }
         code.add(new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf));
         code.add(new InsnNode(result.getOpcode(Opcodes.IRETURN)));
         return helper;
+    }
+
+    /**
+     * {@code (int n) -> { fuel[1] += price * max(0, n); return n; }} ({@link WorkPrices#arrayElement}), before a
+     * new array of length {@code n}; in calibration also {@code fuel[alloc:<kind>] += max(0, n)}.
+     * Straight-line, so it needs no frames.
+     */
+    private static MethodNode arrayHelper(String className, String fuelField, String name, String kind) {
+        MethodNode helper = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, name,
+                "(I)I", null, null);
+        InsnList code = helper.instructions;
+        long price = WorkPrices.arrayElement(kind.equals("primitive"));
+        if (price != 0) {
+            add(code, className, fuelField, 1, price);
+        }
+        if (WorkProfile.ON) {
+            add(code, className, fuelField, WorkProfile.slot("alloc:" + kind), 1);
+        }
+        code.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        code.add(new InsnNode(Opcodes.IRETURN));
+        return helper;
+    }
+
+    /** {@code fuel[slot] += perElement * max(0, n)}, n the helper's int parameter. */
+    private static void add(InsnList code, String className, String fuelField, int slot, long perElement) {
+        code.add(new FieldInsnNode(Opcodes.GETSTATIC, className, fuelField, "[J"));
+        code.add(new LdcInsnNode(slot));
+        code.add(new InsnNode(Opcodes.DUP2));
+        code.add(new InsnNode(Opcodes.LALOAD));
+        code.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        code.add(new InsnNode(Opcodes.I2L));
+        code.add(new InsnNode(Opcodes.LCONST_0));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/lang/Math", "max", "(JJ)J", false));
+        if (perElement != 1) {
+            code.add(new LdcInsnNode(perElement));
+            code.add(new InsnNode(Opcodes.LMUL));
+        }
+        code.add(new InsnNode(Opcodes.LADD));
+        code.add(new InsnNode(Opcodes.LASTORE));
     }
 }
