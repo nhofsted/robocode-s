@@ -135,6 +135,8 @@ def main():
                    "instead of the most called")
     p.add_argument("--min-share", type=float, default=1e-4, help="share of all work a kind needs for a price")
     p.add_argument("--ridge", type=float, default=0.02, help="pull towards the priors")
+    p.add_argument("--heavy-weight", type=float, default=1.0,
+                   help="weight of robots doing --min-work or more (relative errors), against 1")
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--percentile", type=float, default=5, help="robots the generous prices may still overcharge, in %%")
     p.add_argument("--flat", type=float, default=160, help="today's price, ps per counted instruction")
@@ -146,7 +148,10 @@ def main():
     jdk = [m.strip() for m in open(args.jdk_list).read().split() if m.strip()] if args.jdk_list else args.jdk_methods
     names, priors, xs = features(rows, jdk, args.min_share)
     ys = [r["cpu"] for r in rows]
-    weights = [1 / max(y, 1.0) for y in ys]
+    # Heavy robots are the ones a budget limits: --heavy-weight makes their errors count more
+    # (light ones still pin down the per-turn part).
+    weights = [(args.heavy_weight if r["fuel"] / r["turns"] >= args.min_work else 1.0) / max(y, 1.0)
+               for r, y in zip(rows, ys)]
     beta = nnls(xs, ys, weights, priors, args.ridge)
     print(f"{len(rows)} robots, {len(names)} prices; per turn {beta[0] / 1000:.1f} us")
     totals = [sum(x[j] for x in xs) for j in range(len(names))]
