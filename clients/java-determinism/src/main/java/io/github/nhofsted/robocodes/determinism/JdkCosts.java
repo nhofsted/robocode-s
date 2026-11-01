@@ -255,7 +255,7 @@ final class JdkCosts {
             int units = params.length == 0 ? 0 : slots[params.length - 1] + params[params.length - 1].getSize();
             code.add(new InsnNode(Opcodes.DUP2));
             code.add(new VarInsnNode(Opcodes.LSTORE, units));
-            code.add(new LdcInsnNode(WorkPrices.sized(cost.perUnit())));
+            code.add(new LdcInsnNode(WorkPrices.sized(call.owner + "." + call.name + call.desc, cost.perUnit())));
             code.add(new InsnNode(Opcodes.LMUL));
             code.add(new InsnNode(Opcodes.LADD));
             code.add(new InsnNode(Opcodes.LASTORE));
@@ -267,7 +267,7 @@ final class JdkCosts {
             code.add(new InsnNode(Opcodes.LADD));
             code.add(new InsnNode(Opcodes.LASTORE));
         } else {
-            code.add(new LdcInsnNode(WorkPrices.sized(cost.perUnit())));
+            code.add(new LdcInsnNode(WorkPrices.sized(call.owner + "." + call.name + call.desc, cost.perUnit())));
             code.add(new InsnNode(Opcodes.LMUL));
             code.add(new InsnNode(Opcodes.LADD));
             code.add(new InsnNode(Opcodes.LASTORE));

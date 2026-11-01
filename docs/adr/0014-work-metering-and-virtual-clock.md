@@ -25,6 +25,7 @@ In deterministic mode the determinism agent **counts the work** of robot code an
   - **The fit:** CPU time ≈ 64 µs per turn + 104 ps per counted instruction (228 robots, 12 left out).
   - **Per robot**, the cost of an instruction now varies widely: tight loops that the JIT compiles well are cheap, calls and allocation are expensive. Over 1 000 000 instructions per turn: 45–209 ps, median 159 (10 robots). Over 100 000: 45–772 ps, median 330 (43 robots).
   - `PICOS_PER_INSTRUCTION` = 160, the median of the heaviest robots, as in the first calibration. One constant can't be close for every robot; it's a fair price for robots that do a lot of work, which are the ones a budget limits.
+- **Superseded for the prices (rules 3, 2026-11-01):** ADR 0026 prices each kind of instruction and some JDK calls on their own, in units of `PICOS_PER_UNIT` = 10 ps (`elapsed = turns × TURN_NANOS + units × PICOS_PER_UNIT / 1000`). The virtual clock reads those units.
 
 The values depend only on what the robot executes, the same in classic's oracle and in robocode-s, on every machine.
 

@@ -53,7 +53,11 @@ def features(rows, jdk_methods, min_share):
             elif k != "static":
                 groups[k] += n
     kept_groups = sorted(g for g, n in groups.items() if n >= min_share * total)
-    methods = [m for m, n in calls.most_common(jdk_methods) if n * 11 >= min_share * total]
+    if isinstance(jdk_methods, list):
+        # A fixed list (prefixes of `owner.name`): methods whose cost is known to differ.
+        methods = sorted(m for m in calls if any(m.startswith("jdk:" + p) for p in jdk_methods))
+    else:
+        methods = [m for m, n in calls.most_common(jdk_methods) if n * 11 >= min_share * total]
     # Sized calls and allocated elements: those with enough units get prices of their own.
     kept_sized = sorted(k for k, n in sized.items() if n >= min_share * total)
     names = ["turn"] + kept_groups + ["other"] + methods + kept_sized + ["sized_other"]
@@ -127,6 +131,8 @@ def main():
     p.add_argument("samples", nargs="+")
     p.add_argument("--min-work", type=float, default=100_000, help="counted instructions a turn for the comparison")
     p.add_argument("--jdk-methods", type=int, default=24, help="JDK methods with a price of their own")
+    p.add_argument("--jdk-list", help="file of JDK methods (owner/Class.name prefixes) with prices of their own, "
+                   "instead of the most called")
     p.add_argument("--min-share", type=float, default=1e-4, help="share of all work a kind needs for a price")
     p.add_argument("--ridge", type=float, default=0.02, help="pull towards the priors")
     p.add_argument("--folds", type=int, default=5)
@@ -137,7 +143,8 @@ def main():
     rows = load(args.samples)
     if len(rows) < 3:
         sys.exit("not enough samples with profiles")
-    names, priors, xs = features(rows, args.jdk_methods, args.min_share)
+    jdk = [m.strip() for m in open(args.jdk_list).read().split() if m.strip()] if args.jdk_list else args.jdk_methods
+    names, priors, xs = features(rows, jdk, args.min_share)
     ys = [r["cpu"] for r in rows]
     weights = [1 / max(y, 1.0) for y in ys]
     beta = nnls(xs, ys, weights, priors, args.ridge)

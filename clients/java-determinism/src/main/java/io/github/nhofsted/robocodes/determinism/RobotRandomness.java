@@ -165,7 +165,8 @@ public final class RobotRandomness {
      */
     public static int rulesVersion() {
         // 2: robots' own threads on one virtual CPU per robot, sleeps on the virtual clock (ADR 0025).
-        return 2;
+        // 3: work priced per kind of instruction and JDK call, new arrays per element (ADR 0026).
+        return 3;
     }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */

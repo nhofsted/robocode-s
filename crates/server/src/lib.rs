@@ -63,7 +63,7 @@ pub const FIRST_TURN_BUDGETS: u64 = 7;
 /// Version of the deterministic rules (`RobotRandomness.rulesVersion()` on the Java side):
 /// deterministic battles need a robot host that follows the same ones. Version 2: robots'
 /// own threads run on one virtual CPU per robot (ADR 0025).
-pub const DETERMINISTIC_RULES: u32 = 2;
+pub const DETERMINISTIC_RULES: u32 = 3;
 
 /// How many turns late a robot's `Execute` for `turn` counts in deterministic mode, after
 /// `work` nanoseconds of counted work. As classic, which waits a budget for each robot each

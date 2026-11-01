@@ -51,7 +51,9 @@ class RobotThreadsTest {
         @Override
         public void run() {
             for (int i = 0; i < 300; i++) {
-                Busy.spin(20_000);
+                // Integer loops are cheap in rules 3 (ADR 0026): enough work that the quanta
+                // still fall every few blocks.
+                Busy.spin(80_000);
                 log.add(name + i);
             }
         }
@@ -301,7 +303,8 @@ class RobotThreadsTest {
                 switches++;
             }
         }
-        // 300 blocks of about 120 000 instructions each, quanta of 625 000: a switch every ~5.
+        // 300 blocks of about 480 000 instructions each (integer loops, mostly 1 unit each), quanta
+        // of a few million units: a switch every few blocks.
         assertTrue(switches > 50, "the CPU changed hands at quanta: " + switches);
         for (int robot = 61; robot < 65; robot++) {
             assertEquals(first, interleaving(robot), "the same interleaving");
