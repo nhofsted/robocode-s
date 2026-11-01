@@ -48,7 +48,12 @@ def oracle(battle, jars, out, meter):
            "--rounds", str(battle["rounds"]), "--jars", os.pathsep.join(map(str, jars)),
            "--out", str(out / f"{battle['name']}.{'metered' if meter else 'cpu'}.jsonl.gz")]
     report.with_suffix(".tmp").unlink(missing_ok=True)
-    r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2700)
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2700)
+    except subprocess.TimeoutExpired:
+        # Robots that never end a round unmetered (endless loops, threads) can't be measured.
+        print(f"{battle['name']}: oracle timed out", file=sys.stderr)
+        return None
     if r.returncode != 0:
         print(f"{battle['name']}: oracle failed (exit {r.returncode})", file=sys.stderr)
         return None
@@ -105,7 +110,8 @@ def main():
         chosen = [dict(b, name=f"{prefix}-{b['name']}") for b in chosen]
         if args.limit:
             chosen = chosen[:args.limit]
-        battles += chosen
+        # The rumble ranks 1v1 and melee; team battles only take time here.
+        battles += [b for b in chosen if "teams" not in b["name"]]
     samples, kept, profiles, dropped = [], [], [], 0
 
     def both(battle):
