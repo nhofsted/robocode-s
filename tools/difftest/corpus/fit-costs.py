@@ -173,6 +173,13 @@ def main():
     print(summary("flat", list(flat.values())))
     print(summary("fit", list(fit.values())))
     print(summary("held out", list(out_of_fold.values())))
+    # The benchmarks are each the only sample of their kind: held out, the fit can't know
+    # them. What matters is the rumble's robots.
+    robots = {i: v for i, v in out_of_fold.items() if not rows[i]["robot"].startswith("calib.")}
+    if robots:
+        print(summary("robots", list(robots.values())) + f"  ({len(robots)}, held out, no benchmarks)")
+        print(summary("flat", [flat[i] for i in robots]) + "  (the same robots)")
+        out_of_fold = robots
     scale = quantile(list(out_of_fold.values()), args.percentile / 100)
     print(f"\ngenerous scale (held-out p{args.percentile:g}): {scale:.3f}: the fit's prices times this overcharge "
           f"{sum(v < scale for v in out_of_fold.values())} of {len(out_of_fold)} held-out robots")
