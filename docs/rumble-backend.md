@@ -561,18 +561,20 @@ rules (`DETERMINISTIC_RULES`, without an engine version change) would have ended
 differently, e.g. new work prices. It stores a `purge` alert (`reference`: `<id> <until>
 <vid>,...[ rec]`; a used id is refused, and `until`, the hour of the switch, must be over);
 `cleanup` then works like a ban removal (§11.3). First it deletes the open verification items
-with one of the versions (a correction after the purge would cancel a record twice). With
-`allRecordings` it deletes every recording of the engine version next: the slot items of
-every track, the tracks, the slot items once more (a slot filled meanwhile opens again),
-publish's recordings cache, and it invalidates `/rec/e<E>/*`. No recording can be shown to
-be what the robots would do under the new rules (a track has no work or clock data), so all
-are filled again. Then it walks the log backwards from the hour the purge starts down to the
-oldest version's registration (at most 400 days), writing for every counted record (any
-uid, not held, not a failure) with one of the versions a correction (weight −1, uid
-`system`, sort `<start>#purge.<id>.<source hour>.<n>`), except records a correction in a
-later hour already cancelled. Starting at the purge rather than at `until` also catches
-records released meanwhile and the few new-rules battles fought in between (they are fought
-again). Resumable through `state/e<E>/cleanup.json` (`purges`, `purged`).
+with one of the versions (a correction after the purge would cancel a record twice). Then it
+walks the log backwards from the hour the purge starts down to the oldest version's
+registration (at most 400 days), writing for every counted record (any uid, not held, not a
+failure) with one of the versions a correction (weight −1, uid `system`, sort
+`<start>#purge.<id>.<source hour>.<n>`), except records a correction in a later hour already
+cancelled. Starting at the purge rather than at `until` also catches records released
+meanwhile and the few new-rules battles fought in between (they are fought again). With
+`allRecordings` it then deletes every recording of the engine version: it saves the slot
+groups of the tracks (`state/e<E>/purge-<id>-groups.json`), deletes the tracks (DeleteObjects,
+1,000 a request) and invalidates `/rec/e<E>/*`, then deletes the slot items, paced, its
+position saved as it goes (2026-11-01: 281,815 tracks in 37,845 groups, about two hours of
+runs), and last publish's recordings cache. No recording can be shown to be what the robots
+would do under the new rules (a track has no work or clock data), so all are filled again.
+Resumable through `state/e<E>/cleanup.json` (`purges`, `purged`).
 
 **A rules change, step by step:** release the client with the new rules; in one config
 change set `minClient` to it and `rep.settleBefore` to now (every verification item queued

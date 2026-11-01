@@ -460,20 +460,6 @@ fn purges(
             state.purges.insert(id.clone(), cursor.clone());
             batch.write_state_json(key, state)?;
         }
-        if cursor.recordings && !cursor.recordings_done {
-            if !all_recordings(batch, engine, start_ms, report)? {
-                report.purges.push(PurgeReport {
-                    id: id.clone(),
-                    corrected: cursor.corrected,
-                    next: cursor.next,
-                    finished: false,
-                });
-                continue;
-            }
-            cursor.recordings_done = true;
-            state.purges.insert(id.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-        }
         let mut unsaved = 0;
         while !cursor.finished() {
             if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
@@ -533,13 +519,26 @@ fn purges(
             batch.write_state_json(key, state)?;
             unsaved = 0;
         }
+        // After the log: the rankings first, then the recordings.
+        if cursor.finished() && cursor.recordings && !cursor.recordings_done {
+            all_recordings(
+                batch,
+                engine,
+                key,
+                &id,
+                &mut cursor,
+                state,
+                start_ms,
+                report,
+            )?;
+        }
         report.purges.push(PurgeReport {
             id: id.clone(),
             corrected: cursor.corrected,
             next: cursor.next,
-            finished: cursor.finished(),
+            finished: cursor.complete(),
         });
-        if cursor.finished() {
+        if cursor.complete() {
             println!(
                 "cleanup: purge {id}: {} records corrected",
                 cursor.corrected
@@ -553,54 +552,94 @@ fn purges(
     Ok(())
 }
 
-/// A purge's recordings (§12.4): every track of the engine version and the slot items they
-/// are in, so that the slots fill again; publish's recordings cache, so that the index is
-/// built anew. Slot items first (a filled entry without its track would never fill again),
-/// then the tracks, then the slot items once more (a slot filled meanwhile opens again; its
-/// new track is gone). Each step can be repeated; false: the time budget ran out first.
+/// The slot groups of a purge's recordings, saved before the tracks go (the listing of the
+/// tracks names the groups; once they are deleted nothing does).
+fn purge_groups_key(engine: u32, id: &str) -> String {
+    format!("state/e{engine}/purge-{id}-groups.json")
+}
+
+/// A purge's recordings (§12.4), resumable over runs: every track of the engine version and
+/// the slot items they are in, so that the slots fill again; publish's recordings cache, so
+/// that the index is built anew. First the slot groups are saved (from the listing of the
+/// tracks), then the tracks go (DeleteObjects, a thousand a request), then the slot items,
+/// paced, the position saved as it goes (2026-11-01: 281,815 tracks in 37,845 groups). A
+/// slot filled meanwhile gets a track of the new rules; its item may go after it, and it fills
+/// again. `/rec/e<E>/*` is invalidated after the tracks and at the end.
+#[allow(clippy::too_many_arguments)]
 fn all_recordings(
     batch: &Batch,
     engine: u32,
+    key: &str,
+    id: &str,
+    cursor: &mut PurgeCursor,
+    state: &mut CleanupState,
     start_ms: u64,
     report: &mut CleanupReport,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let store = batch.store();
-    let versions = store.list_versions().map_err(|e| e.to_string())?;
-    let dirs: HashMap<String, u32> = versions.iter().map(|v| (version_dir(v), v.vid)).collect();
     let prefix = format!("rec/e{engine}/");
-    let keys = batch.objects().list(Bucket::Jars, &prefix)?;
-    let groups: BTreeSet<(Division, String)> = keys
-        .iter()
-        .filter_map(|k| recording_group(k, engine, &dirs))
-        .map(|g| (g.division(), g.key()))
-        .collect();
+    let groups_key = purge_groups_key(engine, id);
+    let save = |cursor: &PurgeCursor, state: &mut CleanupState| -> Result<(), String> {
+        state.purges.insert(id.to_string(), cursor.clone());
+        batch.write_state_json(key, state)
+    };
+    let invalidate = |report: &mut CleanupReport| -> Result<(), String> {
+        let path = format!("/{prefix}*");
+        batch.services.cdn.invalidate(
+            std::slice::from_ref(&path),
+            &format!("purge-{start_ms}-{}", report.invalidated.len()),
+        )?;
+        report.invalidated.push(path);
+        Ok(())
+    };
+    let groups: Vec<(Division, String)> = match batch.read_json(Bucket::State, &groups_key)? {
+        Some(groups) => groups,
+        None => {
+            let versions = store.list_versions().map_err(|e| e.to_string())?;
+            let dirs: HashMap<String, u32> =
+                versions.iter().map(|v| (version_dir(v), v.vid)).collect();
+            let keys = batch.objects().list(Bucket::Jars, &prefix)?;
+            let groups: BTreeSet<(Division, String)> = keys
+                .iter()
+                .filter_map(|k| recording_group(k, engine, &dirs))
+                .map(|g| (g.division(), g.key()))
+                .collect();
+            let groups: Vec<(Division, String)> = groups.into_iter().collect();
+            batch.write_state_json(&groups_key, &groups)?;
+            println!(
+                "cleanup: purge {id}: {} tracks in {} slot groups",
+                keys.len(),
+                groups.len()
+            );
+            groups
+        }
+    };
+    if !cursor.tracks_done {
+        let keys = batch.objects().list(Bucket::Jars, &prefix)?;
+        batch.objects().delete_many(Bucket::Jars, &keys)?;
+        report.recordings_deleted += keys.len();
+        cursor.tracks_done = true;
+        save(cursor, state)?;
+        invalidate(report)?;
+        println!("cleanup: purge {id}: {} tracks deleted", keys.len());
+    }
     let over = || batch.now_ms().saturating_sub(start_ms) > batch.budget_ms;
     let mut writes = Pace::new(batch, WRITE_RATE);
-    let mut delete_slots = |report: &mut CleanupReport| -> Result<bool, String> {
-        for (division, slot_key) in &groups {
-            if over() {
-                return Ok(false);
-            }
-            writes.take(1.0);
-            store
-                .delete_slots(engine, *division, slot_key)
-                .map_err(|e| e.to_string())?;
-            report.slot_items_deleted += 1;
-        }
-        Ok(true)
-    };
-    if !delete_slots(report)? {
-        return Ok(false);
-    }
-    for key in &keys {
+    while cursor.slots_done < groups.len() {
         if over() {
-            return Ok(false);
+            save(cursor, state)?;
+            return Ok(());
         }
-        batch.objects().delete(Bucket::Jars, key)?;
-        report.recordings_deleted += 1;
-    }
-    if !delete_slots(report)? {
-        return Ok(false);
+        let (division, slot_key) = &groups[cursor.slots_done];
+        writes.take(1.0);
+        store
+            .delete_slots(engine, *division, slot_key)
+            .map_err(|e| e.to_string())?;
+        report.slot_items_deleted += 1;
+        cursor.slots_done += 1;
+        if cursor.slots_done.is_multiple_of(200) {
+            save(cursor, state)?;
+        }
     }
     for division in [Division::OneVsOne, Division::Melee] {
         batch.objects().delete(
@@ -608,18 +647,13 @@ fn all_recordings(
             &rumble_core::recordings::cache_key(engine, division),
         )?;
     }
-    if !keys.is_empty() {
-        let path = format!("/{prefix}*");
-        batch
-            .services
-            .cdn
-            .invalidate(std::slice::from_ref(&path), &format!("purge-{start_ms}"))?;
-        report.invalidated.push(path);
-    }
+    invalidate(report)?;
+    batch.objects().delete(Bucket::State, &groups_key)?;
+    cursor.recordings_done = true;
+    save(cursor, state)?;
     println!(
-        "cleanup: purge: {} recordings and {} slot groups deleted",
-        keys.len(),
+        "cleanup: purge {id}: {} slot groups deleted, recordings done",
         groups.len()
     );
-    Ok(true)
+    Ok(())
 }
