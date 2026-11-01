@@ -181,6 +181,9 @@ pub struct BattleOutcome {
     /// turn took longer than [`ServerConfig::hard_limit`] in real time, which depends on the
     /// machine, ADR 0025). Empty where that isn't known.
     pub hard_limits: Vec<bool>,
+    /// Per robot, by robot index: the turns it skipped (it answered late, or by its counted
+    /// work in deterministic mode). Empty where that isn't known.
+    pub skipped_turns: Vec<i64>,
 }
 
 /// What became of a robot's connection in a battle.
@@ -309,6 +312,8 @@ struct Link {
     threads: bool,
     /// The hard limit disabled the robot.
     hard_limit: bool,
+    /// Turns it skipped while alive.
+    skipped_turns: i64,
 }
 
 /// Runs a battle with robots (and any observers) connecting to `listener`.
@@ -879,6 +884,7 @@ impl<'a> BattleLoop<'a> {
             .collect();
         let threads = self.links.iter().map(|l| l.threads).collect();
         let hard_limits = self.links.iter().map(|l| l.hard_limit).collect();
+        let skipped_turns = self.links.iter().map(|l| l.skipped_turns).collect();
         self.broadcast(server_message::Msg::BattleOver(v1::BattleOver {
             aborted,
             rounds,
@@ -908,6 +914,7 @@ impl<'a> BattleLoop<'a> {
             connections,
             threads,
             hard_limits,
+            skipped_turns,
         })
     }
 
@@ -1338,6 +1345,7 @@ impl<'a> BattleLoop<'a> {
                     for skipped in answered + 1..turn {
                         link.events.push(Event::SkippedTurn { turn: skipped });
                     }
+                    link.skipped_turns += (turn - answered - 1).max(0);
                 }
             }
             if link.stream.is_none() || link.awaiting.is_some() {

@@ -106,6 +106,7 @@ impl Watcher {
                         connections: Vec::new(),
                         threads: Vec::new(),
                         hard_limits: Vec::new(),
+                        skipped_turns: Vec::new(),
                     });
                 }
                 server_message::Msg::Error(e) => return Err(e.message),

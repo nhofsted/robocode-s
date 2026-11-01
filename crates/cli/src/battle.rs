@@ -557,6 +557,9 @@ pub fn run(o: &Options) -> Result<(), String> {
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "threads": threads,
             "hardLimit": hard_limits,
+            "skippedTurns": statics.iter().zip(&local.outcome.skipped_turns)
+                .map(|(s, n)| (s.name.clone(), serde_json::Value::from(*n)))
+                .collect::<serde_json::Map<String, serde_json::Value>>(),
             "robotProperties": host.properties.iter().map(RobotProperty::jvm_arg).collect::<Vec<_>>(),
             "results": results::json(&rows),
         });
