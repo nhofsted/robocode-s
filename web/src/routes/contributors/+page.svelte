@@ -51,7 +51,7 @@
 	const COLUMNS: { key: SortKey; label: string; num: boolean; title?: string }[] = [
 		{ key: 'rank', label: '#', num: true },
 		{ key: 'login', label: 'Volunteer', num: false },
-		{ key: 'battles', label: 'Battles', num: true },
+		{ key: 'battles', label: 'Battles', num: true, title: 'A melee battle counts as five: it takes about five times the CPU of a 1v1 battle' },
 		{ key: 'battlesWeek', label: 'Last 7 days', num: true },
 		{ key: 'tier', label: 'Tier', num: false, title: 'New volunteers have a share of their battles re-run to check them' },
 		{ key: 'since', label: 'Since', num: false }

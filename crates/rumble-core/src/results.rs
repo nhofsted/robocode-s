@@ -342,6 +342,8 @@ pub fn apply_results<S: Store + ?Sized>(
 
     let mut records = Vec::new();
     let mut seeds = Vec::new();
+    // The user's counter: each counted battle weighs its division's weight.
+    let mut credit = 0u64;
     let mut checks = Vec::new();
     let mut runs = Vec::new();
     // Verification runs in which a robot hit the hard limit: no fault (ADR 0025).
@@ -425,6 +427,7 @@ pub fn apply_results<S: Store + ?Sized>(
                 };
                 record.encode(&mut records);
                 seeds.push(assigned.seed);
+                credit += assigned.division.weight();
                 if battle.status != BattleStatus::Ok {
                     continue;
                 }
@@ -498,7 +501,7 @@ pub fn apply_results<S: Store + ?Sized>(
             ttl: now + LOG_TTL,
         }),
         uid: user.uid.clone(),
-        battles: counted,
+        battles: credit,
         last_post: now,
     };
     match store.commit_results(&transaction) {
@@ -599,7 +602,7 @@ pub fn apply_results<S: Store + ?Sized>(
             rejected,
             duplicate: false,
             uploads,
-            user: summary(user, counted, config),
+            user: summary(user, credit, config),
         },
         log,
         colored,
@@ -1121,6 +1124,25 @@ mod tests {
         assert_eq!(again.response.rejected, first.response.rejected);
         assert_eq!(store.log_items(1).len(), 1);
         assert_eq!(store.get_user("g1").unwrap().unwrap().battles, 12);
+    }
+
+    #[test]
+    fn a_melee_battle_counts_five_for_its_contributor() {
+        let (store, user) = setup(60, UserState::New);
+        let mut melee = assigned(BattleKind::Normal, 12, &[5, 9], None);
+        melee.division = Division::Melee;
+        let p = payload(
+            "g1",
+            vec![assigned(BattleKind::Normal, 11, &[5, 9], None), melee],
+        );
+        let r = request(&p, vec![ok(0, 1), status(1, BattleStatus::RobotFailed)]);
+        let first = post(&store, &user, &r).unwrap();
+        assert_eq!(first.response.accepted, [0, 1]);
+        // 10 before, then 1 for the 1v1 battle and 5 for the melee battle.
+        assert_eq!(first.response.user.battles, 16);
+        assert_eq!(store.get_user("g1").unwrap().unwrap().battles, 16);
+        // The log still holds the battles themselves.
+        assert_eq!(store.log_items(1)[0].battles, 2);
     }
 
     #[test]
