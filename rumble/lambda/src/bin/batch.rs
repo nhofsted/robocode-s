@@ -44,9 +44,10 @@ async fn main() -> Result<(), Error> {
     lambda_runtime::run(service_fn(move |event: LambdaEvent<Value>| {
         let batch = Arc::clone(&batch);
         async move {
-            let Event { mode } = serde_json::from_value(event.payload)
+            let event: Event = serde_json::from_value(event.payload)
                 .map_err(|e| format!("bad event (want {{\"mode\": ...}}): {e}"))?;
-            let result = tokio::task::spawn_blocking(move || batch.run(mode)).await?;
+            let mode = event.mode;
+            let result = tokio::task::spawn_blocking(move || batch.run_event(&event)).await?;
             match result {
                 Ok(report) => {
                     println!("{mode:?}: {report}");

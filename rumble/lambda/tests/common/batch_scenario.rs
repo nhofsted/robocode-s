@@ -11,7 +11,7 @@
 
 use rumble_core::api::UserUpdateRequest;
 use rumble_core::bots;
-use rumble_core::data::{Archive, BotDetails, Contributors, Rankings, RumbleIndex};
+use rumble_core::data::{Archive, BotDetails, Contributors, Rankings, RumbleIndex, VersionDetails};
 use rumble_core::ids::{Division, WeightClass};
 use rumble_core::plan::Plan;
 use rumble_core::record::{Entry, Record};
@@ -23,7 +23,7 @@ use rumble_core::store::{
 use rumble_lambda::batch::cleanup::CleanupReport;
 use rumble_lambda::batch::plan::{PlanReport, state_key};
 use rumble_lambda::batch::publish::PublishReport;
-use rumble_lambda::batch::{Batch, Mode, Services};
+use rumble_lambda::batch::{Batch, Event, Mode, Services};
 use rumble_lambda::cloudfront::MemCdn;
 use rumble_lambda::fetch::MemFetcher;
 use rumble_lambda::s3::{Bucket, Fetched, IMMUTABLE, JAR_TYPE, Objects, TRACK_TYPE};
@@ -95,6 +95,15 @@ impl World {
     fn publish(&self) -> PublishReport {
         serde_json::from_value(self.batch(u64::MAX).run(Mode::Publish).expect("publish"))
             .expect("publish report")
+    }
+
+    fn restore(&self, from: u32) -> serde_json::Value {
+        self.batch(u64::MAX)
+            .run_event(&Event {
+                mode: Mode::Restore,
+                from: Some(from),
+            })
+            .expect("restore")
     }
 
     fn cleanup(&self, budget_ms: u64) -> CleanupReport {
@@ -359,8 +368,8 @@ fn setup(world: &World) -> Posted {
     posted
 }
 
-/// The pairing state the folding should produce from `records` (the retired and removed
-/// versions dropped).
+/// The pairing state the folding should produce from `records` (the removed versions
+/// dropped; retired ones keep theirs).
 fn expected_state(records: &[(String, Record)], dropped: &[u32]) -> State {
     let mut state = State::new(1, Division::OneVsOne, 0);
     for (uid, record) in records {
@@ -503,6 +512,26 @@ pub fn run(world: &World, data_dir: &Path) {
     let versions: Vec<&str> = bot1.versions.iter().map(|v| v.version.as_str()).collect();
     assert_eq!(versions, vec!["2.0", "1.0"]);
     assert!(bot1.versions[1].retired_at.is_some());
+    // The retired 1.0 has a version file: its pairings against today's members.
+    let shared = bot1.versions[1].shared["1v1"];
+    assert!(shared > 0);
+    assert!(bot1.versions[0].shared.is_empty());
+    let v1_file: VersionDetails = world.json(&format!(
+        "data/v1/versions/syn.Bot1/{}.json",
+        &bot1.versions[1].sha256[..16]
+    ));
+    assert_eq!(
+        (v1_file.id.as_str(), v1_file.version.as_str()),
+        ("syn.Bot1", "1.0")
+    );
+    assert_eq!(v1_file.rumbles["1v1"].shared, shared);
+    assert!(
+        v1_file.rumbles["1v1"]
+            .pairings
+            .iter()
+            .all(|p| p.opponent != "syn.Bot1")
+    );
+    assert_eq!(report.version_files_written, 1);
     let contributors: Contributors = world.json("data/v1/contributors.json");
     let logins: Vec<&str> = contributors
         .contributors
@@ -540,6 +569,10 @@ pub fn run(world: &World, data_dir: &Path) {
     assert_eq!(
         (again.bot_files_written, again.bot_files_unchanged),
         (0, 50)
+    );
+    assert_eq!(
+        (again.version_files_written, again.version_files_unchanged),
+        (0, 1)
     );
     // The plan now has `top` from the snapshot.
     world.set(T0 + 200);
@@ -587,7 +620,31 @@ pub fn run(world: &World, data_dir: &Path) {
     assert_same_pairings(&rerun, &once);
     assert!(world.plan().hours.is_empty(), "nothing left to fold");
     assert_same_pairings(&world.state(), &once);
-    assert_same_pairings(&once, &expected_state(&posted.records, &[1]));
+    assert_same_pairings(&once, &expected_state(&posted.records, &[]));
+
+    // ---- restore: the retired syn.Bot1 1.0's pairings, as an older planner dropped them,
+    // come back from the log. ----
+    let mut dropped = world.state();
+    dropped.drop_versions(&HashSet::from([1]));
+    world
+        .objects
+        .put(
+            Bucket::State,
+            &state_key(1, Division::OneVsOne),
+            &dropped.to_bytes(),
+            "application/octet-stream",
+            None,
+        )
+        .unwrap();
+    assert!(world.state().pairings().all(|((a, b), _)| a != 1 && b != 1));
+    let restored = world.restore(2026102400);
+    assert_eq!(restored["retiredVersions"], 1);
+    assert!(restored["pairings"][0].as_u64().unwrap() > 0);
+    assert_same_pairings(&world.state(), &once);
+    assert_eq!(world.state().versions[&1], once.versions[&1]);
+    // Again: nothing changes.
+    world.restore(2026102400);
+    assert_same_pairings(&world.state(), &once);
 
     // Recordings: of the retired syn.Bot1 1.0, of syn.Bot7 (taken down below), of others.
     let v7 = store.get_version(7).unwrap().unwrap();
@@ -659,7 +716,7 @@ pub fn run(world: &World, data_dir: &Path) {
         .filter(|(uid, _)| uid != "g102")
         .cloned()
         .collect();
-    assert_same_pairings(&world.state(), &expected_state(&without, &[1]));
+    assert_same_pairings(&world.state(), &expected_state(&without, &[]));
 
     // ---- a takedown: jar, recordings and slot item go, CloudFront forgets them. ----
     let jar = format!("jars/{}.jar", v7.sha256);
@@ -843,5 +900,5 @@ pub fn run(world: &World, data_dir: &Path) {
         .filter(|(uid, r)| uid != "g102" && r.contestants.iter().all(|e| e.vid != purged))
         .cloned()
         .collect();
-    assert_same_pairings(&world.state(), &expected_state(&kept, &[1, 7]));
+    assert_same_pairings(&world.state(), &expected_state(&kept, &[7]));
 }

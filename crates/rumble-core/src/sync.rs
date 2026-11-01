@@ -9,7 +9,7 @@
 //! - a listed version that is new is imported **active** (its jar fetched and validated by the
 //!   Lambda first), the bot's other versions that are listed nowhere retired;
 //! - a listed version that is `delisted` is active again with its frozen pairings, one that is
-//!   `retired` is active again from scratch (its pairings were dropped);
+//!   `retired` is active again with its frozen pairings (§12.4);
 //! - a version that left one list loses that division; a bot that left every list is
 //!   `delisted` (version and bot; `cur` keeps pointing to the version).
 //!
@@ -212,7 +212,7 @@ pub enum Change {
     },
     /// Delisted → active, with its pairings.
     Relist { vid: u32, divisions: Vec<Division> },
-    /// Retired → active, from scratch.
+    /// Retired → active, with its frozen pairings.
     Reactivate { vid: u32, divisions: Vec<Division> },
     /// Replaced by another listed version of the bot.
     Retire { vid: u32 },

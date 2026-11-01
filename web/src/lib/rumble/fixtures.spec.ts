@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classOf, createFixtures } from './fixtures.ts';
-import type { Archive, BotDetails, Contributors, Rankings, RumbleIndex } from './types.ts';
+import type { Archive, BotDetails, Contributors, Rankings, RumbleIndex, VersionDetails } from './types.ts';
 
 const fixtures = createFixtures({ seed: 42, bots: 120 });
 const index = fixtures.get('rumbles.json') as RumbleIndex;
@@ -58,6 +58,29 @@ describe('fixtures', () => {
 			expect(bot.versions[0].weightClass).toBe('nano');
 			expect(bot.rumbles['1v1-nano'].rank).toBe(row.rank);
 		}
+	});
+
+	it('have version files where a version says it shares opponents, and only there', () => {
+		const rankings = fixtures.get('rankings/1v1.json') as Rankings;
+		let files = 0;
+		for (const row of rankings.bots) {
+			const bot = fixtures.get(`bots/${row.id}.json`) as BotDetails;
+			expect(bot.versions[0].shared).toBeUndefined();
+			for (const v of bot.versions.slice(1)) {
+				const file = fixtures.get(`versions/${row.id}/${v.sha256.slice(0, 16)}.json`) as
+					| VersionDetails
+					| undefined;
+				expect(file !== undefined).toBe(v.shared !== undefined);
+				if (!file) continue;
+				files++;
+				expect(file.version).toBe(v.version);
+				const r = file.rumbles['1v1']!;
+				expect(v.shared?.['1v1']).toBe(r.shared);
+				const current = new Set(bot.rumbles['1v1'].pairings.map((p) => p.opponent));
+				expect(r.pairings.every((p) => current.has(p.opponent) && p.opponent !== row.id)).toBe(true);
+			}
+		}
+		expect(files).toBeGreaterThan(0);
 	});
 
 	it('give the current version first and retire older ones', () => {

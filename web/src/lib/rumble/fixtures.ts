@@ -30,6 +30,8 @@ import {
 	type RumbleId,
 	type RumbleIndex,
 	type RumbleSummary,
+	type VersionDetails,
+	type VersionPairing,
 	type WeightClass
 } from './types.ts';
 
@@ -165,9 +167,60 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		};
 	};
 
+	// Most bots' newest retired version has a version file: about four in five of today's
+	// opponents, scores near today's (a little worse on average), a few opponents met in their
+	// previous version.
+	function versionFile(id: BotId, sha16: string): VersionDetails | undefined {
+		const b = byId.get(id);
+		const v = b?.versions[1];
+		if (!b || !v || v.sha256.slice(0, 16) !== sha16 || hash(`vf:${id}`) % 5 === 0) return undefined;
+		const clamp = (x: number) => Math.round(Math.min(99, Math.max(1, x)) * 100) / 100;
+		const out: VersionDetails['rumbles'] = {};
+		for (const [rid, r] of rumbles) {
+			const d = r.details.get(id);
+			if (!d) continue;
+			const pairings: VersionPairing[] = d.pairings
+				.filter((p) => hash(`vf:${id}|${p.opponent}`) % 5 !== 0)
+				.map((p) => {
+					const h = hash(`vf:${id}|${rid}|${p.opponent}`);
+					const opp = byId.get(p.opponent);
+					const older = h % 9 === 0 && opp !== undefined && opp.versions.length > 1;
+					const delta = ((h % 1000) / 1000 - 0.6) * 12;
+					return {
+						opponent: p.opponent,
+						opponentVersion: older ? opp.versions[1].version : p.opponentVersion,
+						battles: 1 + (h % 20),
+						score: clamp(p.score + delta),
+						survival: clamp(p.survival + delta * 1.3)
+					};
+				})
+				.sort((x, y) => (x.opponent < y.opponent ? -1 : 1));
+			if (pairings.length === 0) continue;
+			const mean = (f: (p: VersionPairing) => number) =>
+				Math.round((pairings.reduce((t, p) => t + f(p), 0) / pairings.length) * 100) / 100;
+			out[rid] = {
+				battles: pairings.reduce((t, p) => t + p.battles, 0),
+				aps: mean((p) => p.score),
+				survival: mean((p) => p.survival),
+				shared: pairings.length,
+				pairings
+			};
+		}
+		if (Object.keys(out).length === 0) return undefined;
+		return { schema: SCHEMA_VERSION, id, version: v.version, sha256: v.sha256, rumbles: out };
+	}
+
 	const bot = (id: BotId): BotDetails | undefined => {
 		const b = byId.get(id);
 		if (!b) return undefined;
+		const previous = b.versions[1] ? versionFile(id, b.versions[1].sha256.slice(0, 16)) : undefined;
+		const versions = b.versions.map((v, i) => {
+			if (i !== 1 || !previous) return v;
+			const shared = Object.fromEntries(
+				Object.entries(previous.rumbles).map(([rid, r]) => [rid, r?.shared ?? 0])
+			);
+			return { ...v, shared };
+		});
 		const entries: Record<RumbleId, BotRumble> = {};
 		for (const [rid, r] of rumbles) {
 			const d = r.details.get(id);
@@ -184,7 +237,7 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			author: { name: b.author, github: hash(id) % 3 === 0 ? b.author : null, country: b.country },
 			description: hash(id) % 4 === 0 ? null : `${shortName(id)}: a ${b.weightClass} bot.`,
 			homepage: hash(id) % 2 === 0 ? `https://robowiki.net/wiki/${shortName(id)}` : null,
-			versions: b.versions,
+			versions,
 			rumbles: entries,
 			...(Object.keys(counts).length > 0 ? { recordings: counts } : {})
 		};
@@ -310,6 +363,8 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		if (m) return rankings(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
 		if (m) return bot(decodeURIComponent(m[1]));
+		m = /^versions\/([^/]+)\/([0-9a-f]{16})\.json$/.exec(clean);
+		if (m) return versionFile(decodeURIComponent(m[1]), m[2]);
 		m = /^rec\/(1v1|melee)\/([^/]+)\.json$/.exec(clean);
 		if (m) {
 			const id = decodeURIComponent(m[2]);

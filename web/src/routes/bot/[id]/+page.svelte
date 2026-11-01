@@ -117,6 +117,13 @@
 
 	const pairingHref = (opponent: string) =>
 		resolve('/pairing/[rumble]/[a]/[b]', { rumble, a: bot.id, b: opponent });
+
+	// Earlier versions with opponents in common with the ranked one link to a comparison.
+	const shared = (v: (typeof bot.versions)[number]) => v.shared?.[rumble] ?? 0;
+	const comparable = $derived(bot.state !== 'delisted' && bot.versions.some((v) => shared(v) > 0));
+	const versionHref = (version: string) =>
+		resolve('/compare/[rumble]/[a]/[b]', { rumble, a: bot.id, b: bot.id }) +
+		`?b=${encodeURIComponent(version)}`;
 </script>
 
 <svelte:head>
@@ -355,6 +362,12 @@
 
 	<section>
 		<h2>Versions</h2>
+		{#if comparable}
+			<p class="muted hint">
+				Pick an earlier version to compare it with the ranked one against the opponents both have
+				met in {rumbleName(data.summary)}.
+			</p>
+		{/if}
 		<div class="table-scroll versions">
 			<table class="data">
 				<thead>
@@ -363,7 +376,16 @@
 				<tbody>
 					{#each bot.versions as v (v.version)}
 						<tr>
-							<td class="mono">{v.version}</td>
+							<td class="mono">
+								{#if bot.state !== 'delisted' && shared(v) > 0}
+									<a
+										href={versionHref(v.version)}
+										title="Compare {v.version} with the ranked version: {formatCount(shared(v))} opponents in common">{v.version}</a
+									>
+								{:else}
+									{v.version}
+								{/if}
+							</td>
 							<td>{released(v)}</td>
 							<td>{formatDate(v.addedAt)}</td>
 							<td>{v.retiredAt ? formatDate(v.retiredAt) : bot.state === 'delisted' ? 'delisted' : 'current'}</td>
@@ -536,6 +558,10 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 		margin-bottom: 0.6rem;
+		font-size: 0.85rem;
+	}
+	.hint {
+		margin: 0 0 0.6rem;
 		font-size: 0.85rem;
 	}
 	.pairings,

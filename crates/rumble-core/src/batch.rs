@@ -148,18 +148,15 @@ pub fn fold_hour(states: &mut [State], hour: u32, items: &[LogItem]) -> HourRepo
     report
 }
 
-/// The versions whose pairings leave the state (§10.5 step 2): retired, removed, failed.
-/// Delisted versions keep theirs, frozen (§16.5): they are not planned, so nothing is added,
-/// and not ranked, so they count for nobody, until the version is listed again.
+/// The versions whose pairings leave the state (§10.5 step 2): removed and failed ones.
+/// Retired and delisted versions keep theirs, frozen (§12.4, §16.5): they are not planned, so
+/// nothing is added, and not ranked, so they count for nobody; a retired version's pairings
+/// are published for comparing it with the bot's ranked version, and a version that is listed
+/// again comes back with them.
 pub fn dropped_versions(versions: &[VersionItem]) -> HashSet<u32> {
     versions
         .iter()
-        .filter(|v| {
-            matches!(
-                v.state,
-                VersionState::Retired | VersionState::Removed | VersionState::Failed
-            )
-        })
+        .filter(|v| matches!(v.state, VersionState::Removed | VersionState::Failed))
         .map(|v| v.vid)
         .collect()
 }
@@ -902,8 +899,12 @@ mod tests {
         let (active, _) = plan_bots(&versions, Division::Melee);
         assert_eq!(active.len(), 1);
         assert_eq!(ranking(None, &versions, Division::OneVsOne), vec![1, 2]);
-        // A delisted version is neither planned nor dropped: its pairings stay, frozen.
-        assert_eq!(dropped_versions(&versions), [4].into());
+        // Retired and delisted versions are neither planned nor dropped: their pairings stay,
+        // frozen. Failed and removed ones go.
+        assert!(dropped_versions(&versions).is_empty());
+        versions.push(version(6, "f.F", VersionState::Failed));
+        versions.push(version(7, "g.G", VersionState::Removed));
+        assert_eq!(dropped_versions(&versions), [6, 7].into());
     }
 
     #[test]

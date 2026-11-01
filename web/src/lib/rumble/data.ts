@@ -10,7 +10,8 @@ import type {
 	Recordings1v1,
 	RecordingsMelee,
 	RumbleId,
-	RumbleIndex
+	RumbleIndex,
+	VersionDetails
 } from './types.ts';
 import { pairRounds, type PairRounds } from './recordings.ts';
 
@@ -40,6 +41,14 @@ export const loadRankings = (fetch: Fetch, rumble: RumbleId) =>
 
 export const loadBot = (fetch: Fetch, id: BotId) =>
 	load<BotDetails>(fetch, `bots/${encodeURIComponent(id)}.json`, `bot "${id}"`);
+
+/** A retired version's pairings (`BotVersion.shared` says which versions have them). */
+export const loadVersion = (fetch: Fetch, id: BotId, sha256: string) =>
+	load<VersionDetails>(
+		fetch,
+		`versions/${encodeURIComponent(id)}/${sha256.slice(0, 16)}.json`,
+		`version data of "${id}"`
+	);
 
 export const loadArchive = (fetch: Fetch) => load<Archive>(fetch, 'archive.json', 'the archive');
 
