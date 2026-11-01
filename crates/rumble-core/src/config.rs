@@ -14,7 +14,7 @@ pub const DEFAULT_ENGINE_VERSION: u32 = 1;
 /// (`robocode_s_server::DETERMINISTIC_RULES`, which the Lambdas don't link). `GET info`
 /// reports it; a test in `rumble-client` keeps the two equal, as it does for the engine
 /// version.
-pub const DETERMINISTIC_RULES: u32 = 2;
+pub const DETERMINISTIC_RULES: u32 = 3;
 
 /// All tunables. Every field has a default, so a partial JSON object deserializes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,6 +164,11 @@ pub struct RepConfig {
     /// Three-way disagreements after which a version is flagged nondeterministic (§11.5);
     /// 0 turns the automatic flag off.
     pub nd_disagreements: u32,
+    /// Unix milliseconds: verification items queued before it are settled without judging
+    /// anyone (as a flagged bot's, §11.5) when served or resolved. Set when the deterministic
+    /// rules change (with `minClient`, §12.4): runs of the old rules can't be compared with
+    /// the new ones. 0: off.
+    pub settle_before: u64,
 }
 
 impl Default for RepConfig {
@@ -179,6 +184,7 @@ impl Default for RepConfig {
             ban_mismatches: 3,
             ban_window_days: 90,
             nd_disagreements: 3,
+            settle_before: 0,
         }
     }
 }
@@ -419,7 +425,8 @@ mod tests {
                 "rate": {"workSeconds": 10, "resultsSeconds": 5},
                 "rep": {"startRate": 0.2, "floorRate": 0.01, "tau": 40.0, "verifierMin": 50,
                         "recorderMin": 20, "quarantineMatches": 20, "recheckOnPenalty": 20,
-                        "banMismatches": 3, "banWindowDays": 90, "ndDisagreements": 3},
+                        "banMismatches": 3, "banWindowDays": 90, "ndDisagreements": 3,
+                        "settleBefore": 0},
                 "probation": {"battles": 10, "failShare": 0.8},
                 "slots": {"top": 50, "perSide": 5, "maxBytes": 262144},
                 "plan": {"priorVariance": {"1v1": 16.0, "melee": 25.0}, "priorWeight": 3.0,

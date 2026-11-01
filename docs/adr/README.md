@@ -27,3 +27,4 @@
 | [0023](0023-nondeterministic-robots.md) | Robots that aren't reproducible are flagged, and their battles never penalize anyone |
 | [0024](0024-robots-that-start-threads-are-reported.md) | Robots that start threads of their own are reported |
 | [0025](0025-deterministic-robot-threads.md) | Deterministic threads for robots: one virtual CPU per robot |
+| [0026](0026-work-prices-per-kind.md) | Work prices per kind of instruction and JDK call |

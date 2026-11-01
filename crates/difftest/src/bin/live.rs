@@ -56,6 +56,7 @@ fn main() -> ExitCode {
             "clients/java-determinism/build/libs/java-determinism-0.1.0-SNAPSHOT.jar",
         ),
         sandbox,
+        properties: Vec::new(),
     };
     let jars: Vec<PathBuf> = std::env::var_os("ROBOCODES_ROBOT_JARS")
         .map(|v| {

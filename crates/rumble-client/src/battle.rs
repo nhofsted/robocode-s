@@ -261,6 +261,9 @@ impl Runner {
         let env = Environment {
             jars: env_jars,
             fresh_data: true,
+            // Rumble results never come from robots with our diagnostics switched on
+            // (`meterWork=false` changes their turns).
+            robot_properties: Vec::new(),
             ..self.options.env.clone()
         };
         let config = ServerConfig {

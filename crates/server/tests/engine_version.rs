@@ -3,7 +3,8 @@
 //! `ENGINE_VERSION` (design §4.4) changes with every change to `DETERMINISTIC_RULES`, but
 //! for the owner's exceptions: rules 2 (ADR 0025) kept engine version 1, as robots without
 //! threads of their own give byte-identical battles and those with threads are no-fault in
-//! the rumble (ADR 0023).
+//! the rumble (ADR 0023); rules 3 (ADR 0026, new work prices) kept it too: the rankings stay,
+//! and the battles the new prices change are purged and fought again (rumble-backend §12.4).
 
 use robocode_s_engine::ENGINE_VERSION;
 use robocode_s_server::DETERMINISTIC_RULES;
@@ -12,8 +13,8 @@ use robocode_s_server::DETERMINISTIC_RULES;
 fn engine_version_follows_the_deterministic_rules() {
     assert_eq!(
         (ENGINE_VERSION, DETERMINISTIC_RULES),
-        (1, 2),
+        (1, 3),
         "Bump ENGINE_VERSION (crates/engine/src/lib.rs) whenever DETERMINISTIC_RULES changes \
-         (unless the owner decides otherwise, as for rules 2), then update this pin."
+         (unless the owner decides otherwise, as for rules 2 and 3), then update this pin."
     );
 }

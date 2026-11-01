@@ -44,8 +44,6 @@ import java.util.Set;
  */
 final class WorkMeter {
 
-    /** Counted per call into the JDK, for the work done there. */
-    static final int JDK_CALL_COST = 10;
 
     private static final String FIELD = "robocodes$fuel";
     private static final String HOOK_FUNCTION = "java/util/function/Function";
@@ -329,6 +327,8 @@ final class WorkMeter {
         InsnList instructions = method.instructions;
         List<AbstractInsnNode> starts = new ArrayList<>();
         List<Long> costs = new ArrayList<>();
+        List<WorkProfile.Block> profiles = new ArrayList<>();
+        WorkProfile.Block profile = WorkProfile.ON ? new WorkProfile.Block() : null;
         AbstractInsnNode start = null;
         long cost = 0;
         for (AbstractInsnNode insn = instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -337,6 +337,8 @@ final class WorkMeter {
                 if (start != null) {
                     starts.add(start);
                     costs.add(cost);
+                    profiles.add(profile);
+                    profile = WorkProfile.ON ? new WorkProfile.Block() : null;
                 }
                 start = null;
                 cost = 0;
@@ -348,13 +350,17 @@ final class WorkMeter {
             if (start == null) {
                 start = insn;
             }
-            cost += 1;
-            if (insn instanceof MethodInsnNode call && isJdk(call.owner)) {
-                cost += JDK_CALL_COST;
+            boolean jdk = insn instanceof MethodInsnNode call && isJdk(call.owner);
+            long insnCost = WorkPrices.of(insn, jdk);
+            cost += insnCost;
+            if (profile != null) {
+                profile.add(insn, jdk, insnCost);
             }
             if (endsBlock(insn)) {
                 starts.add(start);
                 costs.add(cost);
+                profiles.add(profile);
+                profile = WorkProfile.ON ? new WorkProfile.Block() : null;
                 start = null;
                 cost = 0;
             }
@@ -362,6 +368,7 @@ final class WorkMeter {
         if (start != null) {
             starts.add(start);
             costs.add(cost);
+            profiles.add(profile);
         }
         Set<AbstractInsnNode> checked = repeatable(method);
         checked.removeAll(selfCoveredHandlers(method));
@@ -369,6 +376,12 @@ final class WorkMeter {
             InsnList add = checked.contains(starts.get(i))
                     ? countAndCheck(className, costs.get(i), starts.get(i), frames)
                     : count(className, costs.get(i));
+            if (profiles.get(i) != null) {
+                // Before the count and its check: straight-line and stack-neutral.
+                InsnList counted = profiles.get(i).code(className, FIELD);
+                counted.add(add);
+                add = counted;
+            }
             AbstractInsnNode first = starts.get(i);
             if (first.getOpcode() == Opcodes.NEW) {
                 // Stack map frames refer to a NEW by the label right before it

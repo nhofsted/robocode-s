@@ -2,8 +2,8 @@
 
 //! The pure part of the `batch` Lambda's `cleanup` mode (spec §12.4, §11.3, §15): the
 //! recordings and slot items of versions that are no longer current, the jars of removed
-//! versions, and the correction records of banned users, with the cursor that makes the
-//! ban removal resumable across runs.
+//! versions, and the correction records of banned users and of purged versions, with the
+//! cursors that make the removals resumable across runs.
 //!
 //! **Finding slot items without an index.** Slot items are partitions of their own
 //! (`S#<E>#<division>#<key>`), so the job derives the keys of a dead version's items from
@@ -36,6 +36,12 @@ pub struct CleanupState {
     /// M6's reopening of slots without a robot order.
     #[serde(default)]
     pub rec_order: RecOrderMigration,
+    /// Purges in progress, by purge id ([`PurgeCursor`]).
+    #[serde(default)]
+    pub purges: BTreeMap<String, PurgeCursor>,
+    /// Purges finished (their alert stays for 90 days; this keeps them from restarting).
+    #[serde(default)]
+    pub purged: BTreeSet<String>,
 }
 
 /// The one-time reopening of slot entries without a robot order (`SlotEntry::order`): the
@@ -269,20 +275,176 @@ pub fn correction_prefix(started_ms: u64, uid: &str, source: u32) -> String {
     format!("{started_ms:013}#ban.{uid}.{source}.")
 }
 
+/// A purge (§12.4): the battles of some versions are taken out of the pairing state, so that
+/// they are fought again; for battles whose results a change of the deterministic rules
+/// changed (#15). `until` is the hour of that change, over before the purge starts. The log
+/// is walked backwards like a ban's, from the hour the purge starts (so records released
+/// meanwhile, of items queued before the change, are caught too; the few battles fought
+/// with the new rules in between are fought again) down to the oldest purged version's
+/// registration (at most the log's 400 days), and every counted record with a purged
+/// version gets a correction (weight −1, uid `system`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PurgeCursor {
+    pub started_ms: u64,
+    pub vids: BTreeSet<u32>,
+    pub reason: String,
+    /// The open verification items with a purged version are deleted (first step), so that
+    /// no correction of a purged record follows.
+    pub queue_done: bool,
+    pub next: u32,
+    pub stop: u32,
+    /// Keys ([`record_key`]) of records a correction seen in a later hour already cancelled.
+    pub cancelled: Vec<String>,
+    pub pending: Option<Pending>,
+    pub corrected: u64,
+    /// Every recording (track and slot item) goes too: after a rules change none can be
+    /// shown to be what the robots would do now (§12.4).
+    #[serde(default)]
+    pub recordings: bool,
+    #[serde(default)]
+    pub recordings_done: bool,
+}
+
+/// The `kind` of the alert that asks for a purge (`POST admin/purge`).
+pub const PURGE_ALERT: &str = "purge";
+
+/// What a purge alert's `reference` holds: `<id> <until hour> <vid>,<vid>,...`, and ` rec`
+/// if every recording goes too.
+pub fn purge_reference(id: &str, until: u32, vids: &BTreeSet<u32>, recordings: bool) -> String {
+    let vids: Vec<String> = vids.iter().map(u32::to_string).collect();
+    let rec = if recordings { " rec" } else { "" };
+    format!("{id} {until} {}{rec}", vids.join(","))
+}
+
+/// A purge alert's `reference`, read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PurgeAsked {
+    pub id: String,
+    pub until: u32,
+    pub vids: BTreeSet<u32>,
+    pub recordings: bool,
+}
+
+/// The id, the switch's hour, the versions and whether every recording goes, of a purge
+/// alert's `reference`.
+pub fn parse_purge_reference(reference: &str) -> Option<PurgeAsked> {
+    let mut parts = reference.split(' ');
+    let id = parts.next()?.to_string();
+    let until = parts.next()?.parse().ok()?;
+    let vids = parts
+        .next()?
+        .split(',')
+        .map(|v| v.parse().ok())
+        .collect::<Option<BTreeSet<u32>>>()?;
+    let recordings = match parts.next() {
+        None => false,
+        Some("rec") => true,
+        Some(_) => return None,
+    };
+    (!id.is_empty() && !vids.is_empty() && parts.next().is_none()).then_some(PurgeAsked {
+        id,
+        until,
+        vids,
+        recordings,
+    })
+}
+
+/// A new purge's cursor: from the hour it starts down to the oldest of `versions` (their
+/// records can't be older), or the log's 400 days, whichever is later.
+pub fn purge_cursor(
+    vids: BTreeSet<u32>,
+    reason: &str,
+    recordings: bool,
+    versions: &[VersionItem],
+    now_ms: u64,
+) -> PurgeCursor {
+    let now = now_ms / 1000;
+    let oldest = versions
+        .iter()
+        .filter(|v| vids.contains(&v.vid))
+        .map(|v| v.created)
+        .min()
+        .unwrap_or(now);
+    PurgeCursor {
+        started_ms: now_ms,
+        vids,
+        reason: reason.to_string(),
+        queue_done: false,
+        next: hour_key(now),
+        stop: hour_key(oldest.max(now.saturating_sub(LOG_TTL + DAY))),
+        cancelled: Vec::new(),
+        pending: None,
+        corrected: 0,
+        recordings,
+        recordings_done: false,
+    }
+}
+
+impl PurgeCursor {
+    pub fn finished(&self) -> bool {
+        self.next < self.stop
+    }
+}
+
+/// The records of one partition's items that a purge must cancel: every counted record (of
+/// a non-held item, any uid: a verification's majority record and a released one count
+/// too) with a purged version, except those a correction in this or a later partition
+/// already cancelled. Failed battles only count towards failure tallies: they stay.
+pub fn purge_corrections(cursor: &mut PurgeCursor, items: &[LogItem]) -> Vec<(Record, i64)> {
+    let decoded: Vec<Vec<(Record, i64)>> = items
+        .iter()
+        .filter(|i| !i.held)
+        .map(|i| {
+            Record::decode_all(&i.records, &i.uid)
+                .map(|records| records.into_iter().zip(i.seeds.iter().copied()).collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    let purged = |record: &Record| {
+        record.failed.is_none()
+            && record
+                .contestants
+                .iter()
+                .any(|e| cursor.vids.contains(&e.vid))
+    };
+    let mut cancelled = std::mem::take(&mut cursor.cancelled);
+    for (record, seed) in decoded.iter().flatten() {
+        if record.weight < 0 && purged(record) {
+            cancelled.push(record_key(*seed, record));
+        }
+    }
+    let mut out = Vec::new();
+    for (record, seed) in decoded.iter().flatten() {
+        if record.weight <= 0 || !purged(record) {
+            continue;
+        }
+        let key = record_key(*seed, record);
+        if let Some(at) = cancelled.iter().position(|k| *k == key) {
+            cancelled.swap_remove(at);
+            continue;
+        }
+        out.push((record.negated(), *seed));
+    }
+    cursor.cancelled = cancelled;
+    out
+}
+
+/// The sort key prefix of the corrections of partition `source` of a purge.
+pub fn purge_correction_prefix(started_ms: u64, id: &str, source: u32) -> String {
+    format!("{started_ms:013}#purge.{id}.{source}.")
+}
+
 /// The log items (uid `system`) that carry corrections, at most [`CORRECTION_BYTES`] of
 /// records and seeds each, for partition `partition`. Their sort keys depend only on the
 /// cursor's start, the uid, the source partition and the chunk, so writing them again
 /// after a crash is recognized.
 pub fn correction_items(
     engine: u32,
-    started_ms: u64,
-    uid: &str,
-    source: u32,
+    prefix: &str,
     partition: u32,
     corrections: &[(Record, i64)],
     now: u64,
 ) -> Vec<LogItem> {
-    let prefix = correction_prefix(started_ms, uid, source);
     let mut items: Vec<LogItem> = Vec::new();
     let mut records = Vec::new();
     let mut seeds = Vec::new();
@@ -320,6 +482,7 @@ mod tests {
     use super::*;
     use crate::ids::WeightClass;
     use crate::record::Entry;
+    use crate::record::FailReason;
     use crate::store::{Reputation, UserState};
 
     const NOW: u64 = 1_792_843_200;
@@ -468,7 +631,8 @@ mod tests {
         assert!(cursor.cancelled.is_empty());
 
         let many: Vec<(Record, i64)> = (0..70).map(|i| (record(1, 3, 50.0).negated(), i)).collect();
-        let items = correction_items(1, NOW * 1000, "g7", 2026102410, 2026102412, &many, NOW);
+        let prefix = correction_prefix(NOW * 1000, "g7", 2026102410);
+        let items = correction_items(1, &prefix, 2026102412, &many, NOW);
         assert_eq!(items.len(), 3);
         assert!(
             items
@@ -483,5 +647,83 @@ mod tests {
         let decoded = Record::decode_all(&items[0].records, SYSTEM_UID).unwrap();
         assert!(decoded.iter().all(|r| r.weight == -1));
         assert_eq!(previous_hour(2026102400), 2026102323);
+    }
+
+    #[test]
+    fn purge_references_round_trip() {
+        let vids: BTreeSet<u32> = [3, 17, 900].into();
+        let reference = purge_reference("rules3", 2026110312, &vids, false);
+        assert_eq!(reference, "rules3 2026110312 3,17,900");
+        let asked = |recordings| PurgeAsked {
+            id: "rules3".to_string(),
+            until: 2026110312,
+            vids: vids.clone(),
+            recordings,
+        };
+        assert_eq!(parse_purge_reference(&reference), Some(asked(false)));
+        let reference = purge_reference("rules3", 2026110312, &vids, true);
+        assert_eq!(reference, "rules3 2026110312 3,17,900 rec");
+        assert_eq!(parse_purge_reference(&reference), Some(asked(true)));
+        assert_eq!(parse_purge_reference("x 2026110312 1 tracks"), None);
+        assert_eq!(parse_purge_reference("x 2026110312 "), None);
+        assert_eq!(parse_purge_reference("x 2026110312 1,a"), None);
+        assert_eq!(parse_purge_reference("x"), None);
+    }
+
+    #[test]
+    fn purges_cancel_every_counted_record_of_their_versions_once() {
+        let versions = vec![
+            version(1, "a.A", VersionState::Active),
+            version(2, "b.B", VersionState::Active),
+        ];
+        let mut cursor = purge_cursor([1].into(), "rules 3", false, &versions, NOW * 1000);
+        assert_eq!((cursor.next, cursor.stop), (hour_key(NOW), hour_key(NOW)));
+        // A later partition: a verification corrected a record of version 1 (the original
+        // with weight -1, the majority's +1, both system's).
+        let later = log(
+            SYSTEM_UID,
+            &[(record(1, 2, 70.0).negated(), 5), (record(1, 2, 40.0), 5)],
+            false,
+        );
+        // Decoded records carry their item's uid.
+        let from = |uid: &str, r: Record| Record {
+            uid: uid.to_string(),
+            ..r.negated()
+        };
+        let out = purge_corrections(&mut cursor, &[later]);
+        assert_eq!(
+            out,
+            vec![(from(SYSTEM_UID, record(1, 2, 40.0)), 5)],
+            "the majority's record"
+        );
+        assert_eq!(cursor.cancelled.len(), 1);
+        let mut failed = record(1, 2, 0.0);
+        failed.failed = Some((0, FailReason::Crash));
+        let earlier = vec![
+            log(
+                "g7",
+                &[
+                    (record(1, 2, 70.0), 5),
+                    (record(2, 3, 55.0), 6),
+                    (failed, 7),
+                ],
+                false,
+            ),
+            log("g8", &[(record(3, 1, 20.0), 8)], false),
+            // A quarantined user's battle never counted.
+            log("g9", &[(record(1, 3, 90.0), 9)], true),
+        ];
+        let out = purge_corrections(&mut cursor, &earlier);
+        assert_eq!(out, vec![(from("g8", record(3, 1, 20.0)), 8)]);
+        assert!(cursor.cancelled.is_empty());
+        // A correction and its original in the same partition cancel each other.
+        let mut cursor = purge_cursor([2].into(), "rules 3", false, &versions, NOW * 1000);
+        let same = vec![
+            log("g7", &[(record(1, 2, 70.0), 5)], false),
+            log(SYSTEM_UID, &[(record(1, 2, 70.0).negated(), 5)], false),
+        ];
+        assert!(purge_corrections(&mut cursor, &same).is_empty());
+        let prefix = purge_correction_prefix(NOW * 1000, "rules3", 2026102410);
+        assert!(prefix.ends_with("#purge.rules3.2026102410."));
     }
 }

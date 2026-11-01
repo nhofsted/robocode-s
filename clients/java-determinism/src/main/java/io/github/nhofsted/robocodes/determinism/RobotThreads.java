@@ -45,22 +45,22 @@ final class RobotThreads {
 
     /** Counted work a thread may do while others of its robot wait: 100 µs of virtual time. */
     static final long QUANTUM_NANOS = 100_000;
-    static final long QUANTUM_INSTRUCTIONS = QUANTUM_NANOS * 1000 / RobotRandomness.PICOS_PER_INSTRUCTION;
+    static final long QUANTUM_INSTRUCTIONS = QUANTUM_NANOS * 1000 / RobotRandomness.PICOS_PER_UNIT;
     /** The turn budget (ADR 0018) in counted instructions. */
     static final long BUDGET_INSTRUCTIONS =
-            RobotRandomness.TURN_BUDGET_NANOS * 1000 / RobotRandomness.PICOS_PER_INSTRUCTION;
+            RobotRandomness.TURN_BUDGET_NANOS * 1000 / RobotRandomness.PICOS_PER_UNIT;
     /**
      * Counted work the other threads may do at most at a turn's end: the time the virtual
      * clock gives a turn for waiting on the other robots (ADR 0014), 1 ms.
      */
-    static final long GAP_INSTRUCTIONS = RobotRandomness.TURN_NANOS * 1000 / RobotRandomness.PICOS_PER_INSTRUCTION;
+    static final long GAP_INSTRUCTIONS = RobotRandomness.TURN_NANOS * 1000 / RobotRandomness.PICOS_PER_UNIT;
     /**
      * Interrupts at a round's end before the robot's other threads are stopped: classic
      * interrupts them every 100 ms for 3 s ({@code RobotThreadManager.waitForStop}).
      */
     static final int END_PULSES = 30;
     /** Counted work the robot's other threads may do after each of those interrupts: 1 ms. */
-    static final long END_SLICE_INSTRUCTIONS = 1_000_000 * 1000 / RobotRandomness.PICOS_PER_INSTRUCTION;
+    static final long END_SLICE_INSTRUCTIONS = 1_000_000 * 1000 / RobotRandomness.PICOS_PER_UNIT;
     /** Whether a higher priority runs first (Java priorities, at most classic's group maximum). */
     static final boolean PRIORITIES = !"false".equals(System.getProperty("robocodes.threadPriorities"));
     /**

@@ -111,6 +111,14 @@ Admin commands (an admin account; they print the server's answer):
   admin bot nd <id> <version> on [--reason TEXT] | off
                          flag a version as not reproducible (its battles are never
                          verified, nobody is penalized by them) or clear the flag
+  admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--all-recordings]
+              [--apply]
+                         take the battles of the versions in FILE (one <id> <version>
+                         a line) up to that hour (UTC, over) out of the rankings, to be
+                         fought again (docs/rumble-backend.md 12.4); shows which
+                         versions there are and stores nothing without --apply;
+                         --all-recordings deletes every recording too (to be filled
+                         again)
   admin alerts           the open alerts (verification mismatches and the like)
   admin config get       print the configuration overrides
   admin config set FILE  replace them with the JSON in FILE
@@ -145,6 +153,15 @@ pub enum Command {
     Repair {
         uids: Vec<String>,
         rep: Option<u32>,
+        apply: bool,
+    },
+    /// `admin purge`: the request is a dry run without `--apply`.
+    Purge {
+        id: String,
+        until: u32,
+        versions: PathBuf,
+        reason: String,
+        all_recordings: bool,
         apply: bool,
     },
     Alerts,
@@ -325,7 +342,8 @@ impl RunOptions {
 
 fn parse_admin(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
-        None => Err("admin: import, user, repair, bot, alerts or config?".into()),
+        None => Err("admin: import, user, repair, bot, purge, alerts or config?".into()),
+        Some("purge") => parse_purge(&args[1..]),
         Some("import") => ImportOptions::parse(&args[1..]).map(Command::Import),
         Some("user") => parse_user(&args[1..]),
         Some("repair") => parse_repair(&args[1..]),
@@ -483,6 +501,39 @@ fn parse_repair(args: &[String]) -> Result<Command, String> {
     Ok(Command::Repair { uids, rep, apply })
 }
 
+fn parse_purge(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str = "admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--all-recordings] [--apply]";
+    let (mut id, mut until, mut versions, mut reason, mut apply) = (None, None, None, None, false);
+    let mut all_recordings = false;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().cloned().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--until" => until = Some(number(arg, value()?)?),
+            "--versions" => versions = Some(PathBuf::from(value()?)),
+            "--reason" => reason = Some(value()?),
+            "--apply" => apply = true,
+            "--all-recordings" => all_recordings = true,
+            a if a.starts_with("--") => return Err(format!("admin purge: unknown option {a}")),
+            a if id.is_none() => id = Some(a.to_string()),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    match (id, until, versions, reason) {
+        (Some(id), Some(until), Some(versions), Some(reason)) if !reason.trim().is_empty() => {
+            Ok(Command::Purge {
+                id,
+                until,
+                versions,
+                reason,
+                all_recordings,
+                apply,
+            })
+        }
+        _ => Err(USAGE.into()),
+    }
+}
+
 fn parse_bot(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
         Some("nd") => match &args[1..] {
@@ -576,6 +627,49 @@ pub fn main(args: &[String]) -> Result<(), String> {
             }
         }
         Command::Repair { uids, rep, apply } => repair(&parsed, uids, *rep, *apply),
+        Command::Purge {
+            id,
+            until,
+            versions,
+            reason,
+            all_recordings,
+            apply,
+        } => {
+            let text = std::fs::read_to_string(versions)
+                .map_err(|e| format!("{}: {e}", versions.display()))?;
+            let mut list = Vec::new();
+            for line in text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            {
+                let (bot, version) = line.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("{}: {line:?} is not \"<id> <version>\"", versions.display())
+                })?;
+                list.push(rumble_core::api::PurgeVersion {
+                    bot: bot.to_string(),
+                    version: version.trim().to_string(),
+                });
+            }
+            let request = rumble_core::api::PurgeRequest {
+                id: id.clone(),
+                versions: list,
+                until: *until,
+                reason: reason.clone(),
+                all_recordings: *all_recordings,
+                dry_run: !apply,
+            };
+            let (api, _) = signed_in(&parsed)?;
+            let answer = api.admin_purge(&request).map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&answer).unwrap_or_default()
+            );
+            if !apply {
+                eprintln!("dry run: nothing stored (--apply asks cleanup for the purge)");
+            }
+            Ok(())
+        }
         Command::Alerts => alerts(&parsed),
         Command::ConfigGet => {
             let (api, _) = signed_in(&parsed)?;
@@ -1302,6 +1396,21 @@ mod tests {
                 apply: true
             }
         );
+        assert_eq!(
+            parse("admin purge rules3 --until 2026110312 --versions v.txt --reason x")
+                .unwrap()
+                .command,
+            Command::Purge {
+                id: "rules3".into(),
+                until: 2026110312,
+                versions: "v.txt".into(),
+                reason: "x".into(),
+                all_recordings: false,
+                apply: false
+            }
+        );
+        assert!(parse("admin purge rules3 --until 2026110312 --versions v.txt").is_err());
+        assert!(parse("admin purge --until 2026110312 --versions v.txt --reason x").is_err());
         assert!(parse("admin repair").is_err());
         assert!(parse("admin repair --apply").is_err());
         assert!(parse("admin repair g1 --frobnicate").is_err());

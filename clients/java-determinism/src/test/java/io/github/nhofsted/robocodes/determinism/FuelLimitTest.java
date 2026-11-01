@@ -144,7 +144,8 @@ class FuelLimitTest {
         long[] second = runToLimit("sample.Fire (41)", 10_000);
         assertEquals(first[0], second[0], "same count at the throw");
         // A loop's start checks: the count is within one pass of the loop from the limit.
-        assertTrue(Math.abs(first[0] - first[1]) < 100, "at the limit: " + first[0] + " vs " + first[1]);
+        assertTrue(Math.abs(first[0] - first[1]) < 100 * WorkPrices.INSTRUCTION,
+                "at the limit: " + first[0] + " vs " + first[1]);
     }
 
     @Test

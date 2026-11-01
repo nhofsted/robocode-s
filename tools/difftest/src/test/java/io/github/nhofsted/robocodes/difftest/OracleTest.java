@@ -53,7 +53,7 @@ class OracleTest {
         Path out = dir.resolve("battle.jsonl");
         assertSucceeded(runOracle(oracleJvmArgs(), "sample.Fire,sample.Walls", 3, 2, out));
         List<String> lines = Files.readAllLines(out);
-        assertTrue(lines.get(0).startsWith("{\"type\":\"header\",\"format\":3,\"robotRandomness\":\"robocode-s/1\","
+        assertTrue(lines.get(0).startsWith("{\"type\":\"header\",\"format\":4,\"robotRandomness\":\"robocode-s/1\","
                 + "\"classic\":\"1.11.1\""), lines.get(0));
         assertTrue(lines.get(0).contains("\"robots\":[\"sample.Fire\",\"sample.Walls\"]"), lines.get(0));
         assertTrue(lines.get(0).contains("\"robotInfo\":[{\"name\":\"sample.Fire\",\"advanced\":false,"), lines.get(0));
@@ -62,6 +62,7 @@ class OracleTest {
         assertEquals(2, lines.stream().filter(l -> l.startsWith("{\"type\":\"roundStart\"")).count());
         assertTrue(lines.get(lines.size() - 1).startsWith("{\"type\":\"results\""));
         assertTrue(lines.stream().noneMatch(l -> l.contains("\"output\":")), "console output is opt-in");
+        assertTrue(lines.stream().noneMatch(l -> l.contains("\"late\":")), "no robot answered late");
         // Commands, remaining values and events per robot (format 2).
         String turn = lines.get(2);
         assertTrue(turn.contains("\"commands\":[{\"bodyTurn\":"), turn);

@@ -104,12 +104,12 @@ public final class RobotRandomness {
      * changes what time-reading robots do.
      */
     /**
-     * Virtual time per counted instruction, in picoseconds. Calibrated on 2026-10-17 against
-     * classic 1.11.1 on OpenJDK 21 (x86-64, WSL2) with only the inexact math intrinsics
-     * disabled: robots doing over 1 000 000 counted instructions per turn take 45-209 ps
-     * each, median 159 (#15, ADR 0014).
+     * Virtual time per counted unit, in picoseconds: robot code's work is counted in these
+     * units at the prices of {@link WorkPrices} (#15, ADR 0014). Rules 2 counted every
+     * instruction alike at 160 ps (16 units), calibrated on 2026-10-17 against classic 1.11.1
+     * on OpenJDK 21 (x86-64, WSL2) with only the inexact math intrinsics disabled.
      */
-    public static final long PICOS_PER_INSTRUCTION = 160;
+    public static final long PICOS_PER_UNIT = 10;
     /** Virtual time per turn besides the robot's own work: waiting for the others. */
     public static final long TURN_NANOS = 1_000_000;
     /**
@@ -154,7 +154,7 @@ public final class RobotRandomness {
      */
     public static final long WORK_CUTOFF_NANOS = 256 * TURN_BUDGET_NANOS;
     /** {@link #WORK_CUTOFF_NANOS} in counted instructions. */
-    static final long CUTOFF_INSTRUCTIONS = WORK_CUTOFF_NANOS * 1000 / PICOS_PER_INSTRUCTION;
+    static final long CUTOFF_INSTRUCTIONS = WORK_CUTOFF_NANOS * 1000 / PICOS_PER_UNIT;
 
     /**
      * Version of the deterministic rules: the constants above and how they decide skipped
@@ -165,7 +165,8 @@ public final class RobotRandomness {
      */
     public static int rulesVersion() {
         // 2: robots' own threads on one virtual CPU per robot, sleeps on the virtual clock (ADR 0025).
-        return 2;
+        // 3: work priced per kind of instruction and JDK call, new arrays per element (ADR 0026).
+        return 3;
     }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
@@ -224,6 +225,8 @@ public final class RobotRandomness {
      * counted (and reads the real clock), to measure its CPU time without that overhead.
      */
     private static final String CALIBRATE = System.getProperty("robocodes.calibrate");
+    /** Whether this JVM calibrates ({@code -Drobocodes.calibrate}). */
+    static final boolean CALIBRATING = CALIBRATE != null;
     static final boolean METER_WORK = !"false".equals(System.getProperty("robocodes.meterWork"));
 
     /** Stack frames per trace line ({@code -Drobocodes.traceDepth}, default 3). */
@@ -500,7 +503,13 @@ public final class RobotRandomness {
         long[] fuel;
         synchronized (FUEL) {
             // The count, and the limit for the robot's work until its first turn.
-            fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> new long[] {CUTOFF_INSTRUCTIONS, -CUTOFF_INSTRUCTIONS});
+            fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> {
+                // Calibration: the profile's slots after the count (WorkProfile).
+                long[] f = new long[WorkProfile.ON ? WorkProfile.SLOTS : 2];
+                f[0] = CUTOFF_INSTRUCTIONS;
+                f[1] = -CUTOFF_INSTRUCTIONS;
+                return f;
+            });
         }
         // Robot classes initialize on the robot's thread: remember the counter for skipped
         // turns, the per-turn trace and the calibration.
@@ -669,7 +678,9 @@ public final class RobotRandomness {
             PeerTurns turns = PEERS.computeIfAbsent(peer, p -> new PeerTurns());
             long work = turns.work < 0 ? 0 : Math.max(0, now - turns.work);
             turns.work = now;
-            turns.late = lateTurns(work, turn);
+            // Calibration: no skipped turns, as in the unmetered run (classic waits for every
+            // robot there), so both runs play the same turns; heavy robots would diverge.
+            turns.late = CALIBRATING ? 0 : lateTurns(work, turn);
             if (turns.late > 0) {
                 // Not published yet: these stay in effect while it is late.
                 turns.oldCommands = published.get();
@@ -732,7 +743,7 @@ public final class RobotRandomness {
 
     /** Virtual time a robot has spent: its turns and its counted work. */
     public static long elapsedNanos(long turns, long instructions) {
-        return turns * TURN_NANOS + instructions * PICOS_PER_INSTRUCTION / 1000;
+        return turns * TURN_NANOS + instructions * PICOS_PER_UNIT / 1000;
     }
 
     private static long elapsedNanos(Object fuel) {
@@ -750,7 +761,7 @@ public final class RobotRandomness {
         }
     }
 
-    /** One line per robot: name, turns, counted work, clock reads, CPU nanos. */
+    /** One line per robot: name, turns, counted work, clock reads, CPU nanos (and the work's profile). */
     private void writeCalibration() {
         StringBuilder out = new StringBuilder();
         synchronized (streams) {
@@ -759,7 +770,11 @@ public final class RobotRandomness {
                 synchronized (st) {
                     out.append(e.getKey()).append('\t').append(st.turns).append('\t')
                             .append(st.fuel == null ? 0 : count(st.fuel)).append('\t').append(st.clockReads)
-                            .append('\t').append(st.cpuNanos).append('\n');
+                            .append('\t').append(st.cpuNanos);
+                    if (WorkProfile.ON) {
+                        out.append('\t').append(WorkProfile.describe(st.fuel));
+                    }
+                    out.append('\n');
                 }
             }
         }
@@ -911,7 +926,7 @@ public final class RobotRandomness {
          * the time its threads slept while nothing else ran.
          */
         synchronized long elapsedNanos(long instructions) {
-            return turnClock + slept + instructions * PICOS_PER_INSTRUCTION / 1000;
+            return turnClock + slept + instructions * PICOS_PER_UNIT / 1000;
         }
 
         /** Time passes that nobody worked: the clock moves on, and the turn is {@code lateNanos} later. */

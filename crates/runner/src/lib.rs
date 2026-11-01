@@ -32,6 +32,42 @@ pub struct JavaHost {
     pub agent_jar: PathBuf,
     /// What robot hosts run in, battles and listings alike: they load robot code.
     pub sandbox: Sandbox,
+    /// Our own diagnostics for robot JVMs (`-Drobocodes.<name>=<value>`, e.g.
+    /// `traceDeterminism`, `meterWork`): the agent's traces and switches. Robots get a fixed
+    /// environment (ADR 0025), so `JAVA_TOOL_OPTIONS` can't carry them; only `robocode-s
+    /// battle --robot-property` sets these, never the rumble.
+    pub properties: Vec<RobotProperty>,
+}
+
+/// One of our diagnostics properties for robot JVMs ([`JavaHost::properties`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RobotProperty {
+    /// Without the `robocodes.` prefix.
+    name: String,
+    value: String,
+}
+
+impl RobotProperty {
+    /// `NAME=VALUE` (or `NAME`, as `NAME=true`), `NAME` with or without the `robocodes.`
+    /// prefix: only our own properties, not the JVM's or the robot's.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let (name, value) = text.split_once('=').unwrap_or((text, "true"));
+        let name = name.strip_prefix("robocodes.").unwrap_or(name);
+        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+            return Err(format!(
+                "{text}: not a robocode-s property (robocodes.<name>=<value>)"
+            ));
+        }
+        Ok(Self {
+            name: name.to_string(),
+            value: value.to_string(),
+        })
+    }
+
+    /// The JVM argument.
+    pub fn jvm_arg(&self) -> String {
+        format!("-Drobocodes.{}={}", self.name, self.value)
+    }
 }
 
 /// How a launched robot talks to the server.
@@ -137,6 +173,7 @@ pub fn jvm_args(host: &JavaHost, launch: &RobotLaunch) -> Vec<String> {
         args.extend(PLAIN_FLAGS.map(String::from));
     }
     args.extend(MODULE_OPENINGS.map(String::from));
+    args.extend(host.properties.iter().map(RobotProperty::jvm_arg));
     if launch.deterministic {
         args.extend(STRICT_MATH_FLAGS.map(String::from));
         args.push(format!("-javaagent:{}", host.agent_jar.display()));
@@ -213,6 +250,7 @@ pub fn launch(host: &JavaHost, launch: &RobotLaunch) -> io::Result<RobotProcess>
         lib_dir: std::path::absolute(&host.lib_dir)?,
         agent_jar: std::path::absolute(&host.agent_jar)?,
         sandbox: host.sandbox,
+        properties: host.properties.clone(),
     };
     let launch = RobotLaunch {
         jars: launch
@@ -422,12 +460,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn robot_properties_are_only_ours() {
+        let p = RobotProperty::parse("traceDeterminism=trace.txt").unwrap();
+        assert_eq!(p.jvm_arg(), "-Drobocodes.traceDeterminism=trace.txt");
+        let p = RobotProperty::parse("robocodes.meterWork=false").unwrap();
+        assert_eq!(p.jvm_arg(), "-Drobocodes.meterWork=false");
+        assert_eq!(
+            RobotProperty::parse("debugThreads").unwrap().jvm_arg(),
+            "-Drobocodes.debugThreads=true"
+        );
+        // Always in our namespace: never the JVM's own properties or other flags.
+        assert_eq!(
+            RobotProperty::parse("java.home=/x").unwrap().jvm_arg(),
+            "-Drobocodes.java.home=/x"
+        );
+        for bad in ["", "=x", "a b=c", "x -Xmx1g=1", "-Dfoo=1"] {
+            assert!(RobotProperty::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn robot_properties_reach_the_jvm() {
+        let host = JavaHost {
+            java: "java".into(),
+            lib_dir: "/opt/host/lib".into(),
+            agent_jar: "/opt/agent.jar".into(),
+            sandbox: Sandbox::None,
+            properties: vec![RobotProperty::parse("traceDeterminism=t.txt").unwrap()],
+        };
+        let launch = RobotLaunch {
+            transport: Transport::Stdio,
+            robot: "sample.Fire".into(),
+            jars: vec![],
+            home: "/tmp/h".into(),
+            seed: 1,
+            deterministic: true,
+            memory_mb: 256,
+            data: None,
+        };
+        let args = jvm_args(&host, &launch);
+        let at = args
+            .iter()
+            .position(|a| a == "-Drobocodes.traceDeterminism=t.txt");
+        let main = args
+            .iter()
+            .position(|a| a == "io.github.nhofsted.robocodes.compat.RobotHost");
+        assert!(
+            at.unwrap() < main.unwrap(),
+            "a JVM option, before the main class"
+        );
+    }
+
+    #[test]
     fn deterministic_robots_get_strict_math_and_the_agent() {
         let host = JavaHost {
             java: "java".into(),
             lib_dir: "/opt/host/lib".into(),
             agent_jar: "/opt/agent.jar".into(),
             sandbox: Sandbox::None,
+            properties: Vec::new(),
         };
         let mut launch = RobotLaunch {
             transport: Transport::Tcp {

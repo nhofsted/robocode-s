@@ -97,6 +97,7 @@ fn a_battle_of_robots_from_an_ide_names_them_and_waits_for_them() {
         jars: Vec::new(),
         sandbox: Sandbox::None,
         fresh_data: true,
+        robot_properties: Vec::new(),
     };
     let config = ServerConfig {
         rules: BattleRules {
@@ -150,6 +151,7 @@ fn a_robot_that_left_before_the_start_says_so() {
         jars: Vec::new(),
         sandbox: Sandbox::None,
         fresh_data: true,
+        robot_properties: Vec::new(),
     };
     let config = ServerConfig::default();
     let err = prepare_ide(&env, &robots, Some(&ide), config, 128, None).unwrap_err();
