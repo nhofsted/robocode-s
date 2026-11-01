@@ -97,6 +97,15 @@ impl Division {
             Division::Melee => "melee",
         }
     }
+
+    /// What a counted battle of the division adds to its contributor's battle counter (the
+    /// contributors ranking): a melee battle takes about five times the CPU of a 1v1 battle.
+    pub const fn weight(self) -> u64 {
+        match self {
+            Division::OneVsOne => 1,
+            Division::Melee => 5,
+        }
+    }
 }
 
 impl fmt::Display for Division {

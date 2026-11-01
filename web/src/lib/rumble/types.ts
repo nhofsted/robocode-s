@@ -227,7 +227,7 @@ export interface Contributor {
 	login: string;
 	/** The volunteer's country (see `Author.country`). */
 	country: string | null;
-	/** Battles contributed in total. */
+	/** Battles contributed in total, a melee battle counting as five (it takes about five times the CPU). */
 	battles: number;
 	/** Battles contributed in the last 7 days. */
 	battlesWeek: number;

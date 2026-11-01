@@ -143,7 +143,7 @@
 					<dd class="num">{formatCount(me.reputation)}</dd>
 					<dt title="The share of your battles that other volunteers re-run to check them">Verify rate</dt>
 					<dd class="num">{percent(me.verifyRate)}</dd>
-					<dt>Battles contributed</dt>
+					<dt title="A melee battle counts as five: it takes about five times the CPU of a 1v1 battle">Battles contributed</dt>
 					<dd class="num">{formatCount(me.battles)}</dd>
 					<dt>Verified matches</dt>
 					<dd class="num">{formatCount(me.verifiedMatches)}</dd>
