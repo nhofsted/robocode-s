@@ -1,28 +1,31 @@
 <script lang="ts">
 	// Two bots side by side against every opponent they share, after LiteRumble's BotCompare:
-	// where does A do better than B, and against what kind of opponent?
+	// where does A do better than B, and against what kind of opponent? B can also be an
+	// earlier version (`?b=<version>`), usually of the same bot: what changed with the update?
 	import { resolve } from '$app/paths';
 	import Flag from '#lib/components/Flag.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import ScatterChart from '#lib/components/ScatterChart.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
-	import { compareBy, formatNumber, rumbleName, scoreHeat, shortName } from '#lib/rumble/format.ts';
+	import { compareBy, formatDate, formatNumber, rumbleName, scoreHeat, shortName } from '#lib/rumble/format.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
 	const rumble = $derived(data.summary.id);
-	const nameA = $derived(shortName(data.a.id));
-	const nameB = $derived(shortName(data.b.id));
+	const sameBot = $derived(data.a.bot.id === data.b.bot.id);
+	const label = (side: typeof data.a) => (sameBot ? `${shortName(side.bot.id)} ${side.version}` : shortName(side.bot.id));
+	const nameA = $derived(label(data.a));
+	const nameB = $derived(label(data.b));
 	const opponents = $derived(new Map(data.rankings.bots.map((r) => [r.id, r])));
 
 	const rows = $derived.by(() => {
-		const byB = new Map(data.eb.pairings.map((p) => [p.opponent, p]));
-		return data.ea.pairings.flatMap((pa) => {
+		const byB = new Map(data.b.pairings.map((p) => [p.opponent, p]));
+		return data.a.pairings.flatMap((pa) => {
 			const pb = byB.get(pa.opponent);
 			const o = opponents.get(pa.opponent);
-			if (!pb || !o || pa.opponent === data.b.id) return [];
+			if (!pb || !o || pa.opponent === data.b.bot.id) return [];
 			return [
 				{
 					opponent: pa.opponent,
@@ -30,6 +33,8 @@
 					opponentSurvival: o.survival,
 					a: pa.score,
 					b: pb.score,
+					// The opponent's version B met, where it isn't the one A met.
+					otherVersion: pb.opponentVersion !== pa.opponentVersion ? pb.opponentVersion : null,
 					diff: pa.score - pb.score,
 					survivalDiff: pa.survival - pb.survival
 				}
@@ -40,10 +45,14 @@
 
 	const better = $derived(rows.filter((r) => r.diff > 0).length);
 	const meanDiff = $derived(rows.length ? rows.reduce((t, r) => t + r.diff, 0) / rows.length : 0);
-	const head = $derived(data.ea.pairings.find((p) => p.opponent === data.b.id));
+	const otherVersions = $derived(rows.filter((r) => r.otherVersion !== null).length);
+	// Head to head: only between two ranked versions (an earlier version met other ones).
+	const head = $derived(
+		data.b.rank === null ? undefined : data.a.pairings.find((p) => p.opponent === data.b.bot.id)
+	);
 
 	const pairingHref = (opponent: string) =>
-		resolve('/pairing/[rumble]/[a]/[b]', { rumble, a: data.a.id, b: opponent });
+		resolve('/pairing/[rumble]/[a]/[b]', { rumble, a: data.a.bot.id, b: opponent });
 
 	const range = (values: number[]): [number, number] => {
 		const m = Math.max(10, ...values.map(Math.abs));
@@ -84,18 +93,27 @@
 	<p class="crumbs">
 		<a href={resolve('/rankings')}>Rankings</a> /
 		<a href={resolve('/rankings/[rumble]', { rumble })}>{rumbleName(data.summary)}</a> /
+		{#if sameBot}
+			<a href={resolve('/bot/[id]', { id: data.a.bot.id }) + `?rumble=${rumble}`}>{shortName(data.a.bot.id)}</a> /
+		{/if}
 	</p>
-	<h1>Compare</h1>
+	<h1>{sameBot ? 'Compare versions' : 'Compare'}</h1>
 	<SampleNotice />
 
 	<section class="duel panel">
-		{#each [{ bot: data.a, entry: data.ea }, { bot: data.b, entry: data.eb }] as s, i (s.bot.id)}
+		{#each [data.a, data.b] as s, i (i)}
 			<div class="side" class:right={i === 1}>
-				<Tank colors={tankColors(s.bot.id, s.bot.versions[0]?.colors)} size={72} heading={i === 0 ? 90 : 270} />
+				<Tank colors={tankColors(s.bot.id, s.colors)} size={72} heading={i === 0 ? 90 : 270} />
 				<div>
 					<a class="name" href={resolve('/bot/[id]', { id: s.bot.id }) + `?rumble=${rumble}`}>{shortName(s.bot.id)}</a>
 					<div class="small muted">
-						<Flag code={s.bot.author.country} /> {s.bot.author.name} · <span class="mono">{s.bot.versions[0].version} · #{s.entry.rank} · APS {formatNumber(s.entry.aps, 2)}</span>
+						<Flag code={s.bot.author.country} /> {s.bot.author.name} ·
+						{#if s.rank === null}
+							<span class="mono">{s.version}</span> · {s.retiredAt ? `retired ${formatDate(s.retiredAt)}` : 'not ranked'} ·
+							<span class="mono" title="Mean score against today's field, as far as this version met it">avg {formatNumber(s.aps, 2)}</span>
+						{:else}
+							<span class="mono">{s.version} · #{s.rank} · APS {formatNumber(s.aps, 2)}</span>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -122,7 +140,7 @@
 		{#if head}
 			<div class="tile panel">
 				<span class="label">Head to head</span>
-				<span class="value mono"><a href={pairingHref(data.b.id)}>{formatNumber(head.score, 1)}%</a></span>
+				<span class="value mono"><a href={pairingHref(data.b.bot.id)}>{formatNumber(head.score, 1)}%</a></span>
 			</div>
 		{/if}
 	</section>
@@ -147,7 +165,13 @@
 			signed
 		/>
 	</div>
-	<p class="muted note">Above zero: {nameA} scores better against that opponent than {nameB} does.</p>
+	<p class="muted note">
+		Above zero: {nameA} scores better against that opponent than {nameB} does.
+		{#if otherVersions > 0}
+			{nameB} met {otherVersions === 1 ? 'one of these opponents' : `${otherVersions} of these opponents`} in an
+			earlier version than {nameA} did (marked in the table).
+		{/if}
+	</p>
 
 	<div class="table-scroll list">
 		<table class="data">
@@ -171,7 +195,10 @@
 						</td>
 						<td class="num">{formatNumber(r.opponentAps, 2)}</td>
 						<td class="num" style:background={scoreHeat(r.a)}>{formatNumber(r.a, 2)}</td>
-						<td class="num" style:background={scoreHeat(r.b)}>{formatNumber(r.b, 2)}</td>
+						<td class="num" style:background={scoreHeat(r.b)}>
+							{#if r.otherVersion !== null}<span class="muted other" title="{nameB} met {shortName(r.opponent)} {r.otherVersion}">vs {r.otherVersion}</span>{/if}
+							{formatNumber(r.b, 2)}
+						</td>
 						<td class="num" style:background={scoreHeat(50 + r.diff)}>{signed(r.diff, 2)}</td>
 					</tr>
 				{/each}
@@ -242,6 +269,10 @@
 	}
 	.list {
 		max-height: 32rem;
+	}
+	.other {
+		font-size: 0.75rem;
+		margin-right: 0.3rem;
 	}
 	.opp {
 		display: inline-flex;

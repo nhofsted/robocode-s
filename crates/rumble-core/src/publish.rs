@@ -9,15 +9,16 @@ use crate::api::Tier;
 use crate::config::Config;
 use crate::data::{
     self, Author, BotDetails, BotVersion, Contributor, Contributors, RumbleIndex, RumbleSummary,
+    VersionDetails, VersionPairing, VersionRumble,
 };
 use crate::flags::FlagMap;
 use crate::ids::{Division, RumbleId};
 use crate::metrics::{self, Member, RumbleMetrics};
-use crate::state::State;
+use crate::state::{self, State};
 use crate::store::{BotItem, BotState, DAY, User, UserState, VersionItem, VersionState, rfc3339};
 use crate::verify;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Snapshots older than this many days are deleted (§15 step 7).
 pub const SNAPSHOT_DAYS: i64 = 14;
@@ -303,12 +304,188 @@ pub fn bot_details(
                     .map(rfc3339),
                 colors: v.colors.clone(),
                 released_at: v.released.map(|ms| rfc3339(ms / 1000)),
+                shared: BTreeMap::new(),
             })
             .collect(),
         rumbles,
         recordings: BTreeMap::new(),
         state: Some(bot.state.as_str().to_string()),
     })
+}
+
+/// Retired vid → (opponent vid, pairing) for each of its pairings with battles.
+type RetiredPairings = HashMap<u32, Vec<(u32, state::Pairing)>>;
+
+/// The pairings of the retired versions in each division's state (§12.4: they stay, frozen),
+/// for the version files (§15 step 5).
+pub struct RetiredIndex<'a> {
+    divisions: Vec<(Division, RetiredPairings)>,
+    versions: HashMap<u32, &'a VersionItem>,
+}
+
+impl<'a> RetiredIndex<'a> {
+    pub fn new(states: &[State], versions: &'a [VersionItem]) -> RetiredIndex<'a> {
+        let retired: HashSet<u32> = versions
+            .iter()
+            .filter(|v| v.state == VersionState::Retired)
+            .map(|v| v.vid)
+            .collect();
+        let divisions = states
+            .iter()
+            .map(|state| {
+                let mut by_vid = RetiredPairings::new();
+                for ((a, b), p) in state.pairings() {
+                    if p.n == 0 {
+                        continue;
+                    }
+                    if retired.contains(&a) {
+                        by_vid.entry(a).or_default().push((b, *p));
+                    }
+                    if retired.contains(&b) {
+                        by_vid.entry(b).or_default().push((a, *p));
+                    }
+                }
+                (state.division, by_vid)
+            })
+            .collect();
+        RetiredIndex {
+            divisions,
+            versions: versions.iter().map(|v| (v.vid, v)).collect(),
+        }
+    }
+
+    fn pairings(&self, division: Division, vid: u32) -> &[(u32, state::Pairing)] {
+        self.divisions
+            .iter()
+            .find(|(d, _)| *d == division)
+            .and_then(|(_, m)| m.get(&vid))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// The version files of a bot (§15 step 5): for each of its retired versions, per rumble the
+/// bot is ranked in, its pairings against that rumble's other members (by bot id: the
+/// member's ranked version where the retired version met it, else the opponent's version it
+/// fought most, ties the newer). Versions without such pairings have no file.
+pub fn version_details(
+    bot: &BotItem,
+    runs: &[RumbleRun],
+    index: &RetiredIndex,
+) -> Vec<VersionDetails> {
+    let retired: Vec<&VersionItem> = bot
+        .versions
+        .iter()
+        .filter_map(|vid| index.versions.get(vid).copied())
+        .filter(|v| v.state == VersionState::Retired)
+        .collect();
+    let mut out = Vec::new();
+    for version in retired {
+        let mut rumbles = BTreeMap::new();
+        for run in runs {
+            if let Some(rumble) = version_rumble(bot, version, run, index) {
+                rumbles.insert(run.id.to_string(), rumble);
+            }
+        }
+        if !rumbles.is_empty() {
+            out.push(VersionDetails {
+                schema: data::SCHEMA_VERSION,
+                id: bot.id.clone(),
+                version: version.version.clone(),
+                sha256: version.sha256.clone(),
+                rumbles,
+            });
+        }
+    }
+    out
+}
+
+fn version_rumble(
+    bot: &BotItem,
+    version: &VersionItem,
+    run: &RumbleRun,
+    index: &RetiredIndex,
+) -> Option<VersionRumble> {
+    let members = &run.metrics.members;
+    let me = members.iter().position(|m| m.id == bot.id)?;
+    let by_id: HashMap<&str, usize> = members
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.id.as_str(), i))
+        .collect();
+    // Per member: the chosen (opponent vid, pairing).
+    let mut chosen: BTreeMap<usize, (u32, state::Pairing)> = BTreeMap::new();
+    for &(opp, p) in index.pairings(run.id.division, version.vid) {
+        let Some(o) = index.versions.get(&opp) else {
+            continue;
+        };
+        let Some(&i) = by_id.get(o.bot.as_str()).filter(|&&i| i != me) else {
+            continue;
+        };
+        let ranked = members[i].vid;
+        let better = match chosen.get(&i) {
+            None => true,
+            Some(&(held, q)) => held != ranked && (opp == ranked || (p.n, opp) > (q.n, held)),
+        };
+        if better {
+            chosen.insert(i, (opp, p));
+        }
+    }
+    if chosen.is_empty() {
+        return None;
+    }
+    let current: HashSet<usize> = run.metrics.bots[me]
+        .pairings
+        .iter()
+        .map(|p| p.opponent)
+        .collect();
+    let mut pairings: Vec<VersionPairing> = chosen
+        .iter()
+        .map(|(&i, &(opp, p))| {
+            let n = f64::from(p.n);
+            // The state keeps the lower vid's side.
+            let (score, survival) = if version.vid < opp {
+                (p.s / n, p.v / n)
+            } else {
+                (100.0 - p.s / n, 100.0 - p.v / n)
+            };
+            VersionPairing {
+                opponent: members[i].id.clone(),
+                opponent_version: index
+                    .versions
+                    .get(&opp)
+                    .map_or_else(String::new, |o| o.version.clone()),
+                battles: p.n,
+                score: round2(score),
+                survival: round2(survival),
+            }
+        })
+        .collect();
+    pairings.sort_by(|a, b| a.opponent.cmp(&b.opponent));
+    let count = pairings.len() as f64;
+    Some(VersionRumble {
+        battles: pairings.iter().map(|p| u64::from(p.battles)).sum(),
+        aps: round2(pairings.iter().map(|p| p.score).sum::<f64>() / count),
+        survival: round2(pairings.iter().map(|p| p.survival).sum::<f64>() / count),
+        shared: chosen.keys().filter(|i| current.contains(i)).count() as u32,
+        pairings,
+    })
+}
+
+/// Sets `shared` on the bot file's versions from the bot's version files.
+pub fn mark_shared(details: &mut BotDetails, files: &[VersionDetails]) {
+    for v in &mut details.versions {
+        v.shared = files
+            .iter()
+            .find(|f| f.sha256 == v.sha256 && f.version == v.version)
+            .map(|f| {
+                f.rumbles
+                    .iter()
+                    .filter(|(_, r)| r.shared > 0)
+                    .map(|(id, r)| (id.clone(), r.shared))
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
 }
 
 /// The time a version is sorted by among a bot's versions (milliseconds): its release date,
@@ -370,6 +547,25 @@ pub fn user_snapshot(users: &[User]) -> UserSnapshot {
 /// The data file key of a bot (`data/v1/bots/<id>.json`).
 pub fn bot_key(id: &str) -> String {
     format!("{DATA_PREFIX}/bots/{id}.json")
+}
+
+/// The prefix of the version files.
+pub const VERSIONS_PREFIX: &str = "data/v1/versions/";
+
+/// The data file key of a version file, `versions/<id>/<sha16>.json` with `sha16` the first 16
+/// hex digits of the jar's SHA-256 (versions may hold characters that are not path-safe).
+pub fn version_key(id: &str, sha256: &str) -> String {
+    format!(
+        "{VERSIONS_PREFIX}{id}/{}.json",
+        &sha256[..sha256.len().min(16)]
+    )
+}
+
+/// The bot id of a version file key.
+pub fn version_key_bot(key: &str) -> Option<&str> {
+    key.strip_prefix(VERSIONS_PREFIX)?
+        .split_once('/')
+        .map(|(id, _)| id)
 }
 
 /// The data file key of a rumble's rankings.
@@ -472,6 +668,99 @@ mod tests {
             },
             1,
         );
+    }
+
+    #[test]
+    fn version_files() {
+        // a.A: 1.1 and 1.2 retired, 1.3 ranked. b.B: 1.4 retired, 1.5 ranked. c.C ranked.
+        let mut versions = vec![
+            version(1, "a.A", WeightClass::Mega, VersionState::Retired),
+            version(2, "a.A", WeightClass::Mega, VersionState::Retired),
+            version(3, "a.A", WeightClass::Mega, VersionState::Active),
+            version(4, "b.B", WeightClass::Mega, VersionState::Retired),
+            version(5, "b.B", WeightClass::Mega, VersionState::Active),
+            version(6, "c.C", WeightClass::Mega, VersionState::Active),
+        ];
+        versions[1].version = "2/x?".into();
+        let mut bots = BTreeMap::new();
+        bots.insert("a.A".into(), bot("a.A", vec![3, 2, 1], 3, None));
+        bots.insert("b.B".into(), bot("b.B", vec![5, 4], 5, None));
+        bots.insert("c.C".into(), bot("c.C", vec![6], 6, None));
+        let (owners, flags) = (BTreeMap::new(), FlagMap::default());
+        let catalog = Catalog {
+            versions: &versions,
+            bots: &bots,
+            owners: &owners,
+            flags: &flags,
+        };
+        let mut state = State::new(1, Division::OneVsOne, 0);
+        battle(&mut state, 3, 5, 60.0);
+        battle(&mut state, 3, 6, 55.0);
+        // 1.1 met b.B's old and ranked versions (the ranked one wins although it has fewer
+        // battles), its own bot's 1.2 (not an opponent) and never c.C.
+        battle(&mut state, 1, 4, 70.0);
+        battle(&mut state, 1, 4, 70.0);
+        battle(&mut state, 1, 5, 40.0);
+        battle(&mut state, 1, 2, 50.0);
+        // 2/x? met only b.B's retired version, from the higher vid's side.
+        battle(&mut state, 4, 2, 80.0);
+        let run = compute_rumble(
+            RumbleId::new(Division::OneVsOne, WeightClass::Mega),
+            &catalog,
+            &state,
+            None,
+        );
+        let runs = vec![run];
+        let index = RetiredIndex::new(std::slice::from_ref(&state), &versions);
+        let files = version_details(&bots["a.A"], &runs, &index);
+        assert_eq!(files.len(), 2);
+        let (v2, v1) = (&files[0], &files[1]);
+        assert_eq!((v1.version.as_str(), v2.version.as_str()), ("1.1", "2/x?"));
+        let r1 = &v1.rumbles["1v1"];
+        assert_eq!(r1.pairings.len(), 1);
+        assert_eq!(
+            (
+                r1.pairings[0].opponent.as_str(),
+                r1.pairings[0].opponent_version.as_str()
+            ),
+            ("b.B", "1.5")
+        );
+        assert_eq!((r1.pairings[0].battles, r1.pairings[0].score), (1, 40.0));
+        assert_eq!((r1.shared, r1.battles, r1.aps), (1, 1, 40.0));
+        let r2 = &v2.rumbles["1v1"];
+        assert_eq!(r2.pairings[0].opponent_version, "1.4");
+        assert_eq!((r2.pairings[0].score, r2.shared), (20.0, 1));
+        // b.B's retired version met only a.A's retired versions: they stand for a.A, the one
+        // it fought most first.
+        let b = version_details(&bots["b.B"], &runs, &index);
+        let rb = &b[0].rumbles["1v1"];
+        assert_eq!(
+            (
+                rb.pairings[0].opponent.as_str(),
+                rb.pairings[0].opponent_version.as_str()
+            ),
+            ("a.A", "1.1")
+        );
+        assert_eq!((rb.pairings[0].battles, rb.pairings[0].score), (2, 30.0));
+        // c.C has none; a bot ranked nowhere has none.
+        assert!(version_details(&bots["c.C"], &[], &index).is_empty());
+
+        let mut details = bot_details(&bots["a.A"], &catalog, &runs, None, "2026-10-24").unwrap();
+        mark_shared(&mut details, &files);
+        let shared: Vec<_> = details
+            .versions
+            .iter()
+            .map(|v| v.shared.get("1v1").copied())
+            .collect();
+        assert_eq!(shared, vec![None, Some(1), Some(1)]);
+        assert_eq!(
+            version_key("a.A", &v2.sha256),
+            "data/v1/versions/a.A/0000000000000000.json"
+        );
+        assert_eq!(version_key_bot(&version_key("a.A", "ff")), Some("a.A"));
+        assert_eq!(version_key_bot("data/v1/bots/a.A.json"), None);
+        let json = serde_json::to_string(v1).unwrap();
+        assert_eq!(serde_json::from_str::<VersionDetails>(&json).unwrap(), *v1);
     }
 
     #[test]

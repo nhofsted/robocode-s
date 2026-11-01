@@ -168,6 +168,51 @@ export interface BotVersion {
 	 * date (else `addedAt`), newest first.
 	 */
 	releasedAt?: string | null;
+	/**
+	 * Per rumble, the opponents both this earlier version and the bot's ranked version have
+	 * battles against (added within v1; absent: none). Where it is above 0,
+	 * `/data/v1/versions/<id>/<sha16>.json` (`VersionDetails`) has this version's pairings.
+	 */
+	shared?: Partial<Record<RumbleId, number>>;
+}
+
+/**
+ * `/data/v1/versions/<bot id>/<sha16>.json` (added within v1), `sha16` the first 16 hex digits of
+ * the version's `sha256`: a retired version's pairings against today's members of each rumble
+ * the bot is ranked in, for comparing it with the ranked version.
+ */
+export interface VersionDetails {
+	schema: typeof SCHEMA_VERSION;
+	id: BotId;
+	version: string;
+	sha256: string;
+	/** Only rumbles with at least one pairing. */
+	rumbles: Partial<Record<RumbleId, VersionRumble>>;
+}
+
+export interface VersionRumble {
+	/** Battles of the pairings below. */
+	battles: number;
+	/** Mean score over the pairings below: not a ranked APS, today's field as far as it met it. */
+	aps: number;
+	/** Mean survival over the pairings below. */
+	survival: number;
+	/** Opponents the ranked version has battles against too. */
+	shared: number;
+	/** Sorted by opponent id. */
+	pairings: VersionPairing[];
+}
+
+/**
+ * An earlier version's pairing against a member. `opponentVersion` is the version it met: the
+ * member's ranked version where it met that one, else the opponent's version it fought most.
+ */
+export interface VersionPairing {
+	opponent: BotId;
+	opponentVersion: string;
+	battles: number;
+	score: number;
+	survival: number;
 }
 
 export interface BotRumble extends Metrics {

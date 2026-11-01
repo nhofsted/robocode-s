@@ -152,6 +152,54 @@ pub struct BotVersion {
     /// The release date as well as it is known (additive; absent where unknown).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_at: Option<String>,
+    /// Per rumble, the opponents both this earlier version and the bot's ranked version have
+    /// battles against (additive; absent: none). Where it is above 0,
+    /// `/data/v1/versions/<id>/<sha16>.json` has this version's pairings.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shared: BTreeMap<String, u32>,
+}
+
+/// `/data/v1/versions/<id>/<sha16>.json`: an earlier (retired) version's pairings against
+/// today's members of each rumble the bot is ranked in, for comparing it with the ranked
+/// version.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionDetails {
+    pub schema: u32,
+    pub id: String,
+    pub version: String,
+    pub sha256: String,
+    /// Only rumbles with at least one pairing.
+    pub rumbles: BTreeMap<String, VersionRumble>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionRumble {
+    /// Battles of the pairings below.
+    pub battles: u64,
+    /// Mean score over the pairings below (not a ranked APS: today's field, as far as it met
+    /// it).
+    pub aps: f64,
+    /// Mean survival over the pairings below.
+    pub survival: f64,
+    /// Opponents the ranked version has battles against too.
+    pub shared: u32,
+    /// Sorted by opponent id.
+    pub pairings: Vec<VersionPairing>,
+}
+
+/// One pairing of an earlier version against a member. `opponentVersion` is the version it
+/// met: the member's ranked version where it met that one, else the opponent's version it
+/// fought most.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionPairing {
+    pub opponent: String,
+    pub opponent_version: String,
+    pub battles: u32,
+    pub score: f64,
+    pub survival: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

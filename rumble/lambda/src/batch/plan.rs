@@ -96,7 +96,12 @@ pub fn latest_snapshot(
     Ok(None)
 }
 
-fn load_state(batch: &Batch, engine: u32, division: Division, now: u64) -> Result<State, String> {
+pub(crate) fn load_state(
+    batch: &Batch,
+    engine: u32,
+    division: Division,
+    now: u64,
+) -> Result<State, String> {
     let key = state_key(engine, division);
     match batch.objects().get(Bucket::State, &key, None)? {
         Fetched::Found { bytes, .. } => {

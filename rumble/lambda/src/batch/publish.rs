@@ -18,6 +18,11 @@
 //!
 //! The recordings index (`data/v1/rec/`, [`super::recordings`]) runs after the rankings and
 //! before the bot files, which carry its counts.
+//!
+//! Version files (`data/v1/versions/<id>/<sha16>.json`: a retired version's pairings against
+//! today's members) are written with their bot's file, when changed (one listing of the prefix
+//! gives the ETags); the files of a processed bot that it no longer has go, as do those of
+//! bots that are removed or gone.
 
 use super::plan::{self, PlanReport, USERS_KEY};
 use super::{Batch, Pace, READ_RATE, json_bytes};
@@ -28,13 +33,14 @@ use rumble_core::data::BotDetails;
 use rumble_core::flags::{FLAGS_KEY, FlagMap};
 use rumble_core::ids::RumbleId;
 use rumble_core::publish::{
-    Catalog, DATA_CACHE, DATA_PREFIX, RumbleRun, Snapshot, UserSnapshot, bot_details, bot_key,
-    compute_rumble, contributors, date_of, expired_snapshots, index, rankings_key, shift_date,
-    snapshot_key, user_snapshot,
+    Catalog, DATA_CACHE, DATA_PREFIX, RetiredIndex, RumbleRun, Snapshot, UserSnapshot,
+    VERSIONS_PREFIX, bot_details, bot_key, compute_rumble, contributors, date_of,
+    expired_snapshots, index, mark_shared, rankings_key, shift_date, snapshot_key, user_snapshot,
+    version_details, version_key, version_key_bot,
 };
 use rumble_core::store::{BotItem, BotState, User, rfc3339};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const JSON: &str = "application/json";
 
@@ -49,6 +55,10 @@ pub struct PublishReport {
     pub bot_files_deleted: usize,
     /// Bots left for the next run (time budget).
     pub bot_files_skipped: usize,
+    /// Version files (`data/v1/versions/`).
+    pub version_files_written: usize,
+    pub version_files_unchanged: usize,
+    pub version_files_deleted: usize,
     /// The recordings index (M6); `None` if it failed (the bot files keep their counts).
     pub recordings: Option<super::recordings::RecordingsReport>,
     pub contributors: usize,
@@ -155,7 +165,15 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
         }
     };
 
-    // Bot files: written if changed; a removed bot's file goes.
+    // Bot files and their version files: written if changed; a removed bot's files go.
+    let retired = RetiredIndex::new(&planned.states, &versions);
+    let version_etags: HashMap<String, String> = batch
+        .objects()
+        .list_etags(Bucket::Site, VERSIONS_PREFIX)?
+        .into_iter()
+        .collect();
+    let mut processed: HashSet<&str> = HashSet::new();
+    let mut kept: HashSet<String> = HashSet::new();
     for (n, bot) in bots.values().enumerate() {
         if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
             report.bot_files_skipped = bots.len() - n;
@@ -173,6 +191,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
             ),
             _ => (None, None),
         };
+        processed.insert(bot.id.as_str());
         if bot.state == BotState::Removed {
             if etag.is_some() {
                 batch.objects().delete(Bucket::Site, &key)?;
@@ -183,6 +202,22 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
         let Some(mut details) = bot_details(bot, &catalog, &runs, previous.as_ref(), &date) else {
             continue;
         };
+        let files = version_details(bot, &runs, &retired);
+        for file in &files {
+            let key = version_key(&bot.id, &file.sha256);
+            let bytes = json_bytes(file);
+            if version_etags
+                .get(&key)
+                .is_some_and(|e| etag_matches(e, &bytes))
+            {
+                report.version_files_unchanged += 1;
+            } else {
+                put_data(batch, &key, &bytes)?;
+                report.version_files_written += 1;
+            }
+            kept.insert(key);
+        }
+        mark_shared(&mut details, &files);
         details.recordings = match &counts {
             Some(counts) => counts.get(&bot.id).cloned().unwrap_or_default(),
             None => previous
@@ -196,6 +231,16 @@ pub fn run(batch: &Batch, config: &Config) -> Result<PublishReport, String> {
         } else {
             put_data(batch, &key, &bytes)?;
             report.bot_files_written += 1;
+        }
+    }
+
+    // Version files nobody has any more: of the bots processed, and of bots that are gone.
+    for key in version_etags.keys() {
+        let bot = version_key_bot(key);
+        let gone = bot.is_none_or(|id| !bots.contains_key(id));
+        if !kept.contains(key) && (gone || bot.is_some_and(|id| processed.contains(id))) {
+            batch.objects().delete(Bucket::Site, key)?;
+            report.version_files_deleted += 1;
         }
     }
 

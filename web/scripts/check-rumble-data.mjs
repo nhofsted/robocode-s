@@ -7,8 +7,8 @@
 //
 //   node web/scripts/check-rumble-data.mjs <dir>
 //
-// <dir> holds the files as under /data/v1: rumbles.json, rankings/*.json, bots/*.json and
-// contributors.json and archive.json (each optional). Exits 1 on any error. Used by the rumble batch Lambda's
+// <dir> holds the files as under /data/v1: rumbles.json, rankings/*.json, bots/*.json,
+// versions/<id>/*.json and contributors.json and archive.json (each optional). Exits 1 on any error. Used by the rumble batch Lambda's
 // tests (rumble/lambda/tests).
 
 import fs from 'node:fs';
@@ -42,12 +42,20 @@ for (const [sub, type] of [
 		if (name.endsWith('.json')) add(path.join(folder, name), type);
 	}
 }
+const versions = path.join(dir, 'versions');
+if (fs.existsSync(versions)) {
+	for (const bot of fs.readdirSync(versions).sort()) {
+		for (const name of fs.readdirSync(path.join(versions, bot)).sort()) {
+			if (name.endsWith('.json')) add(path.join(versions, bot, name), 'VersionDetails');
+		}
+	}
+}
 if (files.length === 0) {
 	console.error(`no data files in ${dir}`);
 	process.exit(1);
 }
 
-let source = `import type { RumbleIndex, Rankings, BotDetails, Contributors, Archive } from ${JSON.stringify(types)};\n`;
+let source = `import type { RumbleIndex, Rankings, BotDetails, Contributors, Archive, VersionDetails } from ${JSON.stringify(types)};\n`;
 files.forEach(([file, type], i) => {
 	source += `// ${file}\nexport const v${i}: ${type} = ${fs.readFileSync(file, 'utf8')};\n`;
 });
