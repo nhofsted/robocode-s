@@ -505,6 +505,7 @@ impl App {
                 | ("POST", "admin/bots/remove")
                 | ("GET", "admin/bots/nd")
                 | ("POST", "admin/bots/nd")
+                | ("POST", "admin/purge")
                 | ("POST", "admin/users/update")
                 | ("GET", "admin/alerts")
                 | ("GET", "admin/config")
@@ -550,6 +551,7 @@ impl App {
                 Ok(Response::ok(&bots::list_nondeterministic(self.store())?))
             }
             ("POST", "admin/bots/nd") => self.set_nondeterministic(request),
+            ("POST", "admin/purge") => self.purge(request, now_ms),
             ("POST", "admin/users/update") => self.update_user(request, &config, now_ms),
             ("GET", "admin/alerts") => self.alerts(),
             ("GET", "admin/config") => self.get_config(),
@@ -1175,6 +1177,21 @@ impl App {
             "NONDETERMINISTIC {} {} set to {:?} by an admin",
             body.bot, body.version, body.reason
         );
+        Ok(Response::ok(&answer))
+    }
+
+    fn purge(&self, request: &Request, now_ms: u64) -> Handled {
+        let body: rumble_core::api::PurgeRequest = request.body_json()?;
+        let answer = bots::purge(self.store(), &body, now_ms)?;
+        if answer.stored {
+            println!(
+                "PURGE {} of {} versions up to {} asked by an admin: {}",
+                answer.id,
+                answer.vids.len(),
+                answer.until,
+                body.reason
+            );
+        }
         Ok(Response::ok(&answer))
     }
 

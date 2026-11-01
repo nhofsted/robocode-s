@@ -168,6 +168,7 @@ Auth column: `-` none, `T` upload token or session, `S` session cookie only (bro
 | `POST admin/bots/import` | A | Registers an imported bot version (§16) |
 | `POST admin/bots/claim` | A | `{"bot", "github"}`: gives a bot to a user |
 | `POST admin/bots/remove` | A | `{"bot", "reason"}`: takedown (§12.4) |
+| `POST admin/purge` | A | `{"id", "versions": [{"bot", "version"}], "until": YYYYMMDDHH, "reason", "dryRun"?}`: purge those versions' battles up to the hour (§12.4) → `{"id", "until", "vids", "missing", "stored"}` |
 | `POST admin/users/update` | A | `{"uid", "rep"?, "state"?, "admin"?, "trusted"?, "mismatches"?, "clearMismatchTimes"?}`; with only `uid` it changes nothing and answers the user (what `admin repair` reads, §11.5) |
 | `GET admin/bots/nd`, `POST admin/bots/nd` | A | The versions flagged nondeterministic or seen in a three-way disagreement; `{"bot", "version", "reason"?}` flags (an empty reason is `admin`) or, without `reason`, clears the flag (§11.5) |
 | `GET admin/alerts` | A | Open alerts (§11.4) |
@@ -551,6 +552,22 @@ The client runs the same validation before it uploads (import, and `rumble submi
 
 A retired version's pairings leave the pairing state at the next plan; its history stays in its bot file. Its recordings are deleted by `cleanup` (S3 deletes are free), its slot items are deleted (1 WCU each). A **delisted** version (§16.5) is not dead: its pairings stay in the state, frozen (it is not planned, and rankings only use pairings between members), and its recordings, slot items and jar stay, so it is back as it was when it is listed again.
 
+**Purge** (2026-11-01, #15): `POST admin/purge` takes the battles of some versions up to an
+hour out of the pairing state, so that they are fought again: for battles a change of the
+deterministic rules (`DETERMINISTIC_RULES`, without an engine version change) would have
+ended differently, e.g. new work prices. It stores a `purge` alert (`reference`: `<id>
+<until> <vid>,...`; a used id is refused, and `until` must be over); `cleanup` then works
+like a ban removal (§11.3): it deletes the open verification items with one of the versions
+(a verifier with the new rules would disagree, and a correction after the purge would
+cancel a record twice), and walks the log backwards from `until` down to the oldest
+version's registration (at most 400 days), writing for every counted record (any uid, not
+held, not a failure) with one of the versions a correction (weight −1, uid `system`, sort
+`<start>#purge.<id>.<source hour>.<n>`), except records a correction in a later hour
+already cancelled. Resumable through `state/e<E>/cleanup.json` (`purges`, `purged`). Use:
+once `minClient` requires the release with the new rules, purge the versions the rules
+change up to the hour of that switch, after the hour is over. Their pairings start from the
+battles since, and the planner refills them first (coverage).
+
 ### 12.5 Recording slots (§12.7)
 
 - **Eligibility** of a counted `ok` battle: the user's `rep ≥ rep.recorderMin` and not quarantined; and in 1v1 one of the two versions is in the plan's `top`, or the pair is in the plan's `slotPairs` (owner, 2026-10-24): for every bot X of the general 1v1 rumble, its 5 best pairings (highest score), 5 worst pairings (lowest score) and 5 problem bots (most negative KNN-PBI, only negative ones), pairs counted once whichever side picked them (`publish` computes them, §15). Once a matchup has slots it keeps them while both versions are current: existing slot items persist even when the pair drops out of the set. In melee, slots are per version: each contestant in `top`.
@@ -624,6 +641,7 @@ robocode-s rumble admin import (--division 1v1|melee) [--list URL|FILE] [--local
                       [--mirror TEMPLATE] [--dry-run] [--concurrency 4] [--report FILE]
 robocode-s rumble admin user UID [--rep N] [--state new|quar|ban] [--admin true|false]
 robocode-s rumble admin bot claim|remove ...      admin alerts      admin config get|set FILE
+robocode-s rumble admin purge ID --until YYYYMMDDHH --versions FILE --reason TEXT [--apply]
 ```
 
 `--server` defaults to `https://rumble.planethofstede.be` (`ROBOCODES_RUMBLE_SERVER`; the dev stage's `https://dev.rumble.planethofstede.be`). `run` prints one line per battle (`1v1 jk.mega.DrussGT 3.1.16 vs voidious.Diamond 1.8.28: 54.2% (41 s)`) and a line per post; `--json` prints the events as JSON lines.

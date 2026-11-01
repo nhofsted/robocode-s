@@ -12,14 +12,20 @@
 //! hour's partition, at most [`WRITE_RATE`] items (≤ 1 KB each) a second. The cursor
 //! (`state/e<E>/cleanup.json`) is saved before and after each partition's corrections, so a
 //! run that stops (time budget, crash) resumes where it was without writing anything twice.
+//!
+//! **Purges** (`POST admin/purge`, a `purge` alert) work the same way for every counted
+//! record with one of the purge's versions, up to its hour: first the verification items
+//! with one of them are deleted, then the log is walked down to the oldest version's
+//! registration ([`purge_corrections`]).
 
 use super::{Batch, Pace, READ_RATE, WRITE_RATE, read_units};
 use crate::routes::{jar_key, plan_key};
 use crate::s3::{Bucket, Fetched};
 use rumble_core::Config;
 use rumble_core::cleanup::{
-    CleanupState, Pending, ban_corrections, ban_cursor, correction_items, correction_prefix,
-    dead_versions, doomed, previous_hour, version_dir,
+    CleanupState, PURGE_ALERT, Pending, PurgeCursor, ban_corrections, ban_cursor, correction_items,
+    correction_prefix, dead_versions, doomed, parse_purge_reference, previous_hour,
+    purge_correction_prefix, purge_corrections, purge_cursor, version_dir,
 };
 use rumble_core::ids::Division;
 use rumble_core::plan::Plan;
@@ -54,6 +60,17 @@ pub struct CleanupReport {
     pub jars_deleted: usize,
     pub invalidated: Vec<String>,
     pub bans: Vec<BanReport>,
+    #[serde(default)]
+    pub purges: Vec<PurgeReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeReport {
+    pub id: String,
+    pub corrected: u64,
+    pub next: u32,
+    pub finished: bool,
 }
 
 fn ignore_condition(result: Result<(), StoreError>) -> Result<(), String> {
@@ -73,7 +90,9 @@ pub fn run(batch: &Batch, config: &Config) -> Result<CleanupReport, String> {
     batch.write_state_json(&key, &state)?;
     bans(batch, engine, &key, &mut state, &mut report, start_ms)?;
     batch.write_state_json(&key, &state)?;
-    // Last: it takes what time the ban removal left.
+    purges(batch, engine, &key, &mut state, &mut report, start_ms)?;
+    batch.write_state_json(&key, &state)?;
+    // Last: it takes what time the ban removals and purges left.
     reopen_without_order(batch, engine, &mut state, &mut report, start_ms)?;
     batch.write_state_json(&key, &state)?;
     Ok(report)
@@ -299,9 +318,7 @@ fn bans(
             let partition = hour_key(now);
             let mut items: Vec<LogItem> = correction_items(
                 engine,
-                cursor.started_ms,
-                &uid,
-                hour,
+                &correction_prefix(cursor.started_ms, &uid, hour),
                 partition,
                 &corrections,
                 now,
@@ -350,6 +367,135 @@ fn bans(
             state.banned.insert(uid);
         } else {
             state.bans.insert(uid, cursor);
+        }
+    }
+    Ok(())
+}
+
+fn purges(
+    batch: &Batch,
+    engine: u32,
+    key: &str,
+    state: &mut CleanupState,
+    report: &mut CleanupReport,
+    start_ms: u64,
+) -> Result<(), String> {
+    let store = batch.store();
+    let mut new = Vec::new();
+    for alert in store.list_alerts().map_err(|e| e.to_string())? {
+        if alert.kind != PURGE_ALERT {
+            continue;
+        }
+        let Some((id, until, vids)) = parse_purge_reference(&alert.reference) else {
+            println!("cleanup: unreadable purge alert {}", alert.sort);
+            continue;
+        };
+        if !state.purged.contains(&id) && !state.purges.contains_key(&id) {
+            new.push((id, until, vids, alert.text));
+        }
+    }
+    if !new.is_empty() {
+        let versions = store.list_versions().map_err(|e| e.to_string())?;
+        for (id, until, vids, text) in new {
+            println!("cleanup: purge {id}: {text}");
+            let cursor = purge_cursor(vids, &text, until, &versions, batch.now_ms());
+            state.purges.insert(id, cursor);
+        }
+        batch.write_state_json(key, state)?;
+    }
+    let ids: Vec<String> = state.purges.keys().cloned().collect();
+    let mut reads = Pace::new(batch, READ_RATE);
+    let mut writes = Pace::new(batch, WRITE_RATE);
+    for id in ids {
+        let mut cursor: PurgeCursor = state.purges[&id].clone();
+        if !cursor.queue_done {
+            // No verification of a purged battle may correct it after the purge.
+            for item in store
+                .query_verify(engine, None, usize::MAX)
+                .map_err(|e| e.to_string())?
+            {
+                if item.bots.iter().any(|v| cursor.vids.contains(v)) {
+                    ignore_condition(store.delete_verify(engine, &item.sort, None))?;
+                }
+            }
+            cursor.queue_done = true;
+            state.purges.insert(id.clone(), cursor.clone());
+            batch.write_state_json(key, state)?;
+        }
+        let mut unsaved = 0;
+        while !cursor.finished() {
+            if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
+                break;
+            }
+            let hour = cursor.next;
+            let items = store.query_log(engine, hour).map_err(|e| e.to_string())?;
+            reads.take(read_units(
+                items
+                    .iter()
+                    .map(|i| i.records.len() + 8 * i.seeds.len() + 100)
+                    .sum(),
+            ));
+            let mut after = cursor.clone();
+            let corrections = purge_corrections(&mut after, &items);
+            after.next = previous_hour(hour);
+            if corrections.is_empty() {
+                cursor = after;
+                unsaved += 1;
+                if unsaved >= 100 {
+                    state.purges.insert(id.clone(), cursor.clone());
+                    batch.write_state_json(key, state)?;
+                    unsaved = 0;
+                }
+                continue;
+            }
+            let now = batch.now_ms() / 1000;
+            let partition = hour_key(now);
+            let prefix = purge_correction_prefix(cursor.started_ms, &id, hour);
+            let mut items: Vec<LogItem> =
+                correction_items(engine, &prefix, partition, &corrections, now);
+            if let Some(pending) = cursor.pending.as_ref().filter(|p| p.source == hour) {
+                // A run stopped while writing these: keep what landed.
+                let written: HashSet<String> = store
+                    .query_log(engine, pending.partition)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|i| i.sort)
+                    .filter(|s| s.starts_with(&prefix))
+                    .collect();
+                items.retain(|i| !written.contains(&i.sort));
+            }
+            cursor.pending = Some(Pending {
+                source: hour,
+                partition,
+            });
+            state.purges.insert(id.clone(), cursor.clone());
+            batch.write_state_json(key, state)?;
+            for item in &items {
+                writes.take(1.0);
+                ignore_condition(store.append_log(item))?;
+            }
+            after.pending = None;
+            after.corrected += corrections.len() as u64;
+            cursor = after;
+            state.purges.insert(id.clone(), cursor.clone());
+            batch.write_state_json(key, state)?;
+            unsaved = 0;
+        }
+        report.purges.push(PurgeReport {
+            id: id.clone(),
+            corrected: cursor.corrected,
+            next: cursor.next,
+            finished: cursor.finished(),
+        });
+        if cursor.finished() {
+            println!(
+                "cleanup: purge {id}: {} records corrected",
+                cursor.corrected
+            );
+            state.purges.remove(&id);
+            state.purged.insert(id);
+        } else {
+            state.purges.insert(id, cursor);
         }
     }
     Ok(())

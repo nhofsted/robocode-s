@@ -812,6 +812,39 @@ pub struct NondeterministicRequest {
     pub reason: Option<String>,
 }
 
+/// `POST admin/purge` (§12.4): take the battles of these versions, up to and including the
+/// hour `until` (`YYYYMMDDHH`, UTC, already over), out of the pairing state, so that they are
+/// fought again. `cleanup` does it (a `purge` alert asks for it). With `dryRun` nothing is
+/// stored: the answer says which versions there are.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeRequest {
+    /// Names the purge (letters, digits, `-` and `_`); a purge with the same id is refused.
+    pub id: String,
+    pub versions: Vec<PurgeVersion>,
+    pub until: u32,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PurgeVersion {
+    pub bot: String,
+    pub version: String,
+}
+
+/// The answer of `POST admin/purge`: the versions found (by vid) and those not.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeResponse {
+    pub id: String,
+    pub until: u32,
+    pub vids: Vec<u32>,
+    pub missing: Vec<PurgeVersion>,
+    pub stored: bool,
+}
+
 /// A version in the answer of `admin/bots/nd`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NondeterministicVersion {

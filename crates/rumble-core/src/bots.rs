@@ -6,16 +6,17 @@
 
 use crate::api::{
     ApiError, BotInfo, BotVersionInfo, ErrorCode, ImportRequest, ImportResponse, ImportResult,
-    NondeterministicRequest, NondeterministicResponse, NondeterministicVersion, SubmitResponse,
-    UserUpdateRequest,
+    NondeterministicRequest, NondeterministicResponse, NondeterministicVersion, PurgeRequest,
+    PurgeResponse, SubmitResponse, UserUpdateRequest,
 };
 use crate::auth::{Submission, check_submission, is_admin};
+use crate::cleanup::{PURGE_ALERT, parse_purge_reference, purge_reference};
 use crate::config::Config;
 use crate::ids::Division;
 use crate::jar::JarInfo;
 use crate::store::{
     ALERT_TTL, Alert, BotItem, BotSource, BotState, DAY, Store, StoreError, StoreResult, User,
-    UserPatch, UserState, VersionItem, VersionState, rfc3339,
+    UserPatch, UserState, VersionItem, VersionState, hour_key, rfc3339,
 };
 use crate::verify::{ban_alert, update_reputation};
 
@@ -766,6 +767,82 @@ pub fn list_nondeterministic<S: Store + ?Sized>(
     Ok(NondeterministicResponse { versions })
 }
 
+/// `POST admin/purge` (§12.4): resolves the versions and, unless it is a dry run, stores the
+/// `purge` alert that `cleanup` acts on. Refused: an id in use (by a purge alert still
+/// kept), an hour that isn't over, no version found.
+pub fn purge<S: Store + ?Sized>(
+    store: &S,
+    request: &PurgeRequest,
+    now_ms: u64,
+) -> Result<PurgeResponse, ApiError> {
+    let bad = |what: String| ApiError::new(ErrorCode::BadRequest, what);
+    if request.id.is_empty()
+        || !request
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(bad(format!(
+            "purge id {:?}: letters, digits, - and _",
+            request.id
+        )));
+    }
+    if crate::batch::hour_start(request.until).is_none() {
+        return Err(bad(format!(
+            "until {}: not an hour (YYYYMMDDHH)",
+            request.until
+        )));
+    }
+    if request.until >= hour_key(now_ms / 1000) {
+        return Err(bad(format!("until {}: the hour isn't over", request.until)));
+    }
+    if store.list_alerts()?.iter().any(|a| {
+        a.kind == PURGE_ALERT
+            && parse_purge_reference(&a.reference).is_some_and(|(id, _, _)| id == request.id)
+    }) {
+        return Err(conflict(format!("purge {} exists", request.id)));
+    }
+    let versions = store.list_versions()?;
+    let mut vids = std::collections::BTreeSet::new();
+    let mut missing = Vec::new();
+    for wanted in &request.versions {
+        match versions
+            .iter()
+            .find(|v| v.bot == wanted.bot && v.version == wanted.version)
+        {
+            Some(v) => {
+                vids.insert(v.vid);
+            }
+            None => missing.push(wanted.clone()),
+        }
+    }
+    if vids.is_empty() {
+        return Err(not_found("none of the versions exist"));
+    }
+    let reason = non_empty(&request.reason).unwrap_or_else(|| "admin".to_string());
+    if !request.dry_run {
+        store.put_alert(&Alert {
+            sort: format!("{now_ms:013}#purge.{}", request.id),
+            kind: PURGE_ALERT.to_string(),
+            text: format!(
+                "purge {}: battles of {} versions up to {}: {reason}",
+                request.id,
+                vids.len(),
+                request.until
+            ),
+            reference: purge_reference(&request.id, request.until, &vids),
+            ttl: now_ms / 1000 + ALERT_TTL,
+        })?;
+    }
+    Ok(PurgeResponse {
+        id: request.id.clone(),
+        until: request.until,
+        vids: vids.into_iter().collect(),
+        missing,
+        stored: !request.dry_run,
+    })
+}
+
 /// `POST admin/bots/nd` (§11.5): flags the version with the reason (an empty one is
 /// `admin`) or, without a reason, clears the flag and the disagreement count's effect.
 pub fn set_nondeterministic<S: Store + ?Sized>(
@@ -807,6 +884,7 @@ pub fn set_nondeterministic<S: Store + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::PurgeVersion;
     use crate::ids::WeightClass;
     use crate::store::{MemStore, Reputation};
 
@@ -1503,6 +1581,72 @@ mod tests {
                 .unwrap_err()
                 .code,
             ErrorCode::Forbidden
+        );
+    }
+
+    #[test]
+    fn purges_resolve_their_versions_and_store_one_alert() {
+        let store = MemStore::new();
+        for (bot, sha) in [("jk.B", 'a'), ("jk.C", 'b')] {
+            import(
+                &store,
+                &import_request(bot, "1", sha, Division::OneVsOne),
+                &info(bot, "1", sha),
+                NOW,
+            )
+            .unwrap();
+        }
+        let request = |id: &str, until: u32, dry_run: bool| PurgeRequest {
+            id: id.into(),
+            versions: vec![
+                PurgeVersion {
+                    bot: "jk.B".into(),
+                    version: "1".into(),
+                },
+                PurgeVersion {
+                    bot: "jk.Z".into(),
+                    version: "9".into(),
+                },
+            ],
+            until,
+            reason: "rules 3".into(),
+            dry_run,
+        };
+        let now_ms = NOW * 1000;
+        let past = hour_key(NOW - 7200);
+        let dry = purge(&store, &request("rules3", past, true), now_ms).unwrap();
+        assert_eq!(
+            (dry.vids.len(), dry.missing.len(), dry.stored),
+            (1, 1, false)
+        );
+        assert!(store.list_alerts().unwrap().is_empty());
+        let stored = purge(&store, &request("rules3", past, false), now_ms).unwrap();
+        assert!(stored.stored);
+        let alerts = store.list_alerts().unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(
+            parse_purge_reference(&alerts[0].reference),
+            Some((
+                "rules3".to_string(),
+                past,
+                dry.vids.iter().copied().collect()
+            ))
+        );
+        let code = |r: &PurgeRequest| purge(&store, r, now_ms).unwrap_err().code;
+        assert_eq!(
+            code(&request("rules3", past, false)),
+            ErrorCode::Conflict,
+            "the id is in use"
+        );
+        assert_eq!(
+            code(&request("other", hour_key(NOW), false)),
+            ErrorCode::BadRequest,
+            "not over"
+        );
+        assert_eq!(code(&request("a b", past, false)), ErrorCode::BadRequest);
+        assert_eq!(
+            code(&request("x", 2026139999, false)),
+            ErrorCode::BadRequest
         );
     }
 

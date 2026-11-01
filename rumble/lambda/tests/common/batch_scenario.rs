@@ -734,4 +734,72 @@ pub fn run(world: &World, data_dir: &Path) {
             .all(|c| c.login != "login-g102"),
         "banned"
     );
+
+    // ---- a purge: every counted battle of one version, up to the last hour, is cancelled. ----
+    let purged = posted
+        .records
+        .iter()
+        .flat_map(|(uid, r)| r.contestants.iter().map(move |e| (uid, e.vid)))
+        .find(|(uid, vid)| *uid != "g102" && *vid != 1 && *vid != 7)
+        .map(|(_, vid)| vid)
+        .expect("a version to purge");
+    let version = store.get_version(purged).unwrap().unwrap();
+    world.set(T0 + 4 * 3600);
+    let until = hour_key(world.now_ms() / 1000 - 3600);
+    let request = rumble_core::api::PurgeRequest {
+        id: "rules3".into(),
+        versions: vec![rumble_core::api::PurgeVersion {
+            bot: version.bot.clone(),
+            version: version.version.clone(),
+        }],
+        until,
+        reason: "rules 3".into(),
+        dry_run: false,
+    };
+    let answer = bots::purge(store, &request, world.now_ms()).unwrap();
+    assert_eq!(answer.vids, vec![purged]);
+    world.tick.store(50, Ordering::SeqCst);
+    let mut runs = 0;
+    let purge = loop {
+        runs += 1;
+        // The steps before take their share of the budget first.
+        let report = world.cleanup(1000);
+        let purge = report
+            .purges
+            .into_iter()
+            .find(|p| p.id == "rules3")
+            .unwrap();
+        // A day of partitions (down to the version's registration), a few a run.
+        if purge.finished || runs > 200 {
+            break purge;
+        }
+    };
+    world.tick.store(0, Ordering::SeqCst);
+    assert!(purge.finished && runs > 1, "{runs} runs");
+    let counted = posted
+        .records
+        .iter()
+        .filter(|(uid, r)| {
+            uid != "g102" && r.failed.is_none() && r.contestants.iter().any(|e| e.vid == purged)
+        })
+        .count() as u64;
+    assert!(counted > 0);
+    assert_eq!(purge.corrected, counted, "each counted battle once");
+    assert!(world.cleanup(u64::MAX).purges.is_empty(), "done once");
+    assert_eq!(
+        bots::purge(store, &request, world.now_ms())
+            .unwrap_err()
+            .code,
+        rumble_core::api::ErrorCode::Conflict
+    );
+    // Folded, the corrections take the version's battles out of the pairing state.
+    world.set(T0 + 6 * 3600);
+    world.plan();
+    let kept: Vec<(String, Record)> = posted
+        .records
+        .iter()
+        .filter(|(uid, r)| uid != "g102" && r.contestants.iter().all(|e| e.vid != purged))
+        .cloned()
+        .collect();
+    assert_same_pairings(&world.state(), &expected_state(&kept, &[1, 7]));
 }

@@ -493,6 +493,11 @@ impl Api {
         self.post_json("admin/bots/nd", body)
     }
 
+    /// `POST admin/purge`
+    pub fn admin_purge(&self, body: &rumble_core::api::PurgeRequest) -> Result<Value, Error> {
+        self.post_json("admin/purge", body)
+    }
+
     /// `POST admin/users/update`; `body` has `uid` and any of `rep`, `state`, `admin`.
     pub fn admin_users_update(&self, body: &Value) -> Result<Value, Error> {
         self.post_json("admin/users/update", body)
