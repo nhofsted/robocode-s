@@ -63,8 +63,11 @@ import java.util.zip.GZIPOutputStream;
  */
 public final class Oracle {
 
+    /** How classic's `RobotThreadManager` reports a thread it could not stop. */
+    private static final String STOP_FAILED = "Unable to stop thread: ";
+
     /** Version of the recording format; bump on incompatible changes. */
-    public static final int FORMAT_VERSION = 3;
+    public static final int FORMAT_VERSION = 4;
 
     public static void main(String[] args) throws Exception {
         Options options = Options.parse(args);
@@ -217,6 +220,15 @@ public final class Oracle {
 
         @Override
         public void onBattleError(BattleErrorEvent event) {
+            // Classic stops a robot it disables for skipped turns from that robot's own thread
+            // (`checkSkippedTurn`), so the stop always fails to join it: deterministic, not an
+            // error of the recording.
+            String error = event.getError();
+            if (error != null && error.startsWith(STOP_FAILED)
+                    && OracleHooks.disabledForSkippedTurns(error.substring(STOP_FAILED.length()))) {
+                System.err.println("classic (expected): " + error);
+                return;
+            }
             errors++;
             System.err.println("battle error: " + event.getError());
             if (event.getErrorInstance() != null) {
@@ -308,6 +320,14 @@ public final class Oracle {
                         raw(json, a);
                     }
                     json.endArray();
+                }
+                json.endArray();
+            }
+            if (java.util.Arrays.stream(hooks.late).anyMatch(java.util.Objects::nonNull)) {
+                // Format 4: robots that answered late, with the turn they last executed in.
+                json.name("late").beginArray();
+                for (Integer last : hooks.late) {
+                    raw(json, last == null ? null : last.toString());
                 }
                 json.endArray();
             }

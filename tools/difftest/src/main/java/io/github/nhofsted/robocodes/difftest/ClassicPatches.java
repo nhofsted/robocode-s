@@ -34,10 +34,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>(The per-robot {@code Utils.getRandom()} of ADR 0010 is done by the determinism
  * agent, which the robocode-s Java robot host uses too.)
  *
- * <p>Finally, {@code RobotPeer.performLoadCommands}, {@code publishStatus} and
- * {@code addEvent} call {@link OracleHooks} on entry, so the oracle can record the
- * robots' commands, the remaining values and the events per turn. The hooks only
- * observe.
+ * <p>Finally, {@code RobotPeer.performLoadCommands}, {@code publishStatus},
+ * {@code addEvent}, {@code drainEnergy}, {@code punishBadBehavior} and
+ * {@code checkSkippedTurn} call {@link OracleHooks} on entry, so the oracle can record the
+ * robots' commands, the remaining values, the events, what robot threads did and which
+ * robots answered late per turn. The hooks only observe.
  */
 public final class ClassicPatches {
 
@@ -106,6 +107,7 @@ public final class ClassicPatches {
                             case "addEvent(Lrobocode/Event;)V" -> "eventAdded";
                             case "drainEnergy()V" -> "energyDrained";
                             case "punishBadBehavior(Lnet/sf/robocode/peer/BadBehavior;)V" -> "punished";
+                            case "checkSkippedTurn()V" -> "turnChecked";
                             default -> null;
                         };
                         if (hook != null) {
@@ -172,8 +174,8 @@ public final class ClassicPatches {
                         };
                     }
                 }, 0);
-                if (hooked[0] != 5) {
-                    throw new IllegalStateException("expected 5 hooked RobotPeer methods, found " + hooked[0]);
+                if (hooked[0] != 6) {
+                    throw new IllegalStateException("expected 6 hooked RobotPeer methods, found " + hooked[0]);
                 }
                 if (replaced[0] != 2) {
                     throw new IllegalStateException("expected one wait() each in RobotPeer.startRound and waitWakeup, found "

@@ -950,8 +950,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/seed.Anastasia_1.0.jar",
    "sha256": "2255f4bdc9174685389338d122cd8569dd68ff8e49bb4a0077f8cda4377b2593",
-   "file": "seed.Anastasia_1.0.jar",
-   "exclude": "Not reproducible in classic: trains its regression model (seed.Regressor) in a background thread, so what it learns depends on thread timing."
+   "file": "seed.Anastasia_1.0.jar"
   },
   {
    "name": "ary.Help",

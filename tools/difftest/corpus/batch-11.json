@@ -932,8 +932,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/rapture.Rapture_2.13.jar",
    "sha256": "0a1201424dd35c395fcf4474a826f64f7b6980bb6015893ade8087bcb37961b7",
-   "file": "rapture.Rapture_2.13.jar",
-   "exclude": "Not reproducible in classic: a PatternAnalyzer thread wakes every 500 ms of wall-clock time and switches the targeting pattern."
+   "file": "rapture.Rapture_2.13.jar"
   },
   {
    "name": "cbot.cbot.CBot",
@@ -1414,8 +1413,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/TNT.TNT_0.99.1.jar",
    "sha256": "b5fe353aca9e8fc0d1746926c04aa66386161563a73f92df996a70de805f83ca",
-   "file": "TNT.TNT_0.99.1.jar",
-   "exclude": "Not reproducible in classic: based on rapture.Rapture, with the same PatternAnalyzer thread that wakes every 500 ms of wall-clock time."
+   "file": "TNT.TNT_0.99.1.jar"
   },
   {
    "name": "sheldor.melee.nano.NaturalScience",

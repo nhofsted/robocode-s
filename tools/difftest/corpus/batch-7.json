@@ -269,8 +269,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/florent.test.Toad_0.14t.jar",
    "sha256": "4290f8a075c9990dca1e9b824746404d4ac67dd61bd741d1832516e6b321b6ef",
-   "file": "florent.test.Toad_0.14t.jar",
-   "exclude": "Not reproducible in classic: rebuilds its segmentation tree in background threads (treeThread, rebuildThread), so what it aims with depends on thread timing."
+   "file": "florent.test.Toad_0.14t.jar"
   },
   {
    "name": "barontrozo.BaronTrozo",

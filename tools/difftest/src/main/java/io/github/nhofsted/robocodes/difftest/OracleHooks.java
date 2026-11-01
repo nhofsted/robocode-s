@@ -51,10 +51,13 @@ public final class OracleHooks {
         final List<List<String>> events = new ArrayList<>();
         /** What robot threads did to their robot while handling the turn (see {@link #energyDrained}). */
         final List<List<String>> actions = new ArrayList<>();
+        /** The turn a robot that woke late last executed in (see {@link #turnChecked}), else null. */
+        final Integer[] late;
 
         Turn(int robots) {
             commands = new String[robots];
             remaining = new String[robots];
+            late = new Integer[robots];
             for (int i = 0; i < robots; i++) {
                 events.add(new ArrayList<>());
                 actions.add(new ArrayList<>());
@@ -225,9 +228,48 @@ public final class OracleHooks {
         action(peer, "\"drainEnergy\"");
     }
 
+    /**
+     * Entry of {@code RobotPeer.checkSkippedTurn()}, on the robot's thread when the battle woke
+     * it: if it last executed more than a turn ago ({@code currentExecutionTime}, before the
+     * check updates it), it answered late and skipped the turns in between. Recorded is that
+     * turn, the input of the check; its outcome (the {@code SkippedTurnEvent}s, a disable) is
+     * recorded as events and actions, and the replay checks robocode-s's check against it.
+     */
+    public static void turnChecked(Object peer) {
+        if (!enabled) {
+            return;
+        }
+        try {
+            int last = (int) field(peer, "currentExecutionTime");
+            int time = (int) call(field(peer, "battle"), "getTime");
+            if (time - last > 1) {
+                synchronized (OracleHooks.class) {
+                    current.late[index(peer)] = last;
+                }
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot read classic's execution time", e);
+        }
+    }
+
+    /** Robots disabled for skipping too many turns, by name. */
+    private static final java.util.Set<String> SKIPPED_TOO_MANY = ConcurrentHashMap.newKeySet();
+
     /** Entry of {@code RobotPeer.punishBadBehavior(BadBehavior)}: the robot is disabled. */
     public static void punished(Object peer, Object badBehavior) {
         action(peer, "\"disable:" + badBehavior + "\"");
+        if (enabled && "SKIPPED_TOO_MANY_TURNS".equals(String.valueOf(badBehavior))) {
+            try {
+                SKIPPED_TOO_MANY.add(String.valueOf(call(field(peer, "statics"), "getName")));
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("cannot read classic's robot name", e);
+            }
+        }
+    }
+
+    /** Whether the robot named {@code name} was disabled for skipping too many turns. */
+    static boolean disabledForSkippedTurns(String name) {
+        return SKIPPED_TOO_MANY.contains(name);
     }
 
     private static void action(Object peer, String json) {

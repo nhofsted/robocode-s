@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: EPL-2.0
 #
-# Records a fixed corpus of classic battles with the sample robots, for the engine replay
-# test (crates/difftest). Usage: tools/difftest/record-samples.sh <output dir> [extra jars]
-# Requires ./gradlew :tools:difftest:installDist :robots:samples:jar :clients:java-determinism:jar
+# Records a fixed corpus of classic battles with the sample robots, and with test robots
+# that skip turns, for the engine replay test (crates/difftest).
+# Usage: tools/difftest/record-samples.sh <output dir> [extra jars]
+# Requires ./gradlew :tools:difftest:installDist :robots:samples:jar :robots:testbots:jar
+#   :clients:java-determinism:jar
 set -euo pipefail
 
 out=${1:?usage: record-samples.sh <output dir> [extra robot jars, path list]}
@@ -21,7 +23,7 @@ java_args=(
   -Ddebug=true
   "-javaagent:$(ls "$root"/clients/java-determinism/build/libs/java-determinism-*.jar)"
   "-javaagent:$(ls "$lib"/difftest-*.jar)"
-  "-Drobocodes.difftest.robotJars=$(ls "$root"/robots/samples/build/libs/samples-*.jar)"
+  "-Drobocodes.difftest.robotJars=$(ls "$root"/robots/samples/build/libs/samples-*.jar):$(ls "$root"/robots/testbots/build/libs/testbots-*.jar)"
   -cp "$lib/*"
   io.github.nhofsted.robocodes.difftest.Oracle
 )
@@ -43,6 +45,9 @@ record melee-samples sample.Corners,sample.Crazy,sample.Fire,sample.RamFire,samp
 record team-vs-walls sampleteam.MyFirstTeam,sample.Walls,sample.SpinBot 7 5 & pids+=($!)
 record sentry samplesentry.BorderGuard,sample.Walls,sample.Crazy,sample.Tracker 8 5 & pids+=($!)
 record junior-target sample.MyFirstJuniorRobot,sample.Target,sample.PaintingRobot 9 5 & pids+=($!)
+# Robots that sleep on their main thread skip turns (ADR 0025); Oversleeper is disabled for it.
+record sleeper-crazy testbots.Sleeper,sample.Crazy 11 10 & pids+=($!)
+record oversleeper-fire testbots.Oversleeper,sample.Fire 12 6 & pids+=($!)
 status=0
 for pid in "${pids[@]}"; do wait "$pid" || status=1; done
 exit $status

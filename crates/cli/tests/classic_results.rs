@@ -3,7 +3,7 @@
 //! `robocode-s battle` against classic: for each recording in `$ROBOCODES_RECORDINGS`
 //! (`tools/difftest/record-samples.sh`), the same battle fought by the cli in
 //! deterministic mode must name the robots as classic did and end with classic's
-//! results. Skipped without recordings; needs the built robot host and sample robots
+//! results. Skipped without recordings; needs the built robot host, sample and test robots
 //! (see `tools/difftest/README.md`).
 
 use flate2::read::GzDecoder;
@@ -97,6 +97,15 @@ fn battles_end_with_classic_results() {
                     .unwrap_or(false)
                     .then_some("--hide-enemy-names"),
             )
+            // The sample robots, and the test robots that skip turns.
+            .args([
+                "--jar",
+                "robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar",
+            ])
+            .args([
+                "--jar",
+                "robots/testbots/build/libs/testbots-0.1.0-SNAPSHOT.jar",
+            ])
             .arg("--json")
             .arg("--record")
             .arg(&record)

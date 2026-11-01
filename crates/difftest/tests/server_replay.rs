@@ -12,8 +12,11 @@ use robocode_s_difftest::{
 use robocode_s_engine::Commands;
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
-use robocode_s_server::{RobotEntry, ServerConfig, run_battle};
+use robocode_s_server::{
+    DETERMINISTIC_BUDGET_NANOS, FIRST_TURN_BUDGETS, RobotEntry, ServerConfig, run_battle,
+};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -79,7 +82,40 @@ fn hello(stream: &mut TcpStream, role: v1::Role, token: &str) {
     );
 }
 
-/// A robot that replays classic's commands. Returns the number of ticks it checked.
+/// Robot `index`'s late answers in a round (format 4's `late`): the turn it answered late
+/// and the turn it woke in.
+fn late_answers(round: &Round, index: usize) -> HashMap<i64, i64> {
+    round
+        .turns
+        .iter()
+        .filter_map(|l| Some((l["late"][index].as_i64()?, l["turn"].as_i64()?)))
+        .collect()
+}
+
+/// The counted work that makes an answer to `turn` `late` turns late on the server
+/// (`late_turns`).
+fn work_for(turn: i64, late: i64) -> u64 {
+    let allowance = if turn == 1 {
+        FIRST_TURN_BUDGETS * DETERMINISTIC_BUDGET_NANOS
+    } else {
+        DETERMINISTIC_BUDGET_NANOS
+    };
+    allowance + (late as u64 - 1) * DETERMINISTIC_BUDGET_NANOS
+}
+
+/// What classic leaves of a late robot's events when it wakes (`clear(false)`): the
+/// critical ones (`isCriticalEvent`), in order.
+fn critical(event: &Value) -> bool {
+    matches!(
+        event["type"].as_str(),
+        Some(
+            "DeathEvent" | "WinEvent" | "SkippedTurnEvent" | "RoundEndedEvent" | "BattleEndedEvent"
+        )
+    )
+}
+
+/// A robot that replays classic's commands, answering late where classic's robot did
+/// (as late as its counted work makes it). Returns the number of ticks it checked.
 fn robot(
     index: usize,
     address: String,
@@ -103,10 +139,15 @@ fn robot(
     };
     let mut round = 0usize;
     let mut ticks = 0;
+    let mut late = HashMap::new();
+    // The turn this robot answered late, until it wakes.
+    let mut answered_late: Option<i64> = None;
     while let Some(msg) = receive(&mut stream) {
         match msg {
             server_message::Msg::RoundStart(r) => {
                 round = r.round as usize;
+                late = late_answers(&rounds[round], index);
+                answered_late = None;
                 let execute = v1::Execute {
                     turn: 0,
                     commands: Some(commands(round, 1)),
@@ -118,10 +159,21 @@ fn robot(
                 ticks += 1;
                 let turn = tick.turn as usize;
                 let line = &rounds[round].turns[turn - 1];
-                let expected = line["events"][index]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
+                let events = |t: usize| {
+                    rounds[round].turns[t - 1]["events"][index]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                // A robot that woke late gets the critical events of the turns it skipped
+                // and of this one, then its `SkippedTurnEvent`s (last in this turn's).
+                let expected: Vec<Value> = match answered_late.take() {
+                    Some(answered) => (answered as usize + 1..=turn)
+                        .flat_map(events)
+                        .filter(critical)
+                        .collect(),
+                    None => events(turn),
+                };
                 let actual: Vec<Value> = tick.events.iter().map(proto_event_json).collect();
                 if !events_equal(&expected, &actual) {
                     fail(format!(
@@ -153,11 +205,20 @@ fn robot(
                 // died robot, engine-spec §15.3). Like the robot host, the robot sends the
                 // commands classic stored, or none when it recorded none (dead): those
                 // change nothing. An Execute the server doesn't await is ignored.
-                let next = rounds[round].turns.get(turn).map(|l| &l["commands"][index]);
+                // Late: the commands classic loaded when it woke, with the work that makes the
+                // server hold them until then.
+                let wakes = late.get(&tick.turn).copied();
+                answered_late = wakes.map(|_| tick.turn);
+                let loaded = wakes.map_or(turn + 1, |w| w as usize);
+                let next = rounds[round]
+                    .turns
+                    .get(loaded - 1)
+                    .map(|l| &l["commands"][index]);
                 let recorded = next.is_some_and(|c| !c.is_null());
                 let execute = v1::Execute {
                     turn: tick.turn,
-                    commands: (!tick.halt || recorded).then(|| commands(round, turn + 1)),
+                    commands: (!tick.halt || recorded).then(|| commands(round, loaded)),
+                    cpu_nanos: wakes.map_or(0, |w| work_for(tick.turn, w - 1 - tick.turn)),
                     ..Default::default()
                 };
                 send(&mut stream, client_message::Msg::Execute(execute));

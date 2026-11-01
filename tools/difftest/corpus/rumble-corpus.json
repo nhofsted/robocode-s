@@ -500,8 +500,7 @@
    ],
    "url": "https://robocode-archive.strangeautomata.com/robots/techdude.forest.FlamingForest_1.1.jar",
    "sha256": "ce04177a7ac54de18748fbb5ea5f371d65a23abcf962c5b3d29e8d63dec78de7",
-   "file": "techdude.forest.FlamingForest_1.1.jar",
-   "exclude": "Not reproducible in classic: a background thread (PatternAnalyzer) works alongside the battle and sleeps 500 ms of wall-clock time per cycle."
+   "file": "techdude.forest.FlamingForest_1.1.jar"
   },
   {
    "name": "bigpete.Stewie",
