@@ -23,9 +23,9 @@ use rumble_client::tokenfile::{self, Credentials, TokenFile};
 use rumble_core::api::{BattleStatus, Me, Tier};
 use rumble_core::ids::Division;
 use std::collections::VecDeque;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Where the rumble is, unless the options or `ROBOCODES_RUMBLE_SERVER` say otherwise.
@@ -600,6 +600,54 @@ fn sleep_unless(cancel: &AtomicBool, d: Duration) {
 
 // ---- the page ----
 
+/// The window to wake when a thread posts a message. A window can give way to a new one
+/// (after losing the GPU, see `crate::gpu`) while the threads go on, so they wake whichever
+/// window shows the page now.
+#[derive(Clone, Default)]
+pub struct Waker(Arc<Mutex<Option<egui::Context>>>);
+
+impl Waker {
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<egui::Context>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Wakes `ctx` from now on, and returns a waker for a thread.
+    fn with(&self, ctx: &egui::Context) -> Waker {
+        *self.slot() = Some(ctx.clone());
+        self.clone()
+    }
+
+    fn wake(&self) {
+        if let Some(ctx) = &*self.slot() {
+            ctx.request_repaint();
+        }
+    }
+}
+
+/// The contributor threads alive (one at most, unless a window that went away left one).
+static CONTRIBUTORS: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a contributor thread is alive, whatever window it was started from.
+pub fn contributing() -> bool {
+    CONTRIBUTORS.load(Ordering::SeqCst) > 0
+}
+
+/// Counts a contributor thread while it lives (a panic in it too).
+struct Alive;
+
+impl Alive {
+    fn new() -> Self {
+        CONTRIBUTORS.fetch_add(1, Ordering::SeqCst);
+        Alive
+    }
+}
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        CONTRIBUTORS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// The Run Rumble page: the account, the contributing thread and what it reported.
 pub struct Rumble {
     tx: Sender<Msg>,
@@ -620,6 +668,8 @@ pub struct Rumble {
     note: Option<String>,
     /// The user asked to update robocode-s (a problem's button): the app takes it.
     pub update_asked: bool,
+    /// The window the threads wake.
+    waker: Waker,
 }
 
 impl Default for Rumble {
@@ -644,7 +694,14 @@ impl Rumble {
             closing: None,
             note: None,
             update_asked: false,
+            waker: Waker::default(),
         }
+    }
+
+    /// The window showing the page goes away; the threads go on, for the next one.
+    pub fn detach(&mut self) {
+        *self.waker.slot() = None;
+        self.closing = None;
     }
 
     /// Whether a contributor thread is alive.
@@ -652,13 +709,14 @@ impl Rumble {
         self.stop.is_some()
     }
 
-    fn send(tx: &Sender<Msg>, ctx: &egui::Context, msg: Msg) {
+    fn send(tx: &Sender<Msg>, waker: &Waker, msg: Msg) {
         let _ = tx.send(msg);
-        ctx.request_repaint();
+        waker.wake();
     }
 
     /// Takes the threads' messages. Call it every frame, whatever page is open.
     pub fn poll(&mut self, ctx: &egui::Context) {
+        self.waker.with(ctx);
         while let Ok(msg) = self.rx.try_recv() {
             self.handle(msg, Instant::now());
         }
@@ -773,7 +831,7 @@ impl Rumble {
                     warning: None,
                 };
                 let server = server_now(settings, creds.server.as_deref());
-                let (tx, ctx) = (self.tx.clone(), ctx.clone());
+                let (tx, ctx) = (self.tx.clone(), self.waker.with(ctx));
                 let cancel = Arc::new(AtomicBool::new(false));
                 self.asking = cancel.clone();
                 std::thread::spawn(move || {
@@ -832,7 +890,7 @@ impl Rumble {
             code: None,
         };
         let server = server_now(settings, None);
-        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        let (tx, ctx) = (self.tx.clone(), self.waker.with(ctx));
         std::thread::spawn(move || {
             let api = api_for(&server, None);
             let github = std::env::var(GITHUB_VAR)
@@ -877,7 +935,7 @@ impl Rumble {
             .as_ref()
             .and_then(|p| tokenfile::read(p).ok().flatten());
         let server = server_now(settings, file.as_ref().map(|f| f.server.as_str()));
-        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        let (tx, ctx) = (self.tx.clone(), self.waker.with(ctx));
         std::thread::spawn(move || {
             let mut warning = None;
             if let Some(file) = &file
@@ -923,10 +981,11 @@ impl Rumble {
         let stop = Stop::new();
         self.stop = Some(stop.clone());
         self.model.begin(Instant::now());
-        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        let (tx, ctx) = (self.tx.clone(), self.waker.with(ctx));
         let spawned = std::thread::Builder::new()
             .name("rumble".into())
             .spawn(move || {
+                let _alive = Alive::new();
                 let contributor = match Contributor::new(config) {
                     Ok(c) => c,
                     Err(fatal) => return Self::send(&tx, &ctx, Msg::StartFailed(fatal)),

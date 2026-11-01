@@ -28,7 +28,9 @@ use robocode_s_runner::{JavaHost, Sandbox, docker_pulling};
 use robocode_s_server::tls::Fingerprint;
 use robocode_s_server::{BattleOutcome, ServerConfig, battle_file};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 
@@ -304,7 +306,23 @@ impl Screenshot {
     }
 }
 
+/// What a window hands to the next one when it goes away (after losing the GPU, see
+/// [`crate::gpu`]): the Run Rumble page with its threads, so contributing goes on, and the
+/// options, the battle setup and the tab.
+#[derive(Default)]
+pub struct Carried {
+    pub rumble: Option<Rumble>,
+    pub settings: Option<Settings>,
+    pub setup: Option<Setup>,
+    pub tab: Option<Tab>,
+}
+
+/// Shared by `main` and the window's [`App`], which fills it as it is dropped.
+pub type Carry = Rc<RefCell<Carried>>;
+
 pub struct App {
+    /// Filled as the app is dropped, for a window that replaces this one.
+    carry: Carry,
     /// `ROBOCODES_PERF_LOG` (see [`crate::perf`]).
     perf: Option<crate::perf::Perf>,
     sprites: Sprites,
@@ -463,7 +481,10 @@ impl App {
         launch: Launch,
         screenshot: Option<Screenshot>,
         own_frame: bool,
+        carry: Carry,
     ) -> Self {
+        crate::gpu::install(cc);
+        let carried = carry.borrow_mut().rumble.take();
         // Dark whatever the system's theme: egui would follow a light Windows or macOS
         // theme (white text fields, and the title on the dark top bar near invisible),
         // and the app's colours (the top bar, the floor) are made for the dark one.
@@ -484,6 +505,7 @@ impl App {
         }
         let robots_seen = launch.setup.robots.clone();
         let mut app = Self {
+            carry,
             perf,
             sprites: Sprites::new(&cc.egui_ctx),
             backdrop: Backdrop::default(),
@@ -535,10 +557,8 @@ impl App {
             saving: None,
             save_error: None,
             updater: crate::update::Updater::new(),
-            rumble: launch
-                .rumble_demo
-                .as_deref()
-                .and_then(Rumble::demo)
+            rumble: carried
+                .or_else(|| launch.rumble_demo.as_deref().and_then(Rumble::demo))
                 .unwrap_or_default(),
         };
         crate::graphs::set_whole_battle(&cc.egui_ctx, app.settings.graphs_battle);
@@ -2680,6 +2700,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        crate::gpu::frame(ctx);
         if let Some(perf) = &mut self.perf {
             perf.begin();
         }
@@ -2820,6 +2841,27 @@ impl eframe::App for App {
         self.pool = None;
         if self.settings_unsaved.is_some() {
             let _ = self.settings.save();
+        }
+    }
+}
+
+impl Drop for App {
+    /// Hands the Run Rumble page (and its threads), the options, the setup and the tab to
+    /// `main`, for a window that replaces this one. It runs as a panic unwinds too: it
+    /// mustn't panic itself.
+    fn drop(&mut self) {
+        let mut rumble = std::mem::take(&mut self.rumble);
+        rumble.detach();
+        if self.settings_unsaved.is_some() {
+            let _ = self.settings.save();
+        }
+        if let Ok(mut carry) = self.carry.try_borrow_mut() {
+            *carry = Carried {
+                rumble: Some(rumble),
+                settings: Some(self.settings.clone()),
+                setup: Some(self.setup.clone()),
+                tab: Some(self.tab),
+            };
         }
     }
 }

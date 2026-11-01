@@ -11,6 +11,7 @@ mod backdrop;
 #[cfg(windows)]
 mod console;
 mod files;
+mod gpu;
 mod graphs;
 mod icons;
 mod ide;
@@ -35,8 +36,10 @@ use app::{App, Browse, Launch, Screenshot, Setup, parse_robots};
 use robocode_s_runner::local::Environment;
 use settings::Settings;
 use shell::Tab;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 const USAGE: &str = "\
 usage: robocode-s-gui [recording] [--full]
@@ -64,7 +67,10 @@ ROBOCODES_LOG). ROBOCODES_FRAME_LOG=1 logs the window's sizes and the moves and
 resizes handed to the system to stderr. ROBOCODES_PERF_LOG=1 logs the renderer
 and the frame rate and frame times once a second (=frames: every frame), and a
 battle's controls (speed, pause, stop) as sent and as its server applies them, to
-stderr.
+stderr. When the GPU goes away (the display sleeping or waking, a driver reset),
+the window gives way to a new one and contributing to the rumble goes on; the log
+says what was seen. ROBOCODES_LOSE_GPU=SECONDS loses the first window's GPU that
+long after it opens, to try that.
 
   --watch HOST:PORT  watch the battle on that server as an observer (one run with
                      `robocode-s battle --observe PORT`), in the Watch Battle tab
@@ -282,7 +288,117 @@ fn main() -> ExitCode {
     };
     let screenshot = shot.map(|path| Screenshot::new(path, after, loading));
     let own_frame = window::wanted();
-    let options = eframe::NativeOptions {
+    let launch = Launch {
+        setup,
+        start,
+        watch,
+        replay,
+        full,
+        tab,
+        browse,
+        kill_at,
+        input_at,
+        camera,
+        min_size: min_size.into(),
+        ide_panel,
+        ide_add,
+        rumble_demo,
+    };
+    // A window that panics because the GPU went away (see `gpu`) gives way to a new one,
+    // on a new device, with what the old one handed over: contributing goes on.
+    let carry = app::Carry::default();
+    let mut next = Some((launch, screenshot, settings));
+    let mut restarts = Restarts::default();
+    loop {
+        let (launch, screenshot, settings) =
+            next.take().unwrap_or_else(|| resumed(&carry, min_size));
+        let options = native_options(size, min_size, own_frame);
+        let for_app = carry.clone();
+        let opened = Instant::now();
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            eframe::run_native(
+                "robocode-s",
+                options,
+                Box::new(move |cc| {
+                    Ok(Box::new(App::new(
+                        cc,
+                        Environment::from_env(),
+                        settings,
+                        launch,
+                        screenshot,
+                        own_frame,
+                        for_app,
+                    )))
+                }),
+            )
+        }));
+        let (why, payload) = match result {
+            Ok(Ok(())) => {
+                rumble_client::log::exit("the window closed");
+                return ExitCode::SUCCESS;
+            }
+            Ok(Err(e)) if restarts.count == 0 => {
+                rumble_client::log::exit(&format!("failed: {e}"));
+                eprintln!("robocode-s-gui: {e}");
+                return ExitCode::FAILURE;
+            }
+            // A new window that couldn't start: the GPU may not be back yet.
+            Ok(Err(e)) => (format!("the new window failed: {e}"), None),
+            Err(payload) => {
+                let message = panic_message(payload.as_ref());
+                if gpu::after_panic(&message).is_none() {
+                    std::panic::resume_unwind(payload);
+                }
+                if !cfg!(windows) {
+                    // winit 0.30 on X11 and Wayland keeps "running" set after a panic, so
+                    // its event loop never starts a new window; only Windows resets it.
+                    rumble_client::log::line(
+                        "gpu: no new window: winit can't run again after a panic here",
+                    );
+                    std::panic::resume_unwind(payload);
+                }
+                if carry.borrow().rumble.is_none() && rumble::contributing() {
+                    // The window didn't hand the page over: a new one would start a
+                    // second contributor beside the first.
+                    rumble_client::log::line(
+                        "gpu: no new window: the old one didn't hand over the contributing thread",
+                    );
+                    std::panic::resume_unwind(payload);
+                }
+                ("the GPU went away".to_string(), Some(payload))
+            }
+        };
+        let Some(wait) = restarts.next(opened.elapsed()) else {
+            rumble_client::log::line(&format!(
+                "gpu: {why}; no new window after {} tries",
+                restarts.count - 1
+            ));
+            match payload {
+                Some(payload) => std::panic::resume_unwind(payload),
+                None => {
+                    rumble_client::log::exit(&format!("failed: {why}"));
+                    return ExitCode::FAILURE;
+                }
+            }
+        };
+        rumble_client::log::line(&format!(
+            "gpu: {why} after {:.0} s of the window; a new window in {} s (try {}), \
+             contributing: {}",
+            opened.elapsed().as_secs_f64(),
+            wait.as_secs(),
+            restarts.count,
+            if rumble::contributing() {
+                "yes, it goes on"
+            } else {
+                "no"
+            }
+        ));
+        std::thread::sleep(wait);
+    }
+}
+
+fn native_options(size: [f32; 2], min_size: [f32; 2], own_frame: bool) -> eframe::NativeOptions {
+    eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("robocode-s")
             // The Wayland app id and X11 class, which desktops match to `robocode-s.desktop`.
@@ -292,52 +408,85 @@ fn main() -> ExitCode {
             .with_min_inner_size(min_size)
             .with_decorations(!own_frame),
         ..Default::default()
+    }
+}
+
+/// What a new window starts with: what the old one handed over (the Run Rumble page is
+/// taken by [`App::new`]), and none of the command line's one-time actions.
+fn resumed(carry: &app::Carry, min_size: [f32; 2]) -> (Launch, Option<Screenshot>, Settings) {
+    let mut carried = carry.borrow_mut();
+    let settings = carried.settings.take().unwrap_or_else(Settings::load);
+    let setup = carried
+        .setup
+        .take()
+        .unwrap_or_else(|| Setup::new(&settings));
+    let launch = Launch {
+        setup,
+        start: false,
+        watch: false,
+        replay: None,
+        full: false,
+        tab: carried.tab.take(),
+        browse: None,
+        kill_at: None,
+        input_at: Vec::new(),
+        camera: view::Camera::default(),
+        min_size: min_size.into(),
+        ide_panel: false,
+        ide_add: false,
+        rumble_demo: None,
     };
-    let result = eframe::run_native(
-        "robocode-s",
-        options,
-        Box::new(move |cc| {
-            let launch = Launch {
-                setup,
-                start,
-                watch,
-                replay,
-                full,
-                tab,
-                browse,
-                kill_at,
-                input_at,
-                camera,
-                min_size: min_size.into(),
-                ide_panel,
-                ide_add,
-                rumble_demo,
-            };
-            Ok(Box::new(App::new(
-                cc,
-                Environment::from_env(),
-                settings,
-                launch,
-                screenshot,
-                own_frame,
-            )))
-        }),
-    );
-    match result {
-        Ok(()) => {
-            rumble_client::log::exit("the window closed");
-            ExitCode::SUCCESS
+    (launch, None, settings)
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_default()
+}
+
+/// How often a window that lost the GPU is replaced: after 2, 4, 8 ... 60 s, at most
+/// [`Restarts::MAX`] times in a row; a window that lasted [`Restarts::RESET`] starts the
+/// count again.
+#[derive(Default)]
+struct Restarts {
+    count: u32,
+}
+
+impl Restarts {
+    const MAX: u32 = 8;
+    const RESET: Duration = Duration::from_secs(600);
+
+    /// The wait before the next window, after one that lasted `lived`; none: give up.
+    fn next(&mut self, lived: Duration) -> Option<Duration> {
+        if lived >= Self::RESET {
+            self.count = 0;
         }
-        Err(e) => {
-            rumble_client::log::exit(&format!("failed: {e}"));
-            eprintln!("robocode-s-gui: {e}");
-            ExitCode::FAILURE
-        }
+        self.count += 1;
+        (self.count <= Self::MAX).then(|| Duration::from_secs((1u64 << self.count).min(60)))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::Restarts;
+    use std::time::Duration;
+
+    #[test]
+    fn restarts_back_off_give_up_and_start_again() {
+        let mut r = Restarts::default();
+        let short = Duration::from_secs(5);
+        let waits: Vec<u64> = (0..Restarts::MAX)
+            .map(|_| r.next(short).unwrap().as_secs())
+            .collect();
+        assert_eq!(waits, [2, 4, 8, 16, 32, 60, 60, 60]);
+        assert_eq!(r.next(short), None);
+        // A window that lasted counts as a first loss again.
+        assert_eq!(r.next(Restarts::RESET), Some(Duration::from_secs(2)));
+    }
+
     #[test]
     fn the_icon_decodes() {
         let icon = super::icon();
