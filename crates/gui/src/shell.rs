@@ -193,7 +193,7 @@ fn column(area: Rect) -> Rect {
 pub fn page<T>(
     root: &mut egui::Ui,
     state: &mut T,
-    scenery: impl FnOnce(&mut T) -> (&mut Backdrop, &mut Sprites),
+    scenery: impl FnOnce(&mut T) -> (&mut Backdrop, &mut Sprites, bool),
     content: impl FnOnce(&mut T, &mut egui::Ui),
 ) {
     egui::CentralPanel::default()
@@ -201,8 +201,8 @@ pub fn page<T>(
         .show(root, |ui| {
             let area = ui.max_rect();
             let column = column(area);
-            let (backdrop, sprites) = scenery(state);
-            backdrop.show(ui, sprites, area);
+            let (backdrop, sprites, animate) = scenery(state);
+            backdrop.show(ui, sprites, area, animate);
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {

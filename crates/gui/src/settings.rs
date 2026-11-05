@@ -8,6 +8,7 @@
 use robocode_s_runner::Sandbox;
 use rumble_core::ids::Division;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The options. Missing fields take their defaults, so older files still load.
@@ -48,6 +49,8 @@ pub struct Settings {
     pub width: i32,
     pub height: i32,
     pub rules: Rules,
+    /// New battles start paused, at their first turn.
+    pub start_paused: bool,
     /// The robots in the battle when the app last had them ("In the battle"), so the
     /// next start begins with them. Robots from an IDE are left out: their connections
     /// end with the app.
@@ -62,10 +65,127 @@ pub struct Settings {
     /// The most frames a second the animations draw; 0 for the display's refresh rate
     /// (see [`crate::pace`]).
     pub frame_rate: u32,
+    /// The tanks wander behind the pages (`crate::backdrop`); off, the backdrop stands
+    /// still.
+    pub background: bool,
     /// The Run Rumble page's choices (`rumble` in the file).
     pub rumble: RumbleSettings,
     /// Look for a newer release once a day (crate::update).
     pub check_updates: bool,
+    /// The colours robots gave their tanks in the battles seen, by robot (see
+    /// [`RobotColors`]), so that the loading screen shows them before they are set again.
+    #[serde(skip_serializing_if = "RobotColors::is_empty")]
+    pub robot_colors: RobotColors,
+}
+
+/// A tank's body, gun and radar colours.
+pub type TankColors = [crate::sprites::Rgb; 3];
+
+/// The tank colours robots were seen with, by robot: its name without the suffix of a
+/// robot that is in a battle more than once (`jk.mega.DrussGT 3.1.16`, `sample.Fire`), or
+/// a team's name for its first member. Saved as `"#rrggbb #rrggbb #rrggbb"` per robot.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RobotColors(BTreeMap<String, TankColors>);
+
+impl RobotColors {
+    /// At most this many robots are remembered.
+    const LIMIT: usize = 2000;
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The colours of the robot (or team) called `name`, as a battle or the robot list
+    /// names it; else those of another version of it.
+    pub fn get(&self, name: &str) -> Option<TankColors> {
+        let key = colors_key(name);
+        if let Some(&colors) = self.0.get(key) {
+            return Some(colors);
+        }
+        let class = class_of(key);
+        self.0
+            .iter()
+            .find(|(k, _)| class_of(k) == class)
+            .map(|(_, &c)| c)
+    }
+
+    /// Remembers `colors` for `name`; true when that changed anything.
+    pub fn set(&mut self, name: &str, colors: TankColors) -> bool {
+        let key = colors_key(name);
+        if key.is_empty() || self.0.get(key) == Some(&colors) {
+            return false;
+        }
+        if self.0.len() >= Self::LIMIT && !self.0.contains_key(key) {
+            // Full (unlikely): forget another version of it, else any one.
+            let class = class_of(key);
+            let drop = self
+                .0
+                .keys()
+                .find(|k| class_of(k) == class)
+                .or_else(|| self.0.keys().next())
+                .cloned();
+            if let Some(drop) = drop {
+                self.0.remove(&drop);
+            }
+        }
+        self.0.insert(key.to_string(), colors);
+        true
+    }
+
+    /// Forgets `name`'s colours (it no longer sets any); true when it had some.
+    pub fn forget(&mut self, name: &str) -> bool {
+        self.0.remove(colors_key(name)).is_some()
+    }
+}
+
+/// `name` without a duplicate's suffix (`sample.Fire (2)` is `sample.Fire`).
+fn colors_key(name: &str) -> &str {
+    let name = name.trim();
+    if let Some(open) = name.rfind(" (")
+        && let Some(n) = name[open + 2..].strip_suffix(')')
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit())
+    {
+        return &name[..open];
+    }
+    name
+}
+
+/// A robot's class name, without its version.
+fn class_of(name: &str) -> &str {
+    name.split(' ').next().unwrap_or(name)
+}
+
+impl Serialize for RobotColors {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(name, colors)| {
+            let hex = colors
+                .map(|[r, g, b]| format!("#{r:02x}{g:02x}{b:02x}"))
+                .join(" ");
+            (name, hex)
+        }))
+    }
+}
+
+impl<'de> Deserialize<'de> for RobotColors {
+    /// Entries that don't parse are dropped, so that one bad entry doesn't lose the file.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = BTreeMap::<String, String>::deserialize(deserializer)?;
+        let parse = |text: &str| -> Option<TankColors> {
+            let mut parts = text.split_whitespace().map(|hex| {
+                let hex = hex.strip_prefix('#').filter(|h| h.len() == 6)?;
+                let v = u32::from_str_radix(hex, 16).ok()?;
+                Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+            });
+            let colors = [parts.next()??, parts.next()??, parts.next()??];
+            parts.next().is_none().then_some(colors)
+        };
+        Ok(Self(
+            raw.into_iter()
+                .filter_map(|(name, text)| Some((name, parse(&text)?)))
+                .collect(),
+        ))
+    }
 }
 
 /// The Run Rumble page's choices (docs/rumble-backend.md §13.7).
@@ -167,6 +287,7 @@ impl Default for Settings {
             width: 800,
             height: 600,
             rules: Rules::default(),
+            start_paused: false,
             robots: [
                 "sample.Fire",
                 "sample.Walls",
@@ -179,8 +300,10 @@ impl Default for Settings {
             watch_fingerprint: String::new(),
             graphs_battle: false,
             frame_rate: 0,
+            background: true,
             rumble: RumbleSettings::default(),
             check_updates: true,
+            robot_colors: RobotColors::default(),
         }
     }
 }
@@ -360,7 +483,12 @@ fn is_jar(path: &Path) -> bool {
 /// `ROBOCODES_ROBOT_JARS`: extra robot jars and class folders (a path list), as for
 /// `robocode-s battle`.
 pub fn env_jars() -> Vec<PathBuf> {
-    std::env::var_os("ROBOCODES_ROBOT_JARS")
+    env_paths("ROBOCODES_ROBOT_JARS")
+}
+
+/// The paths in environment variable `name` (a path list); none when it isn't set.
+pub fn env_paths(name: &str) -> Vec<PathBuf> {
+    std::env::var_os(name)
         .map(|v| {
             std::env::split_paths(&v)
                 .filter(|p| !p.as_os_str().is_empty())
@@ -451,11 +579,13 @@ mod tests {
                 hide_enemy_names: true,
                 sentry_border: 150,
             },
+            start_paused: true,
             robots: vec!["sample.Fire".into(), "sample.Fire".into()],
             watch: "server:7654".into(),
             watch_fingerprint: format!("sha256:{}", ["0F"; 32].join(":")),
             graphs_battle: true,
             frame_rate: 60,
+            background: false,
             rumble: RumbleSettings {
                 server: "https://dev.example".into(),
                 parallel: Some(3),
@@ -463,9 +593,66 @@ mod tests {
                 unsandboxed_consent: true,
             },
             check_updates: false,
+            robot_colors: {
+                let mut c = RobotColors::default();
+                c.set(
+                    "sample.Fire",
+                    [[255, 153, 0], [255, 153, 0], [255, 255, 255]],
+                );
+                c
+            },
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(Settings::parse(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn robot_colors_are_one_line_each_by_robot_and_version() {
+        let mut c = RobotColors::default();
+        let fire = [[255, 153, 0], [255, 153, 0], [255, 255, 255]];
+        let druss = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+        assert!(c.set("sample.Fire (2)", fire));
+        assert!(!c.set("sample.Fire", fire));
+        assert!(c.set("jk.mega.DrussGT 3.1.16", druss));
+        let s = Settings {
+            robot_colors: c.clone(),
+            ..Settings::default()
+        };
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(
+            text.contains(r##""sample.Fire":"#ff9900 #ff9900 #ffffff""##),
+            "{text}"
+        );
+        assert_eq!(Settings::parse(&text).unwrap().robot_colors, c);
+        assert_eq!(c.get("sample.Fire (3)"), Some(fire));
+        assert_eq!(c.get("jk.mega.DrussGT 3.1.16"), Some(druss));
+        // Another version: the colours of the one seen.
+        assert_eq!(c.get("jk.mega.DrussGT 3.2"), Some(druss));
+        assert_eq!(c.get("jk.mega.Druss"), None);
+        assert_eq!(c.get("sample.Walls"), None);
+        let mut forgotten = c.clone();
+        assert!(forgotten.forget("sample.Fire (1)"));
+        assert!(!forgotten.forget("sample.Fire"));
+        assert_eq!(forgotten.get("sample.Fire"), None);
+        // A bad entry is dropped, the rest kept.
+        let s = Settings::parse(
+            r##"{"robot_colors": {"a.B": "#zzzzzz #000000 #000000", "c.D": "#010203 #040506 #070809", "e.F": "#000000"}}"##,
+        )
+        .unwrap();
+        assert_eq!(s.robot_colors.get("c.D"), Some(druss));
+        assert_eq!(s.robot_colors.get("a.B"), None);
+        assert_eq!(s.robot_colors.get("e.F"), None);
+        // None seen: not in the file.
+        let text = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(!text.contains("robot_colors"), "{text}");
+    }
+
+    #[test]
+    fn a_duplicates_suffix_is_left_out_of_the_colors_key() {
+        assert_eq!(colors_key("sample.Fire (12)"), "sample.Fire");
+        assert_eq!(colors_key("a.B 1.0 (2)"), "a.B 1.0");
+        assert_eq!(colors_key("a.B (beta)"), "a.B (beta)");
+        assert_eq!(colors_key("a.B ()"), "a.B ()");
     }
 
     #[test]

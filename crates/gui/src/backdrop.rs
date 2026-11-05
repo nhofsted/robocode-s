@@ -232,8 +232,9 @@ impl Backdrop {
     }
 
     /// Fills `rect` with the backdrop. The tanks move however narrow the margins beside the
-    /// page: they still show there, and below a short page.
-    pub fn show(&mut self, ui: &egui::Ui, sprites: &mut Sprites, rect: Rect) {
+    /// page: they still show there, and below a short page. Unless `animate` (the option
+    /// Background), they stand still, and no frames are drawn for them.
+    pub fn show(&mut self, ui: &egui::Ui, sprites: &mut Sprites, rect: Rect, animate: bool) {
         let ctx = ui.ctx().clone();
         let painter = ui.painter_at(rect);
         floor(&painter, sprites, rect);
@@ -254,14 +255,19 @@ impl Backdrop {
                 self.step(1.0, 1.0);
             }
         }
-        let now = ctx.input(|i| i.time);
-        let real = self
-            .last
-            .map_or(1.0, |t| ((now - t) * 60.0) as f32)
-            .min(3.0);
-        self.step(real * PACE, real);
-        crate::pace::next_frame(&ctx);
-        self.last = Some(now);
+        if animate {
+            let now = ctx.input(|i| i.time);
+            let real = self
+                .last
+                .map_or(1.0, |t| ((now - t) * 60.0) as f32)
+                .min(3.0);
+            self.step(real * PACE, real);
+            crate::pace::next_frame(&ctx);
+            self.last = Some(now);
+        } else {
+            // Turned on again, it goes on from where it stood.
+            self.last = None;
+        }
         self.draw(&ctx, &painter, sprites, rect.min.to_vec2());
     }
 
