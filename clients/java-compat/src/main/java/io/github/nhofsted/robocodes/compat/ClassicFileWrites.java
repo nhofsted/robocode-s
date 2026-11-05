@@ -34,9 +34,10 @@ public class ClassicFileWrites extends ThreadManager {
      * Puts this in classic's container, before anything asks for the thread manager (one
      * instance serves the host manager and {@code RobocodeFileOutputStream} alike). Classic's
      * container finds its modules on the class path that {@code HiddenAccess.init} sets, which
-     * {@code RobocodeEngine} calls again later (it does nothing the second time).
+     * {@code RobocodeEngine} calls again later (it does nothing the second time). The robot
+     * host and the difftest oracle both call it, so that classic plays alike in both.
      */
-    static void install() {
+    public static void install() {
         HiddenAccess.init();
         Container.cache.removeComponent(IThreadManager.class);
         Container.cache.addComponent(IThreadManager.class, ClassicFileWrites.class);

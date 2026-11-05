@@ -4,7 +4,7 @@ Differential testing against classic Robocode (design §13).
 
 ## Oracle
 
-`Oracle` runs a battle in classic Robocode 1.11.2 (the official jars from Maven Central) and records every turn as JSON Lines. These recordings are the reference that the robocode-s engine is compared against.
+`Oracle` runs a battle in classic Robocode 1.11.2 (the official jars from Maven Central), configured as the robot host configures it (`NOSECURITY=true` and `ClassicFileWrites`, ADR 0027), and records every turn as JSON Lines. These recordings are the reference that the robocode-s engine is compared against.
 
 ```sh
 ./gradlew :tools:difftest:run --args="--robots sample.Fire,sample.Walls --seed 42 --rounds 10 --out /tmp/fire-walls-42.jsonl.gz"
