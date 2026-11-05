@@ -69,10 +69,11 @@ If a robot in the lists changes anyway (refused, or punished for threads), the c
 Rumble battle hashes (`crates/rumble-client/examples/battle-hashes.rs`, the hash verification compares; seeded, deterministic, 10 rounds each), the 1.11.1 robot host against the 1.11.2 one:
 
 - **Threaded robots** (TNT, Fermat, Toad, Rapture, FlamingForest against sample.Crazy, and a 7-robot melee of them): identical, with the 1.11.2 jars alone and with the shipped host.
-- **batch-13** (60 corpus duels): identical with the 1.11.2 jars alone.
-- **final-5** (30 corpus duels, 6 melees): with the 1.11.2 jars alone, 34 identical; the two melees with cf.RiO.RiOx (31, 34) differ, from its punished file writes (they reproduce on 1.11.1: three runs, one hash). With the shipped host (`ClassicFileWrites` and the punishment fix): both melees identical to 1.11.1, and so far the first 6 battles of the plan (the full re-run was stopped: the machine ran low on memory).
+- **final-5** (30 corpus duels, 6 melees): with the 1.11.2 jars alone, 34 identical; the two melees with cf.RiO.RiOx (31, 34) differ, from its punished file writes (they reproduce on 1.11.1: three runs, one hash). With the shipped host (`ClassicFileWrites` and the punishment fix): all 36 identical.
+- **batch-13** (60 corpus duels): all identical, with the 1.11.2 jars alone and with the shipped host.
 - **testbots.Pool** (a pool of 2 threads a round, never shut down): punished in round 3 for its sixth thread; with the jars alone the robot host then hung until the hard limit and three runs gave three outcomes; with the fix, the same outcome every run (`a_robot_with_too_many_threads_is_punished_reproducibly`).
+- **Live difftest** of final-5's and the samples' classic 1.11.1 recordings (49): the shipped host gives the 1.11.1 host's verdicts, turn for turn: 44 `OK`, and the same 5 `FAIL`s at the same turns (21-duel, 30, 33, 34 and 35-melee: recordings older than rules 3, ADR 0026).
 
-Still to run: final-5 and batch-13 completely with the shipped host; the live difftest of final-5's and the samples' classic recordings with it (the 1.11.1 host's verdicts are in: 39 of 45 `OK`, the 6 others older recordings that predate rules 3); more of the corpus before item 3.
+Still to run before item 3: the rest of the corpus.
 
 Not covered by this change: the difftest oracle (classic's own battle side) runs 1.11.2 with its file check, so new classic recordings of robots like RiOx disable them; they need the oracle to keep 1.11.1's file writes as well.
