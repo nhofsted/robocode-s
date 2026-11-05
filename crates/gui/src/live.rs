@@ -7,8 +7,9 @@
 use crate::graphs::History;
 use crate::input::Interaction;
 use crate::screen::{self, DebugProperties};
+use crate::settings::TankColors;
 use crate::sound::{self, Cue};
-use crate::view::Camera;
+use crate::view::{self, Camera};
 use eframe::egui;
 use robocode_s_protocol::v1::{self, server_message};
 use robocode_s_runner::JavaHost;
@@ -70,7 +71,15 @@ pub struct Live {
     pub camera: Camera,
     /// The sound effects of the turns that arrived, until played (see `sound`).
     pub cues: Vec<Cue>,
+    /// The robots' tank colours as the battle got going, until taken into the options
+    /// (see [`Live::take_colors`]).
+    colors: Option<Vec<SeenColors>>,
+    colors_seen: bool,
 }
+
+/// A robot's (or team's) tank colours as seen in a battle: `None` when it set none of
+/// its own.
+pub type SeenColors = (String, Option<TankColors>);
 
 impl Live {
     pub fn start(ctx: &egui::Context, host: JavaHost, battle: LocalBattle) -> Self {
@@ -179,6 +188,8 @@ impl Live {
             interaction: Interaction::default(),
             camera: Camera::default(),
             cues: Vec::new(),
+            colors: None,
+            colors_seen: false,
         }
     }
 
@@ -207,6 +218,11 @@ impl Live {
                     }
                     for (properties, r) in self.properties.iter_mut().zip(&s.robots) {
                         screen::apply_debug_properties(properties, &r.debug_properties);
+                    }
+                    // After the round start: a robot colours its tank as its `run` begins.
+                    if !self.colors_seen && s.turn >= 1 {
+                        self.colors_seen = true;
+                        self.colors = Some(seen_colors(&self.robots, &s));
                     }
                     self.history.push(&s);
                     if self.cues.len() < CUES_LIMIT {
@@ -290,6 +306,12 @@ impl Live {
         }
     }
 
+    /// The robots' tank colours, once, when the battle has got going: for the loading
+    /// screen of the next battle with them.
+    pub fn take_colors(&mut self) -> Option<Vec<SeenColors>> {
+        self.colors.take()
+    }
+
     pub fn set_paint(&mut self, robot: usize, enabled: bool) {
         self.paint[robot] = enabled;
         self.control(v1::observer_control::Control::Paint(v1::PaintToggle {
@@ -297,6 +319,23 @@ impl Live {
             enabled,
         }));
     }
+}
+
+/// Each robot's tank colours in `snapshot` (`None`: it set none), by its name, and its
+/// team's by the team's name (its first member's, as the results show a team).
+fn seen_colors(robots: &[v1::RobotStatics], snapshot: &v1::TurnSnapshot) -> Vec<SeenColors> {
+    let mut seen: Vec<SeenColors> = Vec::new();
+    for (statics, robot) in robots.iter().zip(&snapshot.robots) {
+        let set = view::tank_parts_set(&robot.colors.unwrap_or_default());
+        let colors = set.contains(&true).then(|| view::colors(statics, robot).0);
+        if let Some(team) = &statics.team_name
+            && !seen.iter().any(|(name, _)| name == team)
+        {
+            seen.push((team.clone(), colors));
+        }
+        seen.push((statics.name.clone(), colors));
+    }
+    seen
 }
 
 /// A battle that is closed (a new one, or a cancelled start) stops, and its robots with it.

@@ -11,7 +11,7 @@ use crate::replay::{Opening, ReplayView, Request};
 use crate::rerun;
 use crate::rumble::Rumble;
 use crate::screen;
-use crate::settings::{Contents, Rules, Settings};
+use crate::settings::{Contents, RobotColors, Rules, Settings};
 use crate::shell::{self, Tab};
 use crate::sound::{self, Sound};
 use crate::sprites::{Part, Sprites};
@@ -45,6 +45,8 @@ pub struct Setup {
     pub classic: bool,
     pub record: String,
     pub paint: bool,
+    /// Start paused, at the first turn.
+    pub paused: bool,
     pub turns_per_second: u32,
     pub rules: Rules,
     /// A battle to watch (Watch Battle, Remote Server): the server's address (`host:port`),
@@ -66,6 +68,7 @@ impl Setup {
             classic: settings.classic,
             record: String::new(),
             paint: false,
+            paused: settings.start_paused,
             turns_per_second: 30,
             rules: settings.rules,
             watch: settings.watch.clone(),
@@ -191,6 +194,8 @@ struct Starting {
     classic: bool,
     turns_per_second: u32,
     paint: bool,
+    /// It starts paused.
+    paused: bool,
     /// Why the battle couldn't start.
     error: Option<String>,
     /// A battle on another server, watched: its address. The contestants and settings
@@ -234,6 +239,11 @@ impl Battle {
                     live.camera = camera;
                     live.seed = starting.seed;
                     live.set_speed(starting.turns_per_second);
+                    // Before its first turn is fought: the server pauses after it, so the
+                    // battle screen opens on the battlefield as it starts.
+                    if starting.paused {
+                        live.set_paused(true);
+                    }
                     if starting.paint {
                         for i in 0..live.robots.len() {
                             live.set_paint(i, true);
@@ -468,6 +478,7 @@ impl App {
         // theme (white text fields, and the title on the dark top bar near invisible),
         // and the app's colours (the top bar, the floor) are made for the dark one.
         cc.egui_ctx.set_theme(egui::Theme::Dark);
+        crate::fonts::install(&cc.egui_ctx);
         if own_frame {
             crate::window::hide_system_border(cc, shell::BAR);
         } else {
@@ -938,6 +949,7 @@ impl App {
             classic: s.classic,
             turns_per_second: s.turns_per_second,
             paint: s.paint,
+            paused: s.paused,
             error: None,
             watching: None,
             sandbox: Some(self.env.sandbox.report()),
@@ -990,6 +1002,7 @@ impl App {
             classic: false,
             turns_per_second: self.setup.turns_per_second,
             paint: false,
+            paused: false,
             error: None,
             watching: Some(address),
             sandbox: None,
@@ -1102,7 +1115,7 @@ impl App {
         shell::page(
             root,
             self,
-            |app| (&mut app.backdrop, &mut app.sprites),
+            |app| (&mut app.backdrop, &mut app.sprites, app.settings.background),
             content,
         );
     }
@@ -1207,7 +1220,8 @@ impl App {
                 },
             );
             ui.add_space(8.0);
-            contestants_row(ui, &mut app.sprites, &starting.contestants, time);
+            let known = &app.settings.robot_colors;
+            contestants_row(ui, &mut app.sprites, &starting.contestants, known, time);
             ui.add_space(12.0);
             let (w, h) = starting.size;
             let mode = if starting.classic {
@@ -1886,6 +1900,13 @@ impl App {
                          draws a frame per turn, so at most as many as its turns a second.",
                     );
                     ui.end_row();
+                    ui.label("Background");
+                    ui.checkbox(&mut s.background, "Tanks wandering behind the pages")
+                        .on_hover_text(
+                            "Off, they stand still, and the app draws nothing while nothing \
+                             else moves.",
+                        );
+                    ui.end_row();
                     ui.label("Sound");
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut s.sound, "Gunshots, hits and explosions")
@@ -1922,6 +1943,7 @@ impl App {
                         ui.radio_value(&mut s.classic, true, "Classic timing");
                     });
                     ui.end_row();
+                    start_paused_row(ui, &mut s.start_paused);
                     ui.label("Rounds");
                     ui.add(egui::DragValue::new(&mut s.rounds).range(1..=10_000));
                     ui.end_row();
@@ -1997,6 +2019,9 @@ impl App {
         }
         if s.rules != before.rules {
             setup.rules = s.rules;
+        }
+        if s.start_paused != before.start_paused {
+            setup.paused = s.start_paused;
         }
         if s.robot_folders != before.robot_folders {
             self.rescan(ctx);
@@ -2330,6 +2355,7 @@ fn rules_and_output_rows(ui: &mut egui::Ui, s: &mut Setup, browse: &mut Option<B
     ui.label("Debug paint");
     ui.checkbox(&mut s.paint, "On for every robot");
     ui.end_row();
+    start_paused_row(ui, &mut s.paused);
     ui.label("Record to");
     ui.horizontal(|ui| {
         ui.add(
@@ -2344,8 +2370,14 @@ fn rules_and_output_rows(ui: &mut egui::Ui, s: &mut Setup, browse: &mut Option<B
     ui.end_row();
 }
 
-/// A section heading on a page: a title over a line, with space above unless it comes
-/// first.
+/// The row for starting battles paused (the setup's, and the options' default for it).
+fn start_paused_row(ui: &mut egui::Ui, paused: &mut bool) {
+    ui.label("Start paused");
+    ui.checkbox(paused, "Wait at the first turn")
+        .on_hover_text("The battle opens paused: Resume, or One turn at a time.");
+    ui.end_row();
+}
+
 /// The folder button after a file or folder field; true when clicked.
 fn browse_button(ui: &mut egui::Ui, hint: &str) -> bool {
     icons::button(ui, 22.0, hint, false, |p, c, color| {
@@ -2429,6 +2461,8 @@ fn rules_rows(ui: &mut egui::Ui, rules: &mut Rules) {
     ui.end_row();
 }
 
+/// A section heading on a page: a title over a line, with space above unless it comes
+/// first.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     if ui.cursor().top() > ui.max_rect().top() {
         ui.add_space(20.0);
@@ -2584,9 +2618,16 @@ fn robot_row(
 }
 
 /// The contestants on the loading screen: their tanks with their names, the radars turning
-/// while they start. The tanks are in the colours a robot gets when it sets none; its own
-/// are only known once the battle runs.
-fn contestants_row(ui: &mut egui::Ui, sprites: &mut Sprites, names: &[String], time: f32) {
+/// while they start. The tanks are in the colours a robot had in the last battle seen with
+/// it (`known`), else in those it gets when it sets none: its own are only known once the
+/// battle runs.
+fn contestants_row(
+    ui: &mut egui::Ui,
+    sprites: &mut Sprites,
+    names: &[String],
+    known: &RobotColors,
+    time: f32,
+) {
     const CELL: egui::Vec2 = egui::vec2(132.0, 92.0);
     let per_row = ((ui.available_width() / CELL.x).floor() as usize).max(1);
     let rows = names.len().div_ceil(per_row).max(1);
@@ -2604,9 +2645,12 @@ fn contestants_row(ui: &mut egui::Ui, sprites: &mut Sprites, names: &[String], t
                 CELL,
             );
             let center = egui::pos2(cell.center().x, cell.top() + 32.0);
-            // Default colours come from the class name, without version or duplicate suffix.
-            let class = name.split(' ').next().unwrap_or(name);
-            let colors = crate::sprites::default_colors(class);
+            // Default colours come from the class name, without version or duplicate suffix,
+            // or the `*` of a robot from a class folder.
+            let class = name.split(' ').next().unwrap_or(name).trim_end_matches('*');
+            let colors = known
+                .get(name)
+                .unwrap_or_else(|| crate::sprites::default_colors(class));
             let radar = time * 2.0 + i as f32 * 0.7;
             for (part, color, heading) in [
                 (Part::Body, colors[0], 0.0),
@@ -2727,6 +2771,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.remember_colors(ctx);
         self.poll_opening();
         if self.full_on_open && self.opening.is_none() {
             self.full_on_open = false;
@@ -2864,6 +2909,27 @@ impl App {
         }
     }
 
+    /// Takes the tank colours of the robots in the battles into the options, for the
+    /// loading screen of their next battle.
+    fn remember_colors(&mut self, ctx: &egui::Context) {
+        let mut changed = false;
+        for battle in [&mut self.local, &mut self.remote] {
+            let Some(seen) = battle.live.as_mut().and_then(|live| live.take_colors()) else {
+                continue;
+            };
+            let known = &mut self.settings.robot_colors;
+            for (name, colors) in seen {
+                changed |= match colors {
+                    Some(colors) => known.set(&name, colors),
+                    None => known.forget(&name),
+                };
+            }
+        }
+        if changed {
+            self.settings_unsaved = Some(ctx.input(|i| i.time));
+        }
+    }
+
     /// Saves the options once they have been still for a moment and nothing is being
     /// dragged; takes the graphs' Round/Battle choice and the robots in the battle into
     /// them first.
@@ -2988,6 +3054,8 @@ impl App {
                 shot.ended += 1;
                 shot.ended >= 30
             }
+            // Started paused (`--paused`): it stays at its first turn, so frames count.
+            Some((None, Some(live))) if live.paused => shot.frames >= shot.after,
             Some((None, Some(live))) => live
                 .latest
                 .as_ref()

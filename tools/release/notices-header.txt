@@ -65,6 +65,10 @@ its black background made transparent), Copyright (c) 2001-2025 Mathew A. Nelson
 and Robocode contributors. Originally under the Eclipse Public License 1.0;
 distributed here under the Eclipse Public License 2.0, as for the sample robots.
 
+The GUI's emoji font is Noto Emoji 3.002 (its Regular weight, cut from the
+variable font), Copyright 2013 Google LLC. SIL Open Font License 1.1 (text
+below). https://github.com/googlefonts/emoji-bw
+
 
 4. Java runtime (not included)
 ------------------------------

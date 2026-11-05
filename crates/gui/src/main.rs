@@ -11,6 +11,7 @@ mod backdrop;
 #[cfg(windows)]
 mod console;
 mod files;
+mod fonts;
 mod graphs;
 mod icons;
 mod ide;
@@ -40,7 +41,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: robocode-s-gui [recording] [--full]
-       robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint]
+       robocode-s-gui --battle ROBOTS [--rounds N] [--seed N] [--tps N] [--paint] [--paused]
        robocode-s-gui --watch HOST:PORT [--token TOKEN] [--fingerprint F] [--tps N]
 
 Without arguments: the battle setup. With a recording (from --record or
@@ -85,6 +86,9 @@ stderr.
                      otherwise after --after frames (default 120)
   --loading          with --screenshot and --battle or a replay: shoot the loading
                      screen after --after frames instead
+  --paused           with --battle: start it paused at its first turn, as the option
+                     Start paused does (with --screenshot the option is left aside;
+                     --after counts frames then)
   --from-ide         open the \"From your IDE...\" panel at start (for screenshots)
   --ide-add          add the robots started by an IDE to the battle as they connect
                      (for screenshots and testing)
@@ -158,6 +162,7 @@ fn main() -> ExitCode {
         setup.watch_token = token;
     }
     let mut loading = false;
+    let mut paused = None;
     let mut full = false;
     let mut tab = None;
     let mut browse = None;
@@ -185,6 +190,7 @@ fn main() -> ExitCode {
             "--seed" => setup.seed = value(),
             "--tps" => setup.turns_per_second = value().parse().unwrap_or(30),
             "--paint" => setup.paint = true,
+            "--paused" => paused = Some(true),
             "--record" => setup.record = value(),
             "--screenshot" => shot = Some(PathBuf::from(value())),
             "--after" => after = value().parse().unwrap_or(after),
@@ -267,6 +273,12 @@ fn main() -> ExitCode {
             }
             path => replay = Some(PathBuf::from(path)),
         }
+    }
+    // A screenshot's battle runs to its turn whatever the option Start paused says.
+    match paused {
+        Some(p) => setup.paused = p,
+        None if shot.is_some() => setup.paused = false,
+        None => {}
     }
     // The log file (`rumble_client::log`), except for a screenshot's short run. Without a
     // terminal, the Windows build's stderr goes there too: an abort's last words.
