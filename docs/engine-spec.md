@@ -1,6 +1,6 @@
 # robocode-s — Engine Specification
 
-Status: **Draft** · Reference: classic Robocode **1.11.1** (tag `v1.11.1`) · Last updated: 2026-10-10
+Status: **Draft** · Reference: classic Robocode **1.11.2** (written from tag `v1.11.1`, whose battle rules 1.11.2 keeps) · Last updated: 2026-11-05
 
 This document specifies the battle engine precisely enough to reimplement it bit-exactly (ADR 0003). It was written from the classic sources. Source references use the form `File.java:line` and point to 1.11.1:
 - `Battle`, `BaseBattle`: `robocode.battle/src/main/java/net/sf/robocode/battle/`

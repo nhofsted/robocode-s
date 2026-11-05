@@ -303,6 +303,7 @@ public final class RobotHost {
             }
         }
         System.setProperty("NOSECURITY", "true");
+        ClassicFileWrites.install();
         copyJars(jars, home);
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
         List<RobotSpecification> specs = new ArrayList<>();
@@ -442,6 +443,7 @@ public final class RobotHost {
         // share types. Classic's package and thread checks are off; robocode-s isolates
         // robots by process and container instead (design §6).
         System.setProperty("NOSECURITY", "true");
+        ClassicFileWrites.install();
         copyJars(jars, home);
         return play(in, out, token, robot, jars, home, seed, null, null, null, null);
     }
@@ -453,6 +455,7 @@ public final class RobotHost {
      */
     static int runWarm(InputStream in, OutputStream out, String token, Path home) throws Exception {
         System.setProperty("NOSECURITY", "true");
+        ClassicFileWrites.install();
         // Classic's settings and engine (container, modules, repository) are independent of
         // the robot. Its repository reads the robots directory when asked for the robot
         // (not before: jars that arrive while it starts up are not found).
@@ -554,6 +557,7 @@ public final class RobotHost {
 
     static int describe(List<String> robots, List<Path> jars, Path home) throws Exception {
         System.setProperty("NOSECURITY", "true");
+        ClassicFileWrites.install();
         Map<String, Path> copies = copyJars(jars, home);
         RobocodeEngine engine = new RobocodeEngine(home.toFile());
         if (robots.isEmpty()) {

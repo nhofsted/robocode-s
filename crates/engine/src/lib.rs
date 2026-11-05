@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EPL-2.0
 
-//! Deterministic Robocode battle engine, bit-exact with classic Robocode 1.11.1
+//! Deterministic Robocode battle engine, bit-exact with classic Robocode 1.11.2 (the rules of 1.11.1)
 //! (docs/engine-spec.md, ADR 0003).
 //!
 //! A pure simulation with no I/O, threads or clocks. Robots' decisions come in as

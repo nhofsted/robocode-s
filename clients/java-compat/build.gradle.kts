@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
 // The robocode-s robot host for classic Java robots (design §8). It runs classic
-// Robocode's own robot side (robocode.api/core/host/repository 1.11.1: proxies, event
+// Robocode's own robot side (robocode.api/core/host/repository 1.11.2: proxies, event
 // manager, blocking calls, custom events, data files) and replaces only the peer that
 // talks to the engine with one that speaks the robocode-s protocol.
 //
@@ -25,6 +25,8 @@ dependencies {
     runtimeOnly(libs.robocode.classic.battle)
     // Classic ships the Kotlin runtime for robots written in Kotlin.
     runtimeOnly(libs.kotlin.stdlib.classic)
+    // Classic's container (ClassicFileWrites registers in it); classic's own POMs bring it at run time.
+    compileOnly(libs.picocontainer.classic)
     implementation(libs.protobuf.java)
     implementation(project(":clients:java-determinism"))
 

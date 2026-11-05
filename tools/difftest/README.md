@@ -4,7 +4,7 @@ Differential testing against classic Robocode (design §13).
 
 ## Oracle
 
-`Oracle` runs a battle in classic Robocode 1.11.1 (the official jars from Maven Central) and records every turn as JSON Lines. These recordings are the reference that the robocode-s engine is compared against.
+`Oracle` runs a battle in classic Robocode 1.11.2 (the official jars from Maven Central) and records every turn as JSON Lines. These recordings are the reference that the robocode-s engine is compared against.
 
 ```sh
 ./gradlew :tools:difftest:run --args="--robots sample.Fire,sample.Walls --seed 42 --rounds 10 --out /tmp/fire-walls-42.jsonl.gz"
@@ -31,7 +31,7 @@ Same seed and robots give a **byte-identical** recording. This is verified by `O
 3. **`RANDOMSEED`:** seeds classic's own randomness (start positions, robot order each turn).
 4. **The determinism agent (`clients/java-determinism`):** classic cannot seed robots' own `Math.random()` on modern JVMs, and never seeded `new Random()`. The agent gives each robot its own stream, derived from the battle seed and the robot's name (ADR 0009). robocode-s runners use the same derivation, so robots draw the same numbers in both systems.
 
-5. **Classic patches (`ClassicPatches`):** `Utils.getRandom()` returns the robot's own generator on robot threads, as in robocode-s (ADR 0010). And a timing fix: `RobotPeer.startRound` in classic 1.11.1 has a lost-wakeup race. If a robot falls asleep before the battle thread starts waiting for it, the battle waits for the full timeout: 10 minutes with `-Ddebug=true`. The difftest jar is also loaded as an agent that makes this one wait conditional, as classic's `waitSleeping` already does. This changes timing only, never results.
+5. **Classic patches (`ClassicPatches`):** `Utils.getRandom()` returns the robot's own generator on robot threads, as in robocode-s (ADR 0010). And a timing fix: `RobotPeer.startRound` in classic 1.11.1 and 1.11.2 has a lost-wakeup race. If a robot falls asleep before the battle thread starts waiting for it, the battle waits for the full timeout: 10 minutes with `-Ddebug=true`. The difftest jar is also loaded as an agent that makes this one wait conditional, as classic's `waitSleeping` already does. This changes timing only, never results.
 
 The oracle checks 1, 2, 4 and 5 at startup and refuses to run without them. The Gradle `run` task sets everything up.
 
