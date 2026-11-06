@@ -15,33 +15,33 @@ const file = (suffix: string, size: number, label: string): Asset => ({
 });
 
 export const WINDOWS = {
-	setup: file('windows-x86_64-setup.exe', 19_981_136, 'Installer (.exe)'),
-	zip: file('windows-x86_64.zip', 26_931_540, 'Archive (.zip)')
+	setup: file('windows-x86_64-setup.exe', 20_605_124, 'Installer (.exe)'),
+	zip: file('windows-x86_64.zip', 27_672_343, 'Archive (.zip)')
 };
 
 export const LINUX = {
 	x86_64: [
-		file('linux-x86_64.deb', 13_525_352, '.deb'),
-		file('linux-x86_64.rpm', 14_967_424, '.rpm'),
-		file('linux-x86_64.tar.gz', 19_592_876, '.tar.gz')
+		file('linux-x86_64.deb', 14_116_624, '.deb'),
+		file('linux-x86_64.rpm', 15_562_888, '.rpm'),
+		file('linux-x86_64.tar.gz', 20_273_416, '.tar.gz')
 	],
 	aarch64: [
-		file('linux-aarch64.deb', 12_701_216, '.deb'),
-		file('linux-aarch64.rpm', 13_663_808, '.rpm'),
-		file('linux-aarch64.tar.gz', 18_794_908, '.tar.gz')
+		file('linux-aarch64.deb', 13_282_792, '.deb'),
+		file('linux-aarch64.rpm', 14_532_960, '.rpm'),
+		file('linux-aarch64.tar.gz', 19_468_005, '.tar.gz')
 	]
 };
 
 export const MACOS = {
 	aarch64: [
-		file('macos-aarch64.dmg', 19_801_888, 'Disk image (.dmg)'),
-		file('macos-aarch64.app.zip', 18_473_254, 'App (.app.zip)'),
-		file('macos-aarch64.tar.gz', 18_400_828, 'Archive (.tar.gz)')
+		file('macos-aarch64.dmg', 20_482_944, 'Disk image (.dmg)'),
+		file('macos-aarch64.app.zip', 19_157_722, 'App (.app.zip)'),
+		file('macos-aarch64.tar.gz', 19_088_122, 'Archive (.tar.gz)')
 	],
 	x86_64: [
-		file('macos-x86_64.dmg', 20_542_272, 'Disk image (.dmg)'),
-		file('macos-x86_64.app.zip', 19_129_602, 'App (.app.zip)'),
-		file('macos-x86_64.tar.gz', 19_052_036, 'Archive (.tar.gz)')
+		file('macos-x86_64.dmg', 21_950_449, 'Disk image (.dmg)'),
+		file('macos-x86_64.app.zip', 19_807_688, 'App (.app.zip)'),
+		file('macos-x86_64.tar.gz', 19_726_785, 'Archive (.tar.gz)')
 	]
 };
 
