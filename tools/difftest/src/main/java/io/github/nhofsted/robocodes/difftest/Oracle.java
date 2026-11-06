@@ -18,6 +18,7 @@ import robocode.control.snapshot.IBulletSnapshot;
 import robocode.control.snapshot.IRobotSnapshot;
 import robocode.control.snapshot.IScoreSnapshot;
 import robocode.control.snapshot.ITurnSnapshot;
+import io.github.nhofsted.robocodes.compat.ClassicFileWrites;
 import io.github.nhofsted.robocodes.determinism.RobotRandomness;
 
 import java.io.BufferedWriter;
@@ -114,6 +115,11 @@ public final class Oracle {
             }
             // Read by classic's BattleManager when the battle starts.
             System.setProperty("RANDOMSEED", Long.toString(options.seed));
+
+            // Classic as the robot host runs it (design §8, ADR 0027): without its security,
+            // whose class checks (from 1.11.2) rewrite robot code, and with 1.11.1's file writes.
+            System.setProperty("NOSECURITY", "true");
+            ClassicFileWrites.install();
 
             try (Writer out = open(options.out)) {
                 Recorder recorder = new Recorder(out, options);

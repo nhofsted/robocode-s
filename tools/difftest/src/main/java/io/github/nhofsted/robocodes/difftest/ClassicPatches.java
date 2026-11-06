@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
- * Java agent with timing-only fixes for classic Robocode 1.11.1, for use by the oracle.
+ * Java agent with timing-only fixes for classic Robocode 1.11.2, for use by the oracle.
  *
  * <p>{@code RobotPeer.startRound} starts the robot's thread and then waits for the
  * robot to report that it is asleep, without first checking whether it already

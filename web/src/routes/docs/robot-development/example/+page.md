@@ -84,7 +84,7 @@ robot.classname=jd.MyRobot
 robot.version=${project.version}
 robot.author.name=Jane Doe
 robot.description=Seesaws back and forth, spins its gun and fires at what it sees
-robocode.version=1.11.1
+robocode.version=1.11.2
 ```
 
 The version comes from the build file, so there is one place to change it for a release. With Gradle, write `robot.version=${version}` instead. More on these fields in [Packaging and release](/docs/robot-development/release).
@@ -117,7 +117,7 @@ The version comes from the build file, so there is one place to change it for a 
     <dependency>
       <groupId>net.sf.robocode</groupId>
       <artifactId>robocode.api</artifactId>
-      <version>1.11.1</version>
+      <version>1.11.2</version>
       <scope>provided</scope>
     </dependency>
   </dependencies>
@@ -165,7 +165,7 @@ repositories { mavenCentral() }
 
 dependencies {
     // Provided by Robocode when the robot runs: never bundled into the jar.
-    compileOnly("net.sf.robocode:robocode.api:1.11.1")
+    compileOnly("net.sf.robocode:robocode.api:1.11.2")
 }
 
 tasks.withType<JavaCompile> { options.release = 21 }
@@ -287,7 +287,7 @@ plugins {
 }
 
 dependencies {
-    compileOnly("net.sf.robocode:robocode.api:1.11.1")
+    compileOnly("net.sf.robocode:robocode.api:1.11.2")
     // A library: bundled into the robot jar by shadowJar.
     implementation("org.apache.commons:commons-lang3:3.17.0")
 }

@@ -2,7 +2,7 @@
 
 A reimplementation of [Robocode](https://robocode.sourceforge.io/) with a Rust battle engine, a GPU-accelerated battlefield viewer, and a client/server architecture where robots run out of process: locally, in containers, or on remote hosts.
 
-- **Bit-exact compatibility** with classic Java robots (`robocode.*` API, reference version 1.11.1)
+- **Bit-exact compatibility** with classic Java robots (`robocode.*` API, reference version 1.11.2)
 - **Robots in any language**: Java/Kotlin, Python, C#/.NET, Rust, C/C++
 - **Sandboxed robots**: a built-in sandbox on Linux and Windows, or bubblewrap, Docker or Podman; robots can also run on remote runner agents
 - Runs on **Windows, Linux and macOS**

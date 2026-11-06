@@ -60,6 +60,13 @@ final class RemotePeer implements IRobotPeer {
     private boolean winner;
     private boolean finished;
     private boolean drained;
+    /**
+     * Classic's robot side punished the robot (a thread too many, a refused class): classic
+     * kills it, so its next {@code execute} throws {@link DeathException}.
+     */
+    private volatile boolean disabled;
+    /** The round's {@code ROUND_OVER} was taken from the inbox. */
+    private boolean roundOver;
     private long cpuAtReturn = -1;
     /**
      * The final {@code Execute} of a robot that died or was halted, sent from
@@ -105,6 +112,8 @@ final class RemotePeer implements IRobotPeer {
         winner = false;
         finished = false;
         drained = false;
+        disabled = false;
+        roundOver = false;
         cpuAtReturn = -1;
         finalExecute = null;
         finalCommands = null;
@@ -122,6 +131,11 @@ final class RemotePeer implements IRobotPeer {
 
     @Override
     public ExecResults executeImpl(ExecCommands commands) {
+        if (disabled) {
+            // Its Execute with disable went out already; it waits for the round's end.
+            finished = true;
+            throw new DeathException();
+        }
         Execute.Builder execute = finished ? null : Execute.newBuilder()
                 .setTurn(lastTurn)
                 .setCommands(Convert.commands(commands, colors))
@@ -148,6 +162,7 @@ final class RemotePeer implements IRobotPeer {
         Object next = take();
         if (next == ROUND_OVER) {
             finished = true;
+            roundOver = true;
             throw new AbortedException();
         }
         Tick tick = (Tick) next;
@@ -219,10 +234,10 @@ final class RemotePeer implements IRobotPeer {
             // a final Execute. One without commands changes nothing.
             send(Execute.newBuilder().setTurn(lastTurn).setCpuNanos(cpuSinceReturn()));
         }
-        Object next;
-        do {
-            next = take();
-        } while (next != ROUND_OVER);
+        // Not again if an execute took it already: the main thread waits for this thread.
+        while (!roundOver) {
+            roundOver = take() == ROUND_OVER;
+        }
         finished = true;
         return new ExecResults(commands, null, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), true, false,
                 false);
@@ -237,6 +252,7 @@ final class RemotePeer implements IRobotPeer {
     @Override
     public void punishBadBehavior(BadBehavior badBehavior) {
         System.err.println("robot disabled: " + badBehavior);
+        disabled = true;
         if (!finished) {
             finished = true;
             send(Execute.newBuilder().setTurn(lastTurn).setDisable(true).setStopped(true));

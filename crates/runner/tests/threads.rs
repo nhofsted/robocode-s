@@ -51,3 +51,43 @@ fn robots_that_start_threads_are_reported() {
         [false, false, false, false, false, true]
     );
 }
+
+/// Classic 1.11.2's robot side punishes a robot with more than 5 threads besides its run
+/// thread (`RobotThreadManager.checkThreadCount`, every turn). testbots.Pool makes a pool of
+/// two threads each round and never shuts it down, so it has 6 in round 3. The punished robot
+/// must end its round as classic's does (its next `execute` throws `DeathException`), not
+/// hang until the hard limit, and the battle must come out the same every time.
+#[test]
+#[ignore = "needs Java and the built robots"]
+fn a_robot_with_too_many_threads_is_punished_reproducibly() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut env = Environment::from_env();
+    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
+        if path.is_relative() {
+            *path = root.join(&*path);
+        }
+    }
+    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    env.jars
+        .push(root.join("robots/testbots/build/libs/testbots-0.1.0-SNAPSHOT.jar"));
+    let config = ServerConfig {
+        rules: BattleRules {
+            num_rounds: 4,
+            ..Default::default()
+        },
+        seed: 11,
+        deterministic: true,
+        hard_limit: std::time::Duration::from_secs(20),
+        ..Default::default()
+    };
+    let robots = ["testbots.Pool".to_string(), "sample.Crazy".to_string()];
+    let fight = || {
+        let (host, battle) = prepare(&env, &robots, config.clone(), 256).unwrap();
+        run_local_battle(&host, &battle, None, |_| {})
+            .unwrap()
+            .outcome
+    };
+    let first = fight();
+    assert_eq!(first.hard_limits, [false, false]);
+    assert_eq!(fight(), first);
+}

@@ -11,23 +11,23 @@ Breakpoints and stepping work too: your IDE's own debugger starts the robot, and
 
 ## 1. Get the API
 
-Your robot compiles against `robocode.api` 1.11.1, the classic API. You need it at compile time only; robocode-s provides it at run time.
+Your robot compiles against `robocode.api` 1.11.2, the classic API. You need it at compile time only; robocode-s provides it at run time.
 
-- **From Maven Central:** `net.sf.robocode:robocode.api:1.11.1` (Gradle and Maven snippets below).
+- **From Maven Central:** `net.sf.robocode:robocode.api:1.11.2` (Gradle and Maven snippets below).
 - **From your robocode-s installation**, if you build without Gradle or Maven: add this jar to your project as a library.
 
   | Installed with | The jar |
   |---|---|
-  | Windows installer | `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host\robocode.api-1.11.1.jar` |
-  | `.deb` or `.rpm` | `/usr/lib/robocode-s/lib/robot-host/robocode.api-1.11.1.jar` |
-  | macOS app | `/Applications/robocode-s.app/Contents/Resources/lib/robot-host/robocode.api-1.11.1.jar` |
-  | An unpacked archive | `lib/robot-host/robocode.api-1.11.1.jar` in the folder you unpacked |
+  | Windows installer | `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host\robocode.api-1.11.2.jar` |
+  | `.deb` or `.rpm` | `/usr/lib/robocode-s/lib/robot-host/robocode.api-1.11.2.jar` |
+  | macOS app | `/Applications/robocode-s.app/Contents/Resources/lib/robot-host/robocode.api-1.11.2.jar` |
+  | An unpacked archive | `lib/robot-host/robocode.api-1.11.2.jar` in the folder you unpacked |
 
   On Windows, `AppData` is a hidden folder: paste `%LOCALAPPDATA%\Programs\robocode-s\lib\robot-host` into Explorer's address bar (or the IDE's file dialog) to get there. `%LOCALAPPDATA%` is `C:\Users\<you>\AppData\Local`. In a macOS file dialog, Cmd+Shift+G takes a path; Finder shows the app's contents with right-click, Show Package Contents.
 
 **Java level:** compile with `--release 21`. robocode-s runs robots on a Temurin 21 JRE, so 21 is what your robot runs on: you get every language feature and library method (records, `var`, text blocks, `Math.clamp`), and a JDK 21 gives no warnings. Don't go above 21: the runtime can't load newer class files.
 
-The one reason for a lower level is a robot that must also run in classic Robocode or in classic RoboRumble clients: classic 1.11.1 runs on Java 8, so compile such a robot with `--release 8` (`<maven.compiler.release>8</maven.compiler.release>` in Maven, `options.release = 8` in Gradle). The compiler then holds you to Java 8: `records are not supported in -source 8` (records need 16), `cannot find symbol` on a newer method such as `Math.clamp` (21). A JDK 21 also warns that 8 is obsolete; it works. Libraries count too: a library built for a newer level raises your robot's.
+The one reason for a lower level is a robot that must also run in classic Robocode or in classic RoboRumble clients: classic 1.11.2 runs on Java 8, so compile such a robot with `--release 8` (`<maven.compiler.release>8</maven.compiler.release>` in Maven, `options.release = 8` in Gradle). The compiler then holds you to Java 8: `records are not supported in -source 8` (records need 16), `cannot find symbol` on a newer method such as `Math.clamp` (21). A JDK 21 also warns that 8 is obsolete; it works. Libraries count too: a library built for a newer level raises your robot's.
 
 ## 2. Build setup
 
@@ -40,7 +40,7 @@ repositories { mavenCentral() }
 
 dependencies {
     // Provided at run time; never bundle it into your robot.
-    compileOnly("net.sf.robocode:robocode.api:1.11.1")
+    compileOnly("net.sf.robocode:robocode.api:1.11.2")
 }
 
 tasks.withType<JavaCompile> { options.release = 21 }   // classes go to build/classes/java/main
@@ -56,7 +56,7 @@ Maven (`pom.xml`):
   <dependency>
     <groupId>net.sf.robocode</groupId>
     <artifactId>robocode.api</artifactId>
-    <version>1.11.1</version>
+    <version>1.11.2</version>
     <scope>provided</scope>
   </dependency>
 </dependencies>
@@ -83,19 +83,19 @@ Recompile in the IDE and the next battle is new code. A battle already running k
 
    **Added the build file afterwards?** IDEA only reads `pom.xml` or `build.gradle.kts` in a project it created with that build system. In a plain Java project, `src/main/java` is just a folder, and nothing compiles against `robocode.api`. Right-click `pom.xml`, *Add as Maven Project* (Gradle: right-click `build.gradle.kts`, *Link Gradle Project*). You know it worked when `src/main/java` turns blue, `src/main/resources` purple, and *External Libraries* lists `robocode.api`.
 2. Write `src/main/java/jd/MyRobot.java` extending `AdvancedRobot`.
-3. Build with Ctrl+F9 (Build Project) or `./gradlew classes`. The output is `build/classes/java/main` (Gradle) or `target/classes` (Maven). Without a build tool: File, Project Structure, add `robocode.api-1.11.1.jar` as a library, and the output is `out/production/<module>`.
+3. Build with Ctrl+F9 (Build Project) or `./gradlew classes`. The output is `build/classes/java/main` (Gradle) or `target/classes` (Maven). Without a build tool: File, Project Structure, add `robocode.api-1.11.2.jar` as a library, and the output is `out/production/<module>`.
 4. Add a Run configuration of type Shell Script, or an External Tool (Settings, Tools, External Tools), running `robocode-s battle jd.MyRobot*,sample.Walls --jar $ProjectFileDir$/build/classes/java/main`, so one key builds and fights.
 
 ## Eclipse
 
 1. File, New, Java Project (or Gradle/Maven project with the snippets above). Set the compiler compliance to 21: Project, Properties, Java Compiler.
-2. Project, Properties, Java Build Path, Libraries, Add External JARs: `robocode.api-1.11.1.jar` (skip this with Gradle or Maven).
+2. Project, Properties, Java Build Path, Libraries, Add External JARs: `robocode.api-1.11.2.jar` (skip this with Gradle or Maven).
 3. Eclipse builds on save into `bin` (plain projects) or `build/classes/java/main` / `target/classes` (Gradle, Maven). Point robocode-s at that folder.
 4. Optional: Run, External Tools Configurations, a Program running `robocode-s` with `battle jd.MyRobot*,sample.Walls --jar ${project_loc}/bin`.
 
 ## VS Code
 
-1. Install the *Extension Pack for Java* (Red Hat's Java support). Open a Gradle or Maven folder with the snippets above, or a plain folder: `Java: Create Java Project`, then add `robocode.api-1.11.1.jar` under Java Projects, Referenced Libraries.
+1. Install the *Extension Pack for Java* (Red Hat's Java support). Open a Gradle or Maven folder with the snippets above, or a plain folder: `Java: Create Java Project`, then add `robocode.api-1.11.2.jar` under Java Projects, Referenced Libraries.
 2. Use JDK 21 for the project and set the compiler level in the Gradle or Maven file as above; the extension follows the build file.
 3. The output goes to `bin` (plain), `build/classes/java/main` (Gradle) or `target/classes` (Maven).
 4. A task in `.vscode/tasks.json` runs the fight:

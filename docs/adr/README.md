@@ -28,3 +28,4 @@
 | [0024](0024-robots-that-start-threads-are-reported.md) | Robots that start threads of their own are reported |
 | [0025](0025-deterministic-robot-threads.md) | Deterministic threads for robots: one virtual CPU per robot |
 | [0026](0026-work-prices-per-kind.md) | Work prices per kind of instruction and JDK call |
+| [0027](0027-robot-code-cannot-reach-the-robot-host.md) | Robot code can't reach the robot host: classic 1.11.2's class checks, and the agent's hooks out of reach |

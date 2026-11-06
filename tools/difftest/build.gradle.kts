@@ -27,6 +27,9 @@ dependencies {
     // Classic ships the Kotlin runtime for robots written in Kotlin.
     runtimeOnly(libs.kotlin.stdlib.classic)
     implementation(project(":clients:java-determinism"))
+    // Classic configured as the robot host configures it (ClassicFileWrites, ADR 0027).
+    implementation(project(":clients:java-compat"))
+    implementation(libs.robocode.classic.host)
     implementation(libs.asm)
     sampleRobots(project(":robots:samples"))
     determinismAgent(project(":clients:java-determinism"))
