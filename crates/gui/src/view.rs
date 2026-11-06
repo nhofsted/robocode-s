@@ -743,6 +743,22 @@ fn bullet(
     }
 }
 
+/// A robot's filled shape, as a fan (robots fill simple, convex shapes) without egui's
+/// anti-aliasing. That fades each edge over a pixel on both sides of it, so translucent
+/// shapes that share an edge, as a heat map's cells do, both paint the pixels along it:
+/// a lighter grid shows through. Without it the shapes tile exactly, as in classic, whose
+/// robot painting isn't anti-aliased by default either.
+fn fill_unfeathered(points: &[Pos2], color: Color32) -> Shape {
+    let mut mesh = Mesh::default();
+    for &p in points {
+        mesh.colored_vertex(p, color);
+    }
+    for i in 1..points.len() as u32 - 1 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    Shape::mesh(mesh)
+}
+
 /// A robot's debug paint (`PaintOp`s, battlefield coordinates).
 fn paint(painter: &egui::Painter, t: Transform, ops: &[v1::PaintOp], _robot: usize) {
     use v1::paint_op::Op;
@@ -776,8 +792,7 @@ fn paint(painter: &egui::Painter, t: Transform, ops: &[v1::PaintOp], _robot: usi
             Some(Op::Fill(shape)) => {
                 for (points, _) in outline(t, shape) {
                     if points.len() >= 3 {
-                        // Fill as a fan; robots fill simple (convex) shapes.
-                        painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+                        painter.add(fill_unfeathered(&points, color));
                     }
                 }
             }
