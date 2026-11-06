@@ -490,6 +490,7 @@ fn output_text(ui: &mut egui::Ui, robot: usize, text: &str) {
             if text.is_empty() {
                 ui.label(RichText::new("No output yet.").weak().italics());
             } else {
+                crate::fonts::cover(ui, egui::Id::new(("output", robot)), text);
                 ui.add(egui::Label::new(RichText::new(text).monospace()).wrap());
             }
         });
@@ -511,6 +512,9 @@ fn debug_properties(ui: &mut egui::Ui, robot: usize, properties: &DebugPropertie
             // Keys in a column of their own (truncated), values wrapped beside them.
             let keys = (ui.available_width() * 0.45).min(170.0);
             for (key, value) in properties {
+                let id = egui::Id::new(("property", robot, key));
+                crate::fonts::cover(ui, id.with(0), key);
+                crate::fonts::cover(ui, id.with(1), value);
                 ui.horizontal_top(|ui| {
                     let layout = egui::Layout::left_to_right(egui::Align::Min);
                     ui.allocate_ui_with_layout(vec2(keys, 0.0), layout, |ui| {

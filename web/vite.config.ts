@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
 import type { Connect, Plugin } from 'vite';
-import { mdsvex } from 'mdsvex';
+import { code_highlighter, mdsvex } from 'mdsvex';
 import rehypeSlug from 'rehype-slug';
 import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-static';
@@ -153,6 +153,25 @@ function rumbleApiMock(): Plugin {
 	};
 }
 
+/**
+ * mdsvex's Prism highlighter, with Prism's Kotlin grammar repaired: its string literals aren't
+ * greedy, so a string holding a slash-star (a Gradle glob such as "META-INF/versions/**") lost to
+ * the greedy comment token, and the rest of the code block rendered as one comment. mdsvex loads
+ * languages into the global Prism, so the grammar is patched once the first Kotlin block loads it.
+ */
+type Grammar = Record<string, unknown>;
+let kotlinRepaired = false;
+const highlighter: typeof code_highlighter = async (code, lang, ...rest) => {
+	if (!kotlinRepaired && ['kotlin', 'kt', 'kts'].includes(lang?.toLowerCase() ?? '')) {
+		await code_highlighter('', 'kotlin', undefined);
+		const prism = (globalThis as { Prism?: { languages: Record<string, Grammar> } }).Prism;
+		const literals = prism?.languages.kotlin?.['string-literal'];
+		if (Array.isArray(literals)) for (const literal of literals as Grammar[]) literal.greedy = true;
+		kotlinRepaired = true;
+	}
+	return code_highlighter(code, lang, ...rest);
+};
+
 export default defineConfig({
 	plugins: [
 		rumbleFixtures(),
@@ -174,6 +193,7 @@ export default defineConfig({
 					extensions: ['.md'],
 					layout: fileURLToPath(new URL('./src/lib/docs/DocPage.svelte', import.meta.url)),
 					layoutPropForwarding: 'runes',
+					highlight: { highlighter },
 					rehypePlugins: [rehypeSlug]
 				})
 			],

@@ -116,13 +116,16 @@ def main():
         f.write(open(os.path.join(HERE, "notices-header.txt"), encoding="utf-8").read())
         f.write(f"{len(crates)} crates, with the license each declares:\n\n")
         f.write("\n".join(lines))
-        f.write("\n\n\n6. License texts: Java libraries and classic Robocode\n")
-        f.write("-----------------------------------------------------\n\n")
+        f.write("\n\n\n6. License texts: Java libraries, classic Robocode and the emoji font\n")
+        f.write("---------------------------------------------------------------------\n\n")
         for title, name in (("Eclipse Public License 1.0", "EPL-1.0.txt"),
                             ("BSD 3-Clause License (protobuf-java, asm, picocontainer: the copyright "
                              "lines above)", "BSD-3-Clause.txt"),
                             ("Apache License 2.0 (kotlin-stdlib, annotations)", "Apache-2.0.txt")):
             f.write(f"{rule}\n{title}\n{rule}\n\n{licenses(name)}\n\n")
+        font = open(os.path.join(ROOT, "crates", "gui", "assets", "fonts", "OFL.txt"),
+                    encoding="utf-8").read().strip()
+        f.write(f"{rule}\nSIL Open Font License 1.1 (Noto Emoji)\n{rule}\n\n{font}\n\n")
         f.write("\n7. License texts: Rust libraries\n")
         f.write("--------------------------------\n\n")
         f.write("The license files the crates ship, each distinct text once, with the crates\n"

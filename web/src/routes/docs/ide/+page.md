@@ -121,36 +121,74 @@ The IDE starts the robot itself (its Debug button), so breakpoints, stepping and
 - the main class `io.github.nhofsted.robocodes.compat.RobotHost`, with every jar of your installation's `lib/robot-host` folder (the folder of the jar in [the table above](#1-get-the-api)) added to your project as a library;
 - the program argument `--ide`.
 
-How that looks in your IDE:
+`robocode-s ide-config` prints all of it with your installation's paths, ready to paste (the GUI's *From your IDE…* button, above the battle list, shows the same with Copy buttons). It adds `--server` or `--data` to the program arguments only if you changed the port (7878 on 127.0.0.1; `--ide-port` and the options change it) or the data folder.
 
-- **IntelliJ IDEA.**
-  1. File, Project Structure (Ctrl+Alt+Shift+S), *Libraries*, **+**, *Java*. Paste the `lib/robot-host` folder into the file dialog's address bar (on Windows `AppData` is hidden, so browsing to it fails; see [the table above](#1-get-the-api)), select all the jars in it and confirm.
-  2. IDEA asks which module gets the library: pick yours. If it didn't ask, or the library isn't listed under *External Libraries* afterwards, go to *Modules*, select your module, *Dependencies*, **+**, *Library…*, choose the one you just made and *Add Selected*. (The library exists in the project, but only a module's dependencies reach its classpath.)
-  3. Run, Edit Configurations, **+**, *Application*. Main class `io.github.nhofsted.robocodes.compat.RobotHost`, program arguments `--ide`, and your module in the classpath box (`-cp`), so your build output is on the classpath.
-  4. Build (Ctrl+F9), start robocode-s, and press the *Debug* button for this configuration.
-- **Eclipse.** Run, Debug Configurations, *Java Application*, New. Choose your project, the main class above, and `--ide` under *Arguments*. Under *Classpath*, *User Entries*, *Add External JARs…*: the jars of `lib/robot-host`.
-- **VS Code.** `robocode-s ide-config` prints a `launch.json` entry to paste into `.vscode/launch.json`; run it from *Run and Debug*.
+The robot host finds your robots itself in your project's output (the class folders on its classpath), so there is nothing to change when you add or rename a robot. The robot proves it's yours with a token that robocode-s keeps in its data folder, readable by you only, so no other user on the machine can take the slot. The robot host reads it there; you never copy it.
 
-That's all. The robot host finds your robots itself in your project's output (the class folders on its classpath), so there is nothing to change when you add or rename a robot. `robocode-s ide-config` prints the same, with ready-to-paste lines for IntelliJ IDEA, Eclipse and VS Code (the GUI's *From your IDE…* button, above the battle list, shows it with Copy buttons). It adds `--server` or `--data` only if you changed the port (7878 on 127.0.0.1; `--ide-port` and the options change it) or the data folder.
+How to set it up in each IDE:
 
-The robot proves it's yours with a token that robocode-s keeps in its data folder, readable by you only, so no other user on the machine can take the slot. The robot host reads it there; you never copy it.
+### Debugging in IntelliJ IDEA
 
-**Then, each time:**
+1. File, Project Structure (Ctrl+Alt+Shift+S), *Libraries*, **+**, *Java*. Paste the `lib/robot-host` folder into the file dialog's address bar (on Windows `AppData` is hidden, so browsing to it fails; see [the table above](#1-get-the-api)), select all the jars in it and confirm.
+2. IDEA asks which module gets the library: pick yours. If it didn't ask, or the library isn't listed under *External Libraries* afterwards, go to *Modules*, select your module, *Dependencies*, **+**, *Library…*, choose the one you just made and *Add Selected*. (The library exists in the project, but only a module's dependencies reach its classpath.)
+3. Run, Edit Configurations, **+**, *Application*. Main class `io.github.nhofsted.robocodes.compat.RobotHost`, program arguments `--ide`, and your module in the classpath box (`-cp`), so your build output is on the classpath.
+4. Build (Ctrl+F9), start robocode-s, and press the *Debug* button for this configuration.
+
+### Debugging in Eclipse
+
+1. Run, *Debug Configurations…*. Select *Java Application* in the list on the left and press *New launch configuration* (the leftmost button above the list). Give it a name, such as `robocode-s robot`.
+2. *Main* tab: *Project*, your robot's project. *Main class*: type `io.github.nhofsted.robocodes.compat.RobotHost` (*Search…* doesn't find it until the jars are added in step 4; typing it is enough).
+3. *Arguments* tab: *Program arguments* `--ide`.
+4. *Dependencies* tab: select *Classpath Entries* (in older Eclipse, and for projects below Java 9: the *Classpath* tab, *User Entries*), then *Add External JARs…*. Go to the `lib/robot-host` folder (paste its path into the dialog's file name box; on Windows `AppData` is hidden, see [the table above](#1-get-the-api)), select all the jars in it and *Open*. Your project stays in the list, which puts its output (`bin`, or `target/classes` and `build/classes/java/main` with Maven and Gradle) on the classpath.
+5. *Apply*. Make sure the project is built (Eclipse builds on save unless *Project*, *Build Automatically* is off), start robocode-s, and press *Debug*.
+
+Next time, the configuration is in the menu of the toolbar's Debug button (the bug).
+
+### Debugging in VS Code
+
+1. The *Extension Pack for Java* includes the *Debugger for Java*, which this needs.
+2. Open *Run and Debug* (Ctrl+Shift+D). Without a `.vscode/launch.json` yet, click *create a launch.json file* and choose *Java*; VS Code makes one with a `"configurations"` list.
+3. Add the configuration that `robocode-s ide-config` prints to that list. With the `.deb` or `.rpm` it is:
+
+   ```json
+   {
+     "version": "0.2.0",
+     "configurations": [
+       {
+         "type": "java",
+         "request": "launch",
+         "name": "robocode-s robot",
+         "mainClass": "io.github.nhofsted.robocodes.compat.RobotHost",
+         "classPaths": ["$Auto", "/usr/lib/robocode-s/lib/robot-host/*"],
+         "args": ["--ide"]
+       }
+     ]
+   }
+   ```
+
+   `$Auto` is your project's own classpath, with its build output; the second entry is every jar of the robot host. On Windows the path is `C:\\Users\\<you>\\AppData\\Local\\Programs\\robocode-s\\lib\\robot-host\\*` (JSON doubles the backslashes); copy it from `ide-config`, which prints your own. If the folder holds more than one Java project, add `"projectName": "<your project>"`.
+4. Start robocode-s, pick *robocode-s robot* in the list at the top of *Run and Debug*, and press F5. VS Code builds the project first.
+
+### Each time
 
 1. Start the battle. In the GUI, leave robocode-s open: it listens while it runs. On the command line, `robocode-s battle sample.Walls,@ide` (one `@ide` for each robot from the IDE; they come after the others in the battle) waits: *waiting for 1 robot from your IDE on 127.0.0.1:7878*.
 2. Start the configuration with the IDE's Debug button. Your robots show in *From your IDE* at the top of the available robots, with a notice (up to 16; `--robot jd.MyRobot` in the program arguments offers only that one). *Add to battle*, then Start Battle. On the command line the first one is taken.
 3. Hit a breakpoint. The whole battle pauses with the robot: the others wait for it, however long you look. When you let it go, the battle goes on.
 4. When the battle ends the robot's JVM ends with it. Start it again from the IDE for the next battle.
 
-**What differs from a normal battle.** A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`jd.MyRobot*`), and a second copy gets `(2)`. A few details:
+### What differs from a normal battle
+
+A robot you start from the IDE is never timed: no connect timeout, no turn deadline in classic mode, no hard limit in deterministic mode and no skipped turns by its work, and no limit for stopping it at the end of a round. Such a battle is a *debug battle*: the results, the recording and the replay say so, and it isn't comparable with a real one. The robot is named like any other (`jd.MyRobot*`), and a second copy gets `(2)`. A few details:
 
 - A robot from the IDE runs in the IDE's JVM, outside the sandbox, with its own home in robocode-s's data folder (`ide-home`; `--home` changes it): its data files are kept there, not with the other robots'.
 - Teams need several JVMs, so they can't start from the IDE yet; the robot host leaves team robots out.
 - Your robots come from class folders. A robot in a jar works with `--jar robot.jar`, but then the VM options also need `--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED` (the robot host says so).
-- For seeded random numbers (the same battle again with `--seed N`), add `-javaagent:<the determinism agent>` to the VM options and `--seed N` to the program arguments; `ide-config` prints the path. Without it the robot's `Math.random()` isn't seeded.
+- For seeded random numbers (the same battle again with `--seed N`), add `-javaagent:<the determinism agent>` to the VM options and `--seed N` to the program arguments; `ide-config` prints the path. The VM options are under *Modify options*, *Add VM options* in IntelliJ IDEA, in the *Arguments* tab's *VM arguments* in Eclipse, and `"vmArgs"` in VS Code's `launch.json`. Without it the robot's `Math.random()` isn't seeded.
 - A deterministic battle (the default) needs the robot host of the same robocode-s version: use the jars `ide-config` names. `--classic` has no such limit.
 
-**If it doesn't work.** What the robot host or the IDE says, and what to check:
+### If it doesn't work
+
+What the robot host or the IDE says, and what to check:
 
 | You see | Check |
 |---|---|
