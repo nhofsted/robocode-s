@@ -9,9 +9,7 @@
 //! - `cleanup` (daily): recordings, slot items and jars of dead versions, ban removals
 //!   ([`cleanup`]);
 //! - `sync` (daily): the unclaimed imported bots follow the RoboWiki participants lists
-//!   ([`sync`]);
-//! - `restore` (one-off, by hand, with `from`): the retired versions get back the pairings an
-//!   older planner dropped ([`restore`]).
+//!   ([`sync`]).
 //!
 //! Reserved concurrency 1 makes it the only writer of the state files. Like the `api`, it
 //! runs on a blocking thread and drives the SDK with [`crate::block_on`].
@@ -21,7 +19,6 @@ pub mod cleanup;
 pub mod plan;
 pub mod publish;
 pub mod recordings;
-pub mod restore;
 pub mod slot_pairs;
 pub mod sync;
 
@@ -50,17 +47,12 @@ pub enum Mode {
     Publish,
     Cleanup,
     Sync,
-    Restore,
 }
 
-/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup" | "sync"}`, or
-/// `{"mode": "restore", "from": YYYYMMDDHH}`.
+/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup" | "sync"}`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Event {
     pub mode: Mode,
-    /// `restore`: the first hour of the log to fold.
-    #[serde(default)]
-    pub from: Option<u32>,
 }
 
 pub struct Services {
@@ -146,7 +138,7 @@ impl Batch {
     /// Runs one mode and returns its report (logged and returned as the invocation's
     /// result).
     pub fn run(&self, mode: Mode) -> Result<Value, String> {
-        self.run_event(&Event { mode, from: None })
+        self.run_event(&Event { mode })
     }
 
     /// Runs the event's mode (see [`run`](Batch::run)).
@@ -157,9 +149,6 @@ impl Batch {
             Mode::Publish => publish::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Cleanup => cleanup::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Sync => sync::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
-            Mode::Restore => {
-                restore::run(self, &config, event.from).map(|r| serde_json::to_value(r).unwrap())
-            }
         }
     }
 }

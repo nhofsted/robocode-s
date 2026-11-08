@@ -50,7 +50,7 @@ Melee (`/data/v1/rec/melee/<id>.json`):
 
 A round is `[file, round, seed, size, order]`: `file` starts with `w` where this bot won the round, `l` where it didn't; `order[k]` is the index into `bots` of the track's robot `k`. Track URL: `/rec/e<engine>/melee/<id>_<sha16>/<file>.track` (this bot's id and `sha16`). `bots` lists the robots of those rounds, in first-use order (a field member may be a retired version; `sha16` is the first 16 hex digits of its jar's SHA-256, as in `BotVersion.sha256`).
 
-The index contains only filled slots recorded with their robot order (slots filled before M6 are reopened and refill) and only versions that are current for both bots (1v1) or for the bot (melee).
+The index contains only filled slots recorded with their robot order and only versions that are current for both bots (1v1) or for the bot (melee).
 
 ### Downloaded tracks
 

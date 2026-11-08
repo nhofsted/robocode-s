@@ -244,6 +244,7 @@ impl RumbleId {
     }
 
     /// The rumbles of a division that a bot of this codesize is a member of.
+    #[cfg(test)]
     pub fn memberships(division: Division, codesize: u32, limits: &WeightLimits) -> Vec<RumbleId> {
         RumbleId::of_division(division)
             .into_iter()

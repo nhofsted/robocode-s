@@ -14,10 +14,10 @@
 
 use crate::cleanup::recording_group;
 use crate::data::{BotColors, SCHEMA_VERSION};
-use crate::ids::{Division, parse_vid36};
+use crate::ids::Division;
 use crate::publish::DATA_PREFIX;
 use crate::slots::{Group, SlotId, recording_key};
-use crate::store::{BotItem, BotState, SlotEntry, SlotItem, SlotStatus, VersionItem};
+use crate::store::{BotItem, BotState, SlotItem, SlotStatus, VersionItem};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -108,16 +108,7 @@ pub fn listing(
 
 /// The group of a cache key.
 pub fn group_from_key(division: Division, key: &str) -> Option<Group> {
-    match division {
-        Division::OneVsOne => {
-            let (lo, hi) = key.split_once('#')?;
-            Some(Group::Pair {
-                lo: parse_vid36(lo).ok()?,
-                hi: parse_vid36(hi).ok()?,
-            })
-        }
-        Division::Melee => Some(Group::Version(parse_vid36(key).ok()?)),
-    }
+    crate::slots::parse_key(division, key).ok()
 }
 
 impl Cache {
@@ -166,21 +157,6 @@ pub fn read_group(
         .collect();
     slots.sort_by(|a, b| a.0.cmp(&b.0));
     slots
-}
-
-/// The entries `cleanup` reopens (M6's one-time migration): filled or claimed without a
-/// robot order, whose track therefore can't be shown.
-pub fn legacy_entries(item: &SlotItem) -> Vec<(String, SlotEntry)> {
-    item.entries
-        .iter()
-        .filter(|(_, e)| e.order.is_empty())
-        .map(|(id, e)| (id.clone(), e.clone()))
-        .collect()
-}
-
-/// The recording object's key of a legacy entry.
-pub fn entry_key(engine: u32, id: &str, names: &Versions) -> Option<String> {
-    key_of(engine, &SlotId::parse(id).ok()?, names)
 }
 
 // ---- the files ----
@@ -431,7 +407,7 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::ids::WeightClass;
-    use crate::store::{BotSource, VersionState};
+    use crate::store::{BotSource, SlotEntry, VersionState};
 
     fn version(vid: u32, bot: &str, ver: &str, state: VersionState) -> VersionItem {
         VersionItem {
@@ -671,7 +647,7 @@ mod tests {
         let mut item = SlotItem::default();
         item.entries
             .insert("1v1.1.2.a.0".into(), entry(vec![1, 2], SlotStatus::Filled));
-        // No order (legacy), claimed, and filled but its object isn't there.
+        // No order, claimed, and filled but its object isn't there: not read.
         item.entries
             .insert("1v1.1.2.a.1".into(), entry(vec![], SlotStatus::Filled));
         item.entries
@@ -683,12 +659,6 @@ mod tests {
             read_group(7, group, &item, &listed, &names),
             vec![CachedSlot("a.0".into(), 4, -7, 99, vec![1, 2])]
         );
-        let legacy: Vec<String> = legacy_entries(&item)
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
-        assert_eq!(legacy, vec!["1v1.1.2.a.1"]);
-        assert_eq!(entry_key(7, "1v1.1.2.a.1", &names).unwrap(), key("a.1"));
     }
 
     #[test]

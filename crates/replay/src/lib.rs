@@ -30,17 +30,15 @@ pub const ENERGY_SCALE: i64 = 100;
 /// The first byte of every track. The desktop GUI tells tracks from its gzip recordings by
 /// it, so a future version must not be gzip's first byte, `0x1f`.
 ///
-/// Version 2 adds the engine version (design §4.4) after it, as a LEB128 integer; version 1
-/// tracks decode with engine version 0 (unknown). Version 3 (#116) also codes the bullets of
-/// robots that already died: classic lets a dead robot fire (the engine ports it), and
-/// version 2's encoder, which skipped dead robots' births, then lost every later bullet of
-/// the round. Versions 1 and 2 still decode, as they were coded.
+/// The engine version (design §4.4) follows it, as a LEB128 integer. Version 3 (#116) also
+/// codes the bullets of robots that already died: classic lets a dead robot fire (the engine
+/// ports it), and version 2's encoder, which skipped dead robots' births, then lost every
+/// later bullet of the round. Version 2 still decodes, as it was coded. (Version 1, without
+/// the engine version, was only written before the first release.)
 const VERSION: u8 = 3;
 const _: () = assert!(VERSION != 0x1f);
 /// Without dead robots' bullets.
 const VERSION_2: u8 = 2;
-/// The first version, without an engine version or dead robots' bullets.
-const VERSION_1: u8 = 1;
 /// Classic allows one bullet per robot per turn; this only bounds corrupt input.
 const MAX_BIRTHS: usize = 8;
 
@@ -109,7 +107,7 @@ impl BulletTrack {
 /// unknown robot).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Track {
-    /// Engine version (design §4.4) the battle ran with; 0 = unknown (version 1 tracks).
+    /// Engine version (design §4.4) the battle ran with; 0 = unknown.
     pub engine_version: u32,
     pub width: i64,
     pub height: i64,
@@ -166,9 +164,7 @@ fn encode_as(track: &Track, format: Format) -> (Vec<u8>, Vec<f64>) {
     );
     let costs = enc.costs.clone();
     let mut out = vec![format.version];
-    if format.version != VERSION_1 {
-        write_leb128(&mut out, track.engine_version);
-    }
+    write_leb128(&mut out, track.engine_version);
     out.extend(enc.finish());
     (out, costs)
 }
@@ -286,14 +282,10 @@ pub fn decode(bytes: &[u8]) -> Result<Track, DecodeError> {
 
 fn decode_track(bytes: &[u8]) -> Result<Track, DecodeError> {
     let (version, rest) = match bytes.split_first() {
-        Some((&v, rest)) if v == VERSION || v == VERSION_2 || v == VERSION_1 => (v, rest),
+        Some((&v, rest)) if v == VERSION || v == VERSION_2 => (v, rest),
         _ => return Err(DecodeError("unknown replay version")),
     };
-    let (engine_version, rest) = if version == VERSION_1 {
-        (0, rest)
-    } else {
-        read_leb128(rest)?
-    };
+    let (engine_version, rest) = read_leb128(rest)?;
     let mut dec = Decoder::new(rest);
     let mut track = run(&mut dec, None, Format::of(version))?;
     if dec.overrun() {
@@ -1376,15 +1368,8 @@ mod tests {
     }
 
     #[test]
-    fn version_1_tracks_still_decode_with_engine_version_0() {
-        // Version 1 had no engine version: the coded stream follows the version byte.
-        let mut track = synthetic();
-        track.engine_version = 0;
-        let v2 = encode_as(&track, Format::of(VERSION_2)).0;
-        assert_eq!(v2[1], 0, "engine version 0 is one LEB128 byte");
-        let mut v1 = vec![VERSION_1];
-        v1.extend_from_slice(&v2[2..]);
-        assert_eq!(decode(&v1).unwrap(), track);
+    fn version_1_tracks_are_rejected() {
+        assert!(decode(&[1, 0, 0, 0]).is_err());
     }
 
     #[test]

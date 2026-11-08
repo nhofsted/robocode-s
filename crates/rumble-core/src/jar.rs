@@ -281,6 +281,7 @@ fn validate_inner(
 }
 
 /// The codesize of a jar, nothing else checked (the sum of `validate`'s step 4).
+#[cfg(test)]
 pub fn jar_codesize(bytes: &[u8], config: &Config) -> Result<u32, String> {
     let mut budget = Budget {
         unpacked: 0,

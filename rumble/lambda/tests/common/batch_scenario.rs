@@ -23,7 +23,7 @@ use rumble_core::store::{
 use rumble_lambda::batch::cleanup::CleanupReport;
 use rumble_lambda::batch::plan::{PlanReport, state_key};
 use rumble_lambda::batch::publish::PublishReport;
-use rumble_lambda::batch::{Batch, Event, Mode, Services};
+use rumble_lambda::batch::{Batch, Mode, Services};
 use rumble_lambda::cloudfront::MemCdn;
 use rumble_lambda::fetch::MemFetcher;
 use rumble_lambda::s3::{Bucket, Fetched, IMMUTABLE, JAR_TYPE, Objects, TRACK_TYPE};
@@ -95,15 +95,6 @@ impl World {
     fn publish(&self) -> PublishReport {
         serde_json::from_value(self.batch(u64::MAX).run(Mode::Publish).expect("publish"))
             .expect("publish report")
-    }
-
-    fn restore(&self, from: u32) -> serde_json::Value {
-        self.batch(u64::MAX)
-            .run_event(&Event {
-                mode: Mode::Restore,
-                from: Some(from),
-            })
-            .expect("restore")
     }
 
     fn cleanup(&self, budget_ms: u64) -> CleanupReport {
@@ -621,30 +612,6 @@ pub fn run(world: &World, data_dir: &Path) {
     assert!(world.plan().hours.is_empty(), "nothing left to fold");
     assert_same_pairings(&world.state(), &once);
     assert_same_pairings(&once, &expected_state(&posted.records, &[]));
-
-    // ---- restore: the retired syn.Bot1 1.0's pairings, as an older planner dropped them,
-    // come back from the log. ----
-    let mut dropped = world.state();
-    dropped.drop_versions(&HashSet::from([1]));
-    world
-        .objects
-        .put(
-            Bucket::State,
-            &state_key(1, Division::OneVsOne),
-            &dropped.to_bytes(),
-            "application/octet-stream",
-            None,
-        )
-        .unwrap();
-    assert!(world.state().pairings().all(|((a, b), _)| a != 1 && b != 1));
-    let restored = world.restore(2026102400);
-    assert_eq!(restored["retiredVersions"], 1);
-    assert!(restored["pairings"][0].as_u64().unwrap() > 0);
-    assert_same_pairings(&world.state(), &once);
-    assert_eq!(world.state().versions[&1], once.versions[&1]);
-    // Again: nothing changes.
-    world.restore(2026102400);
-    assert_same_pairings(&world.state(), &once);
 
     // Recordings: of the retired syn.Bot1 1.0, of syn.Bot7 (taken down below), of others.
     let v7 = store.get_version(7).unwrap().unwrap();

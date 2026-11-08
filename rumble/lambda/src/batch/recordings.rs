@@ -284,7 +284,7 @@ mod tests {
         let rig = Rig::new();
         rig.fill(Group::Pair { lo: 1, hi: 2 }, "a.0", vec![1, 2]);
         rig.fill(Group::Pair { lo: 1, hi: 2 }, "b.0", vec![2, 1]);
-        // No order (legacy): not indexed.
+        // No order: not indexed (its tanks can't be named).
         rig.fill(Group::Pair { lo: 1, hi: 3 }, "a.0", vec![]);
         rig.fill(Group::Version(2), "w.0", vec![2, 1, 3]);
 
@@ -314,8 +314,8 @@ mod tests {
         assert!(text.contains(r#"["a-0",2,"77",5,0]"#), "{text}");
         assert!(text.contains(r#""pairs":[{"opp":"b.B""#), "{text}");
 
-        // A second run: nothing is read (the cache), nothing written. Only the legacy
-        // group, which has objects the cache lacks, is read again.
+        // A second run: nothing is read (the cache), nothing written. Only the group
+        // without an order, which has objects the cache lacks, is read again.
         let before: Vec<_> = rig
             .site_keys()
             .iter()
@@ -387,84 +387,5 @@ mod tests {
             IndexFile::OneVsOne(serde_json::from_value(value).unwrap())
         };
         assert_eq!(file.rounds(), 1);
-    }
-
-    #[test]
-    fn cleanup_reopens_slots_without_an_order_once() {
-        use crate::batch::cleanup;
-        use rumble_core::Config;
-        let rig = Rig::new();
-        for v in &rig.versions {
-            rig.store.put_version(v).unwrap();
-        }
-        let pair = Group::Pair { lo: 1, hi: 2 };
-        rig.fill(pair, "a.0", vec![1, 2]);
-        rig.fill(pair, "a.1", vec![]);
-        rig.fill(pair, "b.0", vec![]);
-        rig.fill(Group::Version(3), "l.0", vec![]);
-        // An old claim whose upload never came: in a group with tracks it is reopened too.
-        let config = Config {
-            engine_version: 1,
-            ..Config::default()
-        };
-        rig.store
-            .update_slots(
-                1,
-                Division::OneVsOne,
-                &pair.key(),
-                &[("1v1.1.2.a.2".into(), None)],
-                &[(
-                    "1v1.1.2.a.2".into(),
-                    SlotEntry {
-                        status: SlotStatus::Claimed,
-                        batch: "b".into(),
-                        index: 0,
-                        round: 0,
-                        sha256_b64: "x".into(),
-                        size: 1,
-                        claim_until: 5,
-                        seed: 0,
-                        order: vec![],
-                    },
-                )],
-                false,
-            )
-            .unwrap();
-        let batch = rig.batch(0);
-        rig.clock.store(1_000_000, Ordering::SeqCst);
-        let first = cleanup::run(&batch, &config).unwrap();
-        assert_eq!(first.slots_reopened, 4, "the claim without a track as well");
-        assert_eq!(first.reopened_tracks_deleted, 3);
-        let item = rig
-            .store
-            .get_slots(1, Division::OneVsOne, &pair.key())
-            .unwrap()
-            .unwrap();
-        assert_eq!(item.entries.keys().collect::<Vec<_>>(), ["1v1.1.2.a.0"]);
-        assert!(!item.full);
-        let kept = rig.objects.keys(Bucket::Jars);
-        assert_eq!(kept.len(), 1, "{kept:?}");
-        assert!(kept[0].ends_with("/b-0.track") || kept[0].ends_with("/a-0.track"));
-        // Not done yet: a second pass after the grace period finds nothing and finishes.
-        let state: rumble_core::cleanup::CleanupState = batch
-            .read_json(Bucket::State, &cleanup::cleanup_key(1))
-            .unwrap()
-            .unwrap();
-        assert_eq!(state.rec_order.since, Some(1000));
-        assert!(!state.rec_order.done);
-        rig.clock.store(
-            (1000 + rumble_core::cleanup::ORDER_GRACE) * 1000,
-            Ordering::SeqCst,
-        );
-        let second = cleanup::run(&batch, &config).unwrap();
-        assert_eq!(second.slots_reopened, 0);
-        let state: rumble_core::cleanup::CleanupState = batch
-            .read_json(Bucket::State, &cleanup::cleanup_key(1))
-            .unwrap()
-            .unwrap();
-        assert!(state.rec_order.done);
-        // Done: a late legacy fill is no longer looked for.
-        rig.fill(pair, "b.1", vec![]);
-        assert_eq!(cleanup::run(&batch, &config).unwrap().slots_reopened, 0);
     }
 }

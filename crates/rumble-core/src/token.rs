@@ -118,6 +118,7 @@ impl Keys {
     }
 
     /// The id of the key that signs.
+    #[cfg(test)]
     pub fn signing_kid(&self) -> &str {
         &self.signing().kid
     }

@@ -50,7 +50,6 @@ export const loadVersion = (fetch: Fetch, id: BotId, sha256: string) =>
 		`version data of "${id}"`
 	);
 
-export const loadArchive = (fetch: Fetch) => load<Archive>(fetch, 'archive.json', 'the archive');
 
 /** The recordings index of a bot's current version (types.ts); a 404 error where it has none. */
 export function loadRecordings(fetch: Fetch, division: '1v1', bot: BotId): Promise<Recordings1v1>;

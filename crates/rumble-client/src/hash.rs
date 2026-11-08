@@ -64,6 +64,7 @@ impl RoundHasher {
 }
 
 /// The round hash of a whole round at once.
+#[cfg(test)]
 pub fn round_hash(
     round: u32,
     snapshots: &[v1::TurnSnapshot],
