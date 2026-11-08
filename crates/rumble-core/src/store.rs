@@ -41,6 +41,26 @@ pub const ALERT_TTL: u64 = 90 * DAY;
 pub const SYSTEM_UID: &str = "system";
 
 /// Why a store operation failed.
+/// `as_str` and `parse` of an enum stored as a string attribute.
+macro_rules! stored_enum {
+    ($ty:ident, $what:literal, { $($variant:ident => $text:literal),+ $(,)? }) => {
+        impl $ty {
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $($ty::$variant => $text),+
+                }
+            }
+
+            pub fn parse(text: &str) -> Result<$ty, String> {
+                match text {
+                    $($text => Ok($ty::$variant),)+
+                    _ => Err(format!(concat!("unknown ", $what, " {:?}"), text)),
+                }
+            }
+        }
+    };
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
     /// The write's condition didn't hold; nothing was written.
@@ -89,24 +109,11 @@ pub enum UserState {
     Banned,
 }
 
-impl UserState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            UserState::New => "new",
-            UserState::Quarantined => "quar",
-            UserState::Banned => "ban",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<UserState, String> {
-        match text {
-            "new" => Ok(UserState::New),
-            "quar" => Ok(UserState::Quarantined),
-            "ban" => Ok(UserState::Banned),
-            _ => Err(format!("unknown user state {text:?}")),
-        }
-    }
-}
+stored_enum!(UserState, "user state", {
+    New => "new",
+    Quarantined => "quar",
+    Banned => "ban",
+});
 
 /// The reputation attributes of a user. They change by read-modify-write, guarded by `ver`
 /// (a new attribute, not in §9.2's table): [`Store::set_reputation`] writes them only if
@@ -210,22 +217,10 @@ pub enum TokenKind {
     Session,
 }
 
-impl TokenKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TokenKind::Upload => "upload",
-            TokenKind::Session => "session",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<TokenKind, String> {
-        match text {
-            "upload" => Ok(TokenKind::Upload),
-            "session" => Ok(TokenKind::Session),
-            _ => Err(format!("unknown token kind {text:?}")),
-        }
-    }
-}
+stored_enum!(TokenKind, "token kind", {
+    Upload => "upload",
+    Session => "session",
+});
 
 /// A token or session: the item `T#<hash>`/`T` and its index item `U#<uid>`/`T#<hash12>`
 /// (the same attributes; `id` is the index's 12 hex digits).
@@ -265,26 +260,12 @@ pub enum BotState {
     Delisted,
 }
 
-impl BotState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            BotState::Active => "active",
-            BotState::Retired => "retired",
-            BotState::Removed => "removed",
-            BotState::Delisted => "delisted",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<BotState, String> {
-        match text {
-            "active" => Ok(BotState::Active),
-            "retired" => Ok(BotState::Retired),
-            "removed" => Ok(BotState::Removed),
-            "delisted" => Ok(BotState::Delisted),
-            _ => Err(format!("unknown bot state {text:?}")),
-        }
-    }
-}
+stored_enum!(BotState, "bot state", {
+    Active => "active",
+    Retired => "retired",
+    Removed => "removed",
+    Delisted => "delisted",
+});
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BotSource {
@@ -292,22 +273,10 @@ pub enum BotSource {
     Submit,
 }
 
-impl BotSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            BotSource::Import => "import",
-            BotSource::Submit => "submit",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<BotSource, String> {
-        match text {
-            "import" => Ok(BotSource::Import),
-            "submit" => Ok(BotSource::Submit),
-            _ => Err(format!("unknown bot source {text:?}")),
-        }
-    }
-}
+stored_enum!(BotSource, "bot source", {
+    Import => "import",
+    Submit => "submit",
+});
 
 /// The bot item (`BOT#<id>`, `M`).
 #[derive(Clone, Debug, PartialEq)]
@@ -352,25 +321,16 @@ impl VersionState {
         VersionState::Removed,
         VersionState::Delisted,
     ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            VersionState::Probation => "probation",
-            VersionState::Active => "active",
-            VersionState::Failed => "failed",
-            VersionState::Retired => "retired",
-            VersionState::Removed => "removed",
-            VersionState::Delisted => "delisted",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<VersionState, String> {
-        VersionState::ALL
-            .into_iter()
-            .find(|state| state.as_str() == text)
-            .ok_or_else(|| format!("unknown version state {text:?}"))
-    }
 }
+
+stored_enum!(VersionState, "version state", {
+    Probation => "probation",
+    Active => "active",
+    Failed => "failed",
+    Retired => "retired",
+    Removed => "removed",
+    Delisted => "delisted",
+});
 
 /// The version item (`REG`, `V#<vid36>`).
 #[derive(Clone, Debug, PartialEq)]
@@ -472,24 +432,11 @@ pub enum VerifyKind {
     Recheck,
 }
 
-impl VerifyKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            VerifyKind::Check => "check",
-            VerifyKind::Probation => "probation",
-            VerifyKind::Recheck => "recheck",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<VerifyKind, String> {
-        match text {
-            "check" => Ok(VerifyKind::Check),
-            "probation" => Ok(VerifyKind::Probation),
-            "recheck" => Ok(VerifyKind::Recheck),
-            _ => Err(format!("unknown verification kind {text:?}")),
-        }
-    }
-}
+stored_enum!(VerifyKind, "verification kind", {
+    Check => "check",
+    Probation => "probation",
+    Recheck => "recheck",
+});
 
 /// One run of a verification item.
 #[derive(Clone, Debug, PartialEq)]
@@ -545,22 +492,10 @@ pub enum SlotStatus {
     Filled,
 }
 
-impl SlotStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SlotStatus::Claimed => "c",
-            SlotStatus::Filled => "f",
-        }
-    }
-
-    pub fn parse(text: &str) -> Result<SlotStatus, String> {
-        match text {
-            "c" => Ok(SlotStatus::Claimed),
-            "f" => Ok(SlotStatus::Filled),
-            _ => Err(format!("unknown slot status {text:?}")),
-        }
-    }
-}
+stored_enum!(SlotStatus, "slot status", {
+    Claimed => "c",
+    Filled => "f",
+});
 
 /// One slot in a slot item's map `m`.
 #[derive(Clone, Debug, PartialEq)]
@@ -1409,6 +1344,27 @@ impl Store for MemStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_enums_round_trip_and_reject_the_unknown() {
+        for state in VersionState::ALL {
+            assert_eq!(VersionState::parse(state.as_str()), Ok(state));
+        }
+        for state in [UserState::New, UserState::Quarantined, UserState::Banned] {
+            assert_eq!(UserState::parse(state.as_str()), Ok(state));
+        }
+        assert_eq!(UserState::Quarantined.as_str(), "quar");
+        assert_eq!(SlotStatus::parse("f"), Ok(SlotStatus::Filled));
+        assert_eq!(TokenKind::parse("session"), Ok(TokenKind::Session));
+        assert_eq!(
+            VersionState::parse("gone"),
+            Err("unknown version state \"gone\"".to_string())
+        );
+        assert_eq!(
+            BotSource::parse(""),
+            Err("unknown bot source \"\"".to_string())
+        );
+    }
 
     #[test]
     fn times() {
