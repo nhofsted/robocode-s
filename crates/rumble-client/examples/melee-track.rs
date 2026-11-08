@@ -71,6 +71,7 @@ fn main() {
             hide_enemy_names: false,
         },
         bots: ROBOTS.iter().map(|b| bot(b)).collect(),
+        twice: false,
     };
     let outcome = runner.run(&battle, &vec![samples; ROBOTS.len()]);
     assert_eq!(

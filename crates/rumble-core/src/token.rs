@@ -189,8 +189,10 @@ pub fn verify_state<T: DeserializeOwned>(
     serde_json::from_value(value).map_err(|e| TokenError::BadFormat(e.to_string()))
 }
 
-/// One battle of a batch: `[division, kind, seed, rounds, [vid...], ref?]`. `ref` is the
-/// verification item's sort key for `verify` and `probation` battles.
+/// One battle of a batch: `[division, kind, seed, rounds, [vid...], ref?, twice?]`. `ref` is
+/// the verification item's sort key for `verify` and `probation` battles (`null` when absent
+/// and `twice` follows); `twice` is `true` for a stage 2 verification the client runs twice
+/// (§11.3), absent when false.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "Vec<Value>", into = "Vec<Value>")]
 pub struct BatchBattle {
@@ -200,6 +202,7 @@ pub struct BatchBattle {
     pub rounds: u32,
     pub vids: Vec<u32>,
     pub item: Option<String>,
+    pub twice: bool,
 }
 
 impl From<BatchBattle> for Vec<Value> {
@@ -211,8 +214,13 @@ impl From<BatchBattle> for Vec<Value> {
             Value::from(battle.rounds),
             Value::from(battle.vids),
         ];
-        if let Some(item) = battle.item {
-            array.push(Value::String(item));
+        match battle.item {
+            Some(item) => array.push(Value::String(item)),
+            None if battle.twice => array.push(Value::Null),
+            None => {}
+        }
+        if battle.twice {
+            array.push(Value::Bool(true));
         }
         array
     }
@@ -222,9 +230,9 @@ impl TryFrom<Vec<Value>> for BatchBattle {
     type Error = String;
 
     fn try_from(array: Vec<Value>) -> Result<BatchBattle, String> {
-        if !(5..=6).contains(&array.len()) {
+        if !(5..=7).contains(&array.len()) {
             return Err(format!(
-                "a batch battle has 5 or 6 elements, not {}",
+                "a batch battle has 5 to 7 elements, not {}",
                 array.len()
             ));
         }
@@ -239,6 +247,10 @@ impl TryFrom<Vec<Value>> for BatchBattle {
             None | Some(Value::Null) => None,
             Some(value) => Some(serde_json::from_value(value).map_err(|e| e.to_string())?),
         };
+        let twice = match elements.next() {
+            None => false,
+            Some(value) => serde_json::from_value(value).map_err(|e| e.to_string())?,
+        };
         Ok(BatchBattle {
             division,
             kind,
@@ -246,6 +258,7 @@ impl TryFrom<Vec<Value>> for BatchBattle {
             rounds,
             vids,
             item,
+            twice,
         })
     }
 }
@@ -316,6 +329,7 @@ mod tests {
                     rounds: 35,
                     vids: vec![812, 77],
                     item: None,
+                    twice: false,
                 },
                 BatchBattle {
                     division: Division::Melee,
@@ -324,6 +338,7 @@ mod tests {
                     rounds: 35,
                     vids: (1..=10).collect(),
                     item: Some("VER#0001".to_string()),
+                    twice: false,
                 },
             ],
             k: String::new(),
@@ -370,6 +385,34 @@ mod tests {
             },
             payload()
         );
+    }
+
+    #[test]
+    fn twice_is_a_seventh_element() {
+        let keys = keys(&format!("a:{KEY1}"));
+        let mut twice = payload();
+        twice.b[1].twice = true;
+        twice.b[0].twice = true;
+        let token = sign(&twice, &keys).unwrap();
+        let value: Value = serde_json::from_slice(&parts(&token).0).unwrap();
+        assert_eq!(
+            value["b"][1],
+            json!([
+                "melee",
+                "verify",
+                42,
+                35,
+                (1..=10).collect::<Vec<u32>>(),
+                "VER#0001",
+                true
+            ])
+        );
+        assert_eq!(
+            value["b"][0],
+            json!(["1v1", "normal", i64::MIN, 35, [812, 77], null, true])
+        );
+        let verified = verify(&token, &keys, 1_999).unwrap();
+        assert_eq!(verified.b, twice.b);
     }
 
     #[test]

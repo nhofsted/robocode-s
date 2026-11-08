@@ -139,6 +139,7 @@ fn work_query_and_204() {
         max,
         divisions: vec![Division::OneVsOne, Division::Melee],
         slots: 4,
+        twice: false,
     };
     assert_eq!(
         api.work(&query(1)).unwrap(),
@@ -173,6 +174,7 @@ fn work_batch_decodes() {
             max: 4,
             divisions: vec![Division::OneVsOne],
             slots: 1,
+            twice: false,
         })
         .unwrap()
     else {

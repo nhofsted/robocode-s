@@ -230,6 +230,7 @@ impl WorkServer {
                 deadline,
                 now,
                 config.rep.settle_before,
+                query.twice,
             )?;
             if items.is_empty() {
                 self.queue_empty_until
@@ -256,6 +257,7 @@ impl WorkServer {
                         rounds: item.rounds,
                         vids: item.bots.clone(),
                         item: Some(item.sort.clone()),
+                        twice: verify::needs_twice(&item),
                     },
                     bots,
                 ));
@@ -301,6 +303,7 @@ impl WorkServer {
                     rounds: division_config.rounds,
                     vids,
                     item: None,
+                    twice: false,
                 },
                 bots,
             ));
@@ -333,6 +336,7 @@ impl WorkServer {
                 seed: battle.seed,
                 rules: rules(division_config, battle.rounds),
                 bots,
+                twice: battle.twice,
             })
             .collect();
         Ok(Some(WorkResponse {
@@ -476,6 +480,7 @@ mod tests {
             max,
             divisions,
             slots: 4,
+            twice: false,
         }
     }
 
@@ -873,6 +878,65 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(work.battles[0].kind, BattleKind::Verify);
+    }
+
+    #[test]
+    fn tie_breaks_go_only_to_clients_that_run_them_twice() {
+        let store = MemStore::new();
+        let mut tie_break =
+            verify_item("0000#t", Division::OneVsOne, vec![2, 1], VerifyKind::Check);
+        tie_break.runs.push(tie_break.runs[0].clone());
+        tie_break.runs[1].uid = "g8".into();
+        tie_break.uids.push("g8".into());
+        tie_break.stage = 2;
+        store.put_verify(&tie_break).unwrap();
+        store
+            .put_verify(&verify_item(
+                "0001#c",
+                Division::OneVsOne,
+                vec![2, 1],
+                VerifyKind::Check,
+            ))
+            .unwrap();
+        let mut server = WorkServer::new();
+        server.set_plan(plan_1v1(vec![(1, 2, 5)]));
+        let config = Config::default();
+
+        // An older client: the stage 1 check only; the tie-break stays unclaimed.
+        let old = query(4, vec![Division::OneVsOne]);
+        let work = server
+            .serve(&store, &config, &keys(), &user(50), &old, NOW_MS, &[4; 32])
+            .unwrap()
+            .unwrap();
+        assert_eq!(work.battles[0].kind, BattleKind::Verify);
+        assert!(!work.battles[0].twice);
+        assert_eq!(work.battles[1].kind, BattleKind::Normal);
+        let payload = token::verify(&work.batch, &keys(), NOW).unwrap();
+        assert_eq!(payload.b[0].item.as_deref(), Some("0001#c"));
+        assert!(!payload.b[0].twice);
+        assert!(
+            store
+                .get_verify(1, "0000#t")
+                .unwrap()
+                .unwrap()
+                .claimant
+                .is_none()
+        );
+
+        // A client that runs battles twice gets it, marked twice in the work and the token.
+        let new = WorkQuery { twice: true, ..old };
+        let mut server = WorkServer::new();
+        server.set_plan(plan_1v1(vec![(1, 2, 5)]));
+        let work = server
+            .serve(&store, &config, &keys(), &user(50), &new, NOW_MS, &[5; 32])
+            .unwrap()
+            .unwrap();
+        assert_eq!(work.battles[0].kind, BattleKind::Verify);
+        assert!(work.battles[0].twice);
+        assert!(work.battles[1..].iter().all(|b| !b.twice));
+        let payload = token::verify(&work.batch, &keys(), NOW).unwrap();
+        assert_eq!(payload.b[0].item.as_deref(), Some("0000#t"));
+        assert!(payload.b[0].twice);
     }
 
     #[test]

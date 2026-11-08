@@ -552,6 +552,7 @@ mod tests {
             status: BattleStatus::Ok,
             duration_ms: None,
             battle_hash: Some(sha(1)),
+            repeat_hash: None,
             robots: None,
             rounds: Some(
                 winners

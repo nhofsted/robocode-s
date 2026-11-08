@@ -163,7 +163,7 @@ pub fn take_work<S: Store + ?Sized>(
     until: u64,
     now: u64,
 ) -> StoreResult<Vec<VerifyItem>> {
-    take_work_in(store, engine, uid, None, max, until, now, 0)
+    take_work_in(store, engine, uid, None, max, until, now, 0, true)
 }
 
 /// Whether the item was queued before `settle_before` (Unix ms; 0: never): its runs follow
@@ -180,7 +180,10 @@ pub fn queued_before(item: &VerifyItem, settle_before: u64) -> bool {
 
 /// [`take_work`] restricted to one division (a batch is one division, §10.4): items of
 /// other divisions in the page are skipped. Items queued before `settle_before`
-/// ([`queued_before`]) are settled instead of served.
+/// ([`queued_before`]) are settled instead of served. Stage 2 items (two runs so far) are
+/// served only if `twice`: the client runs them twice ([`WorkQuery::twice`], §11.3).
+///
+/// [`WorkQuery::twice`]: crate::api::WorkQuery::twice
 #[allow(clippy::too_many_arguments)]
 pub fn take_work_in<S: Store + ?Sized>(
     store: &S,
@@ -191,6 +194,7 @@ pub fn take_work_in<S: Store + ?Sized>(
     until: u64,
     now: u64,
     settle_before: u64,
+    twice: bool,
 ) -> StoreResult<Vec<VerifyItem>> {
     let mut taken = Vec::new();
     if max == 0 {
@@ -221,6 +225,10 @@ pub fn take_work_in<S: Store + ?Sized>(
                 settle_no_fault(store, &item, now * 1000)?;
                 continue;
             }
+            // A tie-break left for a client that runs it twice.
+            if !twice && needs_twice(&item) {
+                continue;
+            }
             match store.claim_verify(engine, &item.sort, uid, until, now) {
                 Ok(()) => {
                     item.claimant = Some(uid.to_string());
@@ -236,6 +244,12 @@ pub fn take_work_in<S: Store + ?Sized>(
         }
     }
     Ok(taken)
+}
+
+/// Whether a verifier runs the item twice (§11.3): a stage 2 check or recheck, whose tie-break
+/// must first show that the battle is reproducible.
+pub fn needs_twice(item: &VerifyItem) -> bool {
+    item.kind != VerifyKind::Probation && item.runs.len() >= 2
 }
 
 /// Gives an item back to the queue (the verifier didn't run it): clears the claim if it is
@@ -301,6 +315,12 @@ pub enum Outcome {
     /// (a CloudWatch metric filter turns it into an alarm). Nobody is penalized. `flagged` are
     /// the versions this disagreement made nondeterministic (§11.5).
     Disagreement { log: String, flagged: Vec<u32> },
+    /// Stage 2: the tie-breaking verifier ran the battle twice and its own two hashes differ:
+    /// the battle isn't reproducible (a robot isn't deterministic, §11.5). The item is deleted,
+    /// a held record released, nobody credited or penalized, the counted result stays. An
+    /// alert was stored; `log` is the line the Lambda must log. `flagged` as for
+    /// `Disagreement`: the disagreement is counted for each bot of the item.
+    Unreproducible { log: String, flagged: Vec<u32> },
     /// A bot of the item is flagged nondeterministic (§11.5), or the run hit the hard limit
     /// ([`settle_hard_limit`]): the item is deleted, a held record released, nobody credited
     /// or penalized.
@@ -317,6 +337,25 @@ pub fn resolve<S: Store + ?Sized>(
     engine: u32,
     sort: &str,
     run: Run,
+    origin: &str,
+    now_ms: u64,
+) -> StoreResult<Outcome> {
+    resolve_repeated(store, config, engine, sort, run, None, origin, now_ms)
+}
+
+/// [`resolve`] with the battle hash of the verifier's second run, `repeat`, of a battle it
+/// ran twice (a stage 2 item, [`needs_twice`]). At stage 2, a run whose two hashes differ
+/// proves the battle isn't reproducible: [`Outcome::Unreproducible`], nobody judged. Two
+/// agreeing hashes, or no repeat (a `robotFailed` run compared by records, an item served
+/// to a client that doesn't run twice), resolve as [`resolve`] does. Ignored at stage 1.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_repeated<S: Store + ?Sized>(
+    store: &S,
+    config: &Config,
+    engine: u32,
+    sort: &str,
+    run: Run,
+    repeat: Option<&str>,
     origin: &str,
     now_ms: u64,
 ) -> StoreResult<Outcome> {
@@ -372,6 +411,36 @@ pub fn resolve<S: Store + ?Sized>(
     // Stage 2: the original, the first verifier and this run.
     let original = item.runs[0].clone();
     let first = item.runs[1].clone();
+    if let (Some(hash), Some(repeat)) = (run.hash.as_deref(), repeat)
+        && hash != repeat
+    {
+        // The verifier's own two runs differ: no run can be proven wrong (§11.5).
+        if !delete_claimed(store, engine, sort, &uid)? {
+            return Ok(Outcome::Ignored);
+        }
+        release_unproven(store, &item, now_ms)?;
+        let describe = |r: &Run| format!("{}={}", r.uid, r.hash.as_deref().unwrap_or("-"));
+        store.put_alert(&Alert {
+            sort: format!("{now_ms:013}#{origin}"),
+            kind: "nondeterministic-bot".to_string(),
+            text: format!(
+                "verification item {sort} ({} seed {} bots {}) is not reproducible: the \
+                 tie-breaker {uid} got {hash} and {repeat} from two runs; earlier runs {}, {}",
+                item.division,
+                item.seed,
+                join_vids(&item.bots),
+                describe(&original),
+                describe(&first),
+            ),
+            reference: sort.to_string(),
+            ttl: now_ms / 1000 + ALERT_TTL,
+        })?;
+        let flagged = count_disagreement(store, config, &item.bots, origin, now_ms)?;
+        return Ok(Outcome::Unreproducible {
+            log: format!("ALERT nondeterministic-bot {sort}"),
+            flagged,
+        });
+    }
     let with_original = runs_agree(&original, &run);
     let with_first = runs_agree(&first, &run);
     if !delete_claimed(store, engine, sort, &uid)? {
@@ -542,7 +611,8 @@ pub fn flag_nondeterministic<S: Store + ?Sized>(
     Ok(Some(format!("NONDETERMINISTIC {text}")))
 }
 
-/// Counts a three-way disagreement for each bot of the item and flags the bot that stands
+/// Counts a disagreement (three-way, or a tie-breaker's two differing runs) for each bot of
+/// the item and flags the bot that stands
 /// out (§11.5): at least `rep.ndDisagreements` and more than any other bot of the item, so a
 /// deterministic opponent of a nondeterministic robot isn't flagged with it. Returns the
 /// flagged vids.
@@ -1406,6 +1476,148 @@ mod tests {
         assert!(store.log_items(1).is_empty(), "the counted result stays");
     }
 
+    /// The tie-break of [`resolve_as`], with the tie-breaker's second run `repeat`.
+    fn resolve_twice(store: &MemStore, uid: &str, hash: &str, repeat: Option<&str>) -> Outcome {
+        claim(store, uid);
+        resolve_repeated(
+            store,
+            &config(),
+            1,
+            "0000000000001#b0.0",
+            run(uid, hash, 2000.0, false),
+            repeat,
+            &format!("b-{uid}.0"),
+            NOW_MS,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_tie_breaker_whose_two_runs_differ_judges_nobody() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 0, UserState::Quarantined);
+        add_user(&store, "g2", 60, UserState::New);
+        add_user(&store, "g3", 70, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "x", 9999.0, true)))
+            .unwrap();
+        assert_eq!(resolve_as(&store, "g2", "y", 2000.0), Outcome::TieBreak);
+        // Served to the tie-breaker: it runs the battle twice.
+        assert!(needs_twice(&store.verify_items(1)[0]));
+        // Its first run agrees with g2, its second doesn't: today that would penalize g1.
+        let outcome = resolve_twice(&store, "g3", "y", Some("z"));
+        assert_eq!(
+            outcome,
+            Outcome::Unreproducible {
+                log: "ALERT nondeterministic-bot 0000000000001#b0.0".to_string(),
+                flagged: Vec::new()
+            }
+        );
+        let alerts = store.list_alerts().unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, "nondeterministic-bot");
+        assert_eq!(alerts[0].reference, "0000000000001#b0.0");
+        for part in ["seed 77", "bots 1,2", "g3 got y and z", "g1=x", "g2=y"] {
+            assert!(alerts[0].text.contains(part), "{part}: {}", alerts[0].text);
+        }
+        // Nobody credited or penalized; the quarantined g1's qm doesn't advance.
+        let g1 = rep_of(&store, "g1");
+        assert_eq!(
+            (g1.rep, g1.state, g1.mismatches, g1.quarantine_matches),
+            (0, UserState::Quarantined, 0, 0)
+        );
+        for (uid, rep) in [("g2", 60), ("g3", 70)] {
+            let r = rep_of(&store, uid);
+            assert_eq!((r.rep, r.state, r.mismatches), (rep, UserState::New, 0));
+        }
+        assert!(store.verify_items(1).is_empty());
+        // The held original is released (never proven wrong), nothing corrected.
+        let logs = store.log_items(1);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].uid, "g1");
+        assert_eq!(
+            Record::decode_all(&logs[0].records, "g1").unwrap()[0].weight,
+            1
+        );
+        // Each bot counts a disagreement (§11.5).
+        for vid in [1, 2] {
+            assert_eq!(store.get_version(vid).unwrap().unwrap().disagreements, 1);
+        }
+    }
+
+    #[test]
+    fn a_tie_breaker_whose_two_runs_agree_breaks_the_tie() {
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        add_user(&store, "g3", 70, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "good", 2000.0, false)))
+            .unwrap();
+        resolve_as(&store, "g2", "bad", 1.0);
+        let outcome = resolve_twice(&store, "g3", "good", Some("good"));
+        assert_eq!(
+            without_log(outcome),
+            Outcome::Majority {
+                minority: "g2".to_string(),
+                penalized: Some("g2".to_string()),
+                corrected: false,
+                banned: false,
+                log: String::new()
+            }
+        );
+        assert_eq!(rep_of(&store, "g2").state, UserState::Quarantined);
+        assert_eq!(store.get_version(1).unwrap().unwrap().disagreements, 0);
+    }
+
+    #[test]
+    fn without_a_repeat_the_tie_break_is_as_before() {
+        // A client that didn't run it twice, or a run without a hash.
+        let store = MemStore::new();
+        add_versions(&store);
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        add_user(&store, "g3", 70, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "good", 2000.0, false)))
+            .unwrap();
+        resolve_as(&store, "g2", "bad", 1.0);
+        let outcome = resolve_twice(&store, "g3", "good", None);
+        assert!(matches!(outcome, Outcome::Majority { penalized: Some(ref p), .. } if p == "g2"));
+
+        // A repeat at stage 1 is ignored: the first verifier's runs aren't compared.
+        let store = MemStore::new();
+        add_user(&store, "g1", 30, UserState::New);
+        add_user(&store, "g2", 60, UserState::New);
+        store
+            .put_verify(&check_item(run("g1", "good", 2000.0, false)))
+            .unwrap();
+        assert!(!needs_twice(&store.verify_items(1)[0]));
+        assert_eq!(
+            resolve_twice(&store, "g2", "good", Some("other")),
+            Outcome::Matched
+        );
+    }
+
+    #[test]
+    fn tie_breaks_are_served_only_to_clients_that_run_twice() {
+        let store = MemStore::new();
+        store
+            .put_verify(&check_item(run("g1", "x", 2000.0, false)))
+            .unwrap();
+        resolve_as(&store, "g2", "y", 2000.0);
+        let take = |twice| {
+            take_work_in(&store, 1, "g3", None, 5, 100, 0, 0, twice)
+                .unwrap()
+                .len()
+        };
+        assert_eq!(take(false), 0);
+        assert_eq!(store.verify_items(1).len(), 1, "left in the queue");
+        assert_eq!(take(true), 1);
+    }
+
     #[test]
     fn quarantine_release_and_return() {
         let store = MemStore::new();
@@ -1775,7 +1987,7 @@ mod tests {
         store.put_verify(&new).unwrap();
         assert!(queued_before(&old, 2000) && !queued_before(&new, 2000));
         assert!(!queued_before(&old, 0), "0: off");
-        let taken = take_work_in(&store, 1, "g2", None, 5, 100, 0, 2000).unwrap();
+        let taken = take_work_in(&store, 1, "g2", None, 5, 100, 0, 2000, true).unwrap();
         assert_eq!(taken.len(), 1);
         assert_eq!(taken[0].sort, new.sort);
         assert_eq!(store.verify_items(1).len(), 1, "the old item is gone");
