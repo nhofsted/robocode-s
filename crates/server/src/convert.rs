@@ -333,3 +333,80 @@ pub fn bullet_snapshot(b: &engine::Bullet) -> v1::BulletSnapshot {
         color: 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rules_survive_the_protocol() {
+        // Recordings and the viewer rebuild the rules from the protocol's.
+        let rules = engine::BattleRules {
+            width: 1000,
+            height: 700,
+            num_rounds: 35,
+            gun_cooling_rate: 0.07,
+            inactivity_time: 900,
+            hide_enemy_names: true,
+            sentry_border_size: 120,
+        };
+        for deterministic in [false, true] {
+            assert_eq!(rules_in(&self::rules(&rules, deterministic)), rules);
+        }
+        // A message without the cooling rate gets classic's.
+        let old = v1::BattleRules {
+            gun_cooling_rate: None,
+            ..self::rules(&rules, false)
+        };
+        assert_eq!(rules_in(&old).gun_cooling_rate, 0.1);
+    }
+
+    #[test]
+    fn the_command_copy_keeps_the_state_and_drops_the_one_shot_parts() {
+        let sent = v1::RobotCommands {
+            body_turn_remaining: Some(0.5),
+            gun_turn_remaining: Some(-1.25),
+            radar_turn_remaining: Some(3.0),
+            distance_remaining: Some(-40.0),
+            adjust_gun_for_body_turn: true,
+            adjust_radar_for_gun_turn: false,
+            adjust_radar_for_body_turn: true,
+            adjust_radar_for_body_turn_set: true,
+            max_turn_rate: Some(7.5),
+            max_velocity: Some(6.0),
+            colors: Some(v1::Colors {
+                body: 0x00ff_0000,
+                gun: 1,
+                ..Default::default()
+            }),
+            scan: true,
+            io_robot: true,
+            bullets: vec![v1::BulletCommand {
+                bullet_id: 3,
+                power: Some(1.5),
+                ..Default::default()
+            }],
+            team_messages: vec![v1::TeamMessage {
+                sender: "a".into(),
+                recipient: Some("b".into()),
+                payload: vec![1, 2],
+            }],
+            ..Default::default()
+        };
+        let (commands, passthrough) = self::commands(&sent);
+        assert_eq!(commands.bullets.len(), 1);
+        assert_eq!(commands.bullets[0].power, 1.5);
+        assert_eq!(commands.messages[0].bytes, vec![1, 2]);
+        assert!(commands.scan && commands.io);
+        assert_eq!(
+            commands_copy(&commands, &passthrough),
+            v1::RobotCommands {
+                scan: false,
+                io_robot: false,
+                bullets: vec![],
+                team_messages: vec![],
+                ..sent
+            }
+        );
+    }
+}
