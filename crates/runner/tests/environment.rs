@@ -20,7 +20,6 @@ fn seen(sandbox: Sandbox, deterministic: bool) -> Vec<String> {
     let mut env = Environment::from_env().rooted_at(&root);
     env.fresh_data = false;
     env.sandbox = sandbox;
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
     env.jars
         .push(root.join("robots/testbots/build/libs/testbots-0.1.0-SNAPSHOT.jar"));
     let data = env.robot_data().unwrap();
