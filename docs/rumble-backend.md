@@ -584,6 +584,39 @@ the new rules change (`tools/difftest/corpus/rules-impact.py` finds them) with
 `allRecordings`. Their pairings start from the battles since, and the planner refills them
 first (coverage).
 
+**A track format change, step by step** (track version 3, #116; ADR 0017). The battle hash
+covers every round's track hash (§13.4), so a client that encodes another track version than
+the others disagrees with them on every battle, as one with other rules would. Nothing else
+changes: not `ENGINE_VERSION` (the battles are the same, so the rankings stay), not
+`DETERMINISTIC_RULES` (the robot host's contract), not the API. The server never reads a
+track, so it doesn't need to know the version: `minClient` keeps the old encoders out.
+
+1. Release the client with the new version, on every channel.
+2. Deploy the site: its decoder (`web/src/lib/replay`, from `crates/replay`) reads the new
+   version and every old one. Do it before new clients upload many tracks: the old site
+   can't play the new version. The deploy also publishes `/release.json`, which offers the
+   release to installed clients.
+3. At once, in one config change (`robocode-s rumble admin config get`, edit, `admin config
+   set`): `minClient` = the new release, and `rep.settleBefore` = now + 3 h 10 min in Unix
+   ms. Old clients then get 426 on every call (results, `recordings/done`), so their
+   batches in flight are not counted and their slot claims expire and fill again (a track
+   they PUT meanwhile is overwritten by the next claim). `settleBefore` settles without fault
+   the items the old clients queued and, being in the future, also those of batches an old
+   client ran and an updated one posts from its pending folder within the batch deadline
+   (`batch.deadlineMinutes`, 180, plus the Lambdas' 5 minutes of cached config): those carry
+   the old tracks' hashes. Verification is off for those hours.
+4. Between steps 1 and 3 an updated volunteer can verify an old client's battle and be
+   outvoted. Keep that window short (the owner's verifiers update at step 3), then look for
+   `penalty` alerts since the release (`admin alerts`) and undo wrong ones with `admin
+   repair UID --apply` (§11.5).
+5. The stored recordings stay. They decode with the new decoder, their slots stay filled
+   and their URLs and contents don't change, so no slot item is touched and nothing is
+   invalidated. (Version 3: only the version 2 tracks of rounds in which a dead robot fired,
+   2 of the corpus's 20,820 rounds, miss bullets after that turn, until their versions
+   change.) If every recording must go anyway, `admin purge ... --all-recordings` deletes
+   the tracks and slot items and invalidates `/rec/e<E>/*` as for the rules 3 switch, but
+   it needs at least one version whose battles it purges: there is no recordings-only purge.
+
 ### 12.5 Recording slots (§12.7)
 
 - **Eligibility** of a counted `ok` battle: the user's `rep ≥ rep.recorderMin` and not quarantined; and in 1v1 one of the two versions is in the plan's `top`, or the pair is in the plan's `slotPairs` (owner, 2026-10-24): for every bot X of the general 1v1 rumble, its 5 best pairings (highest score), 5 worst pairings (lowest score) and 5 problem bots (most negative KNN-PBI, only negative ones), pairs counted once whichever side picked them (`publish` computes them, §15). Once a matchup has slots it keeps them while both versions are current: existing slot items persist even when the pair drops out of the set. In melee, slots are per version: each contestant in `top`.
@@ -638,7 +671,7 @@ loop:
 
 - **Round hash** = SHA-256 of `"rsr1"` ‖ `u32 LE round` ‖ for every `TurnSnapshot` of the round in order, `u64 LE server::recording::check(snapshot)` ‖ the prost encoding of the round's `RoundResult`. `check` already leaves out console output, paint, CPU times and debug properties, and which colours robots set (`Colors.set_parts`, which older robot hosts don't send); the colour values count.
 - **Track:** the round as a `replay::Track` (ADR 0017) built from its snapshots: `rumble_client::track::from_snapshots(rules, snapshots) -> Track` (positions ×2, headings to 1/1024 turn, energy ×100, bullets from their first and last snapshot state, `engine_version` = `ENGINE_VERSION`), encoded with `replay::encode`; `track.sha256` = SHA-256 of the bytes. Deterministic (fdlibm), so every volunteer gets the same bytes.
-- **Battle hash** = SHA-256 of `"rsb1"` ‖ `u32 LE engine` ‖ `i64 LE seed` ‖ per round (round hash ‖ track sha256) ‖ the prost encoding of each robot's final `Results` in robot order.
+- **Battle hash** = SHA-256 of `"rsb1"` ‖ `u32 LE engine` ‖ `i64 LE seed` ‖ per round (round hash ‖ track sha256) ‖ the prost encoding of each robot's final `Results` in robot order. It covers the track bytes, so clients that encode another track version disagree on every battle: a track format change is switched like a rules change (§12.4).
 - Verification compares battle hashes; the per-round hashes let a mismatch report name the first round that differs (logged with the alert).
 
 ### 13.5 Local files
