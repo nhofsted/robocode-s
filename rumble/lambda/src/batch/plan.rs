@@ -267,10 +267,12 @@ pub fn run_states(batch: &Batch, config: &Config) -> Result<Planned, String> {
         ledger.issued.remove(&vid);
     }
     let mut random = Random::new(&(batch.services.random)());
-    for work in probation_work(&ledger, &states, config, &versions, now) {
+    for mut work in probation_work(&ledger, &states, config, &versions, now) {
         let Some(version) = by_vid.get(&work.vid) else {
             continue;
         };
+        // A division without opponents is skipped, so the round is the ledger's next index.
+        work.round = ledger.issued.get(&work.vid).map_or(0, Vec::len);
         let snapshot = snapshots.get(&core::general_rumble(work.division));
         let order = ranking(snapshot, &versions, work.division);
         let same_bot: HashSet<u32> = versions

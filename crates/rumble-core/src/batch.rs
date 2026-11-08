@@ -454,7 +454,8 @@ pub struct ProbationWork {
 }
 
 /// The probation items to issue now (§12.3): a probation version without an issue gets
-/// `probation.battles` minus its counted battles, in its first division; once its last
+/// `probation.battles` minus its counted battles, spread over its divisions (one batch of
+/// items per division, each with its own round); once its last
 /// issue is older than the queue's TTL (the items may have expired) it gets the shortfall
 /// again. The caller creates the items ([`probation_items`]) and then records the issue.
 pub fn probation_work(
@@ -469,9 +470,14 @@ pub fn probation_work(
         if version.state != VersionState::Probation {
             continue;
         }
-        let Some(&division) = Division::ALL.iter().find(|d| version.divisions.contains(d)) else {
+        let divisions: Vec<Division> = Division::ALL
+            .iter()
+            .copied()
+            .filter(|d| version.divisions.contains(d))
+            .collect();
+        if divisions.is_empty() {
             continue;
-        };
+        }
         let battles = merged_tally(states, version.vid).battles;
         let need = config.probation.battles.saturating_sub(battles);
         if need == 0 {
@@ -482,13 +488,26 @@ pub fn probation_work(
             None => true,
             Some(last) => last.at + VERIFY_TTL <= now,
         };
-        if due {
+        if !due {
+            continue;
+        }
+        // The battles are spread over the divisions, the remainder going to the first ones
+        // from a start that moves with each issue (so a shortfall of one visits them in turn).
+        let n = divisions.len() as u32;
+        let offset = issues.len() % divisions.len();
+        let mut round = issues.len();
+        for i in 0..n {
+            let count = need / n + u32::from(i < need % n);
+            if count == 0 {
+                continue;
+            }
             work.push(ProbationWork {
                 vid: version.vid,
-                division,
-                round: issues.len(),
-                count: need,
+                division: divisions[(offset + i as usize) % divisions.len()],
+                round,
+                count,
             });
+            round += 1;
         }
     }
     work
@@ -875,6 +894,76 @@ mod tests {
         assert!(probation_work(&ledger, &[], &config, &versions, NOW + 3600).is_empty());
         let later = probation_work(&ledger, &[], &config, &versions, NOW + VERIFY_TTL);
         assert_eq!((later[0].round, later[0].count), (1, 10));
+    }
+
+    #[test]
+    fn probation_battles_spread_over_divisions() {
+        let config = Config::default();
+        let mut both = version(21, "b.B1", VersionState::Probation);
+        both.divisions = vec![Division::OneVsOne, Division::Melee];
+        let single = version(22, "b.B2", VersionState::Probation);
+        let versions = vec![both.clone(), single];
+        let ledger = ProbationLedger::default();
+        let work = probation_work(&ledger, &[], &config, &versions, NOW);
+        let of = |vid: u32| -> Vec<(Division, usize, u32)> {
+            work.iter()
+                .filter(|w| w.vid == vid)
+                .map(|w| (w.division, w.round, w.count))
+                .collect()
+        };
+        let n = config.probation.battles;
+        assert_eq!(
+            of(21),
+            vec![
+                (Division::OneVsOne, 0, n.div_ceil(2)),
+                (Division::Melee, 1, n / 2)
+            ]
+        );
+        assert_eq!(of(22), vec![(Division::OneVsOne, 0, n)]);
+
+        // A melee battle takes the division's number of robots from its own ranking.
+        let melee = config.divisions.get(Division::Melee).robots as usize;
+        let ranking: Vec<u32> = (1..=20).collect();
+        let w = work.iter().find(|w| w.division == Division::Melee).unwrap();
+        let items = probation_items(
+            &config,
+            1,
+            &both,
+            w,
+            &ranking,
+            &HashSet::new(),
+            &mut Random::new(&[3; 32]),
+            NOW,
+        );
+        assert_eq!(items.len() as u32, n / 2);
+        assert!(
+            items
+                .iter()
+                .all(|i| i.division == Division::Melee && i.bots.len() == melee)
+        );
+
+        // A shortfall smaller than the divisions starts at the next one on the next issue.
+        let mut ledger = ProbationLedger::default();
+        ledger.issued.insert(
+            21,
+            vec![Issue {
+                at: NOW,
+                division: Division::OneVsOne,
+                count: n,
+            }],
+        );
+        let mut states = vec![State::new(1, Division::OneVsOne, 0)];
+        states[0].versions.insert(
+            21,
+            crate::state::VersionTally {
+                battles: n - 1,
+                ..Default::default()
+            },
+        );
+        let later = probation_work(&ledger, &states, &config, &versions, NOW + VERIFY_TTL);
+        let w: Vec<_> = later.iter().filter(|w| w.vid == 21).collect();
+        assert_eq!(w.len(), 1);
+        assert_eq!((w[0].division, w[0].count), (Division::Melee, 1));
     }
 
     #[test]
