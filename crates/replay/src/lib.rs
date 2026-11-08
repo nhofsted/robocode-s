@@ -31,10 +31,15 @@ pub const ENERGY_SCALE: i64 = 100;
 /// it, so a future version must not be gzip's first byte, `0x1f`.
 ///
 /// Version 2 adds the engine version (design §4.4) after it, as a LEB128 integer; version 1
-/// tracks decode with engine version 0 (unknown).
-const VERSION: u8 = 2;
+/// tracks decode with engine version 0 (unknown). Version 3 (#116) also codes the bullets of
+/// robots that already died: classic lets a dead robot fire (the engine ports it), and
+/// version 2's encoder, which skipped dead robots' births, then lost every later bullet of
+/// the round. Versions 1 and 2 still decode, as they were coded.
+const VERSION: u8 = 3;
 const _: () = assert!(VERSION != 0x1f);
-/// The first version, without an engine version.
+/// Without dead robots' bullets.
+const VERSION_2: u8 = 2;
+/// The first version, without an engine version or dead robots' bullets.
 const VERSION_1: u8 = 1;
 /// Classic allows one bullet per robot per turn; this only bounds corrupt input.
 const MAX_BIRTHS: usize = 8;
@@ -97,7 +102,11 @@ impl BulletTrack {
 }
 
 /// [`decode`] returns the track [`encode`] was given, except that a robot's values after the
-/// frame it died in are not stored: it decodes as it died.
+/// frame it died in are not stored: it decodes as it died. Bullets are stored in birth order
+/// (frame, then owner); bullets the format can't hold (born at the round start or after the
+/// last frame, of an unknown robot, more than eight from one robot in a frame) are dropped,
+/// and so is an end a bullet can't have (before its birth, after the last frame, on an
+/// unknown robot).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Track {
     /// Engine version (design §4.4) the battle ran with; 0 = unknown (version 1 tracks).
@@ -142,24 +151,57 @@ pub fn encode(track: &Track) -> Vec<u8> {
 
 /// Encodes and also returns the information content per [`LABELS`] category, in bits.
 pub fn encode_with_costs(track: &Track) -> (Vec<u8>, Vec<f64>) {
+    encode_as(track, Format::CURRENT)
+}
+
+fn encode_as(track: &Track, format: Format) -> (Vec<u8>, Vec<f64>) {
     let mut enc = Encoder::new(LABELS.len());
-    let mut rebuilt = run(&mut enc, Some(track)).expect("encoding cannot fail");
+    let input = stored_as(track, format);
+    let mut rebuilt = run(&mut enc, Some(&input), format).expect("encoding cannot fail");
     // The engine version is in the header, not in the coded stream.
     rebuilt.engine_version = track.engine_version;
     debug_assert_eq!(
-        rebuilt,
-        stored(track),
+        rebuilt, input,
         "the encoder's reconstruction must match its input"
     );
     let costs = enc.costs.clone();
-    let mut out = vec![VERSION];
-    write_leb128(&mut out, track.engine_version);
+    let mut out = vec![format.version];
+    if format.version != VERSION_1 {
+        write_leb128(&mut out, track.engine_version);
+    }
     out.extend(enc.finish());
     (out, costs)
 }
 
-/// `track` as the codec stores it: dead robots keep their death frame.
-fn stored(track: &Track) -> Track {
+/// What a track version codes.
+#[derive(Clone, Copy, Debug)]
+struct Format {
+    version: u8,
+    /// The births of robots that died in an earlier frame (version 3).
+    dead_births: bool,
+}
+
+impl Format {
+    const CURRENT: Format = Format::of(VERSION);
+
+    const fn of(version: u8) -> Format {
+        Format {
+            version,
+            dead_births: version >= 3,
+        }
+    }
+}
+
+/// `track` as the codec stores it, what [`decode`] returns from [`encode`]`(track)`: dead
+/// robots keep their death frame, and the bullets are those the format can code, in birth
+/// order ([`Track`]).
+pub fn stored(track: &Track) -> Track {
+    stored_as(track, Format::CURRENT)
+}
+
+/// [`stored`] for `format`. The encoder codes this, so a bullet it can't code is left out
+/// instead of stopping its cursor (#116).
+fn stored_as(track: &Track, format: Format) -> Track {
     let mut track = track.clone();
     for t in 1..track.frames.len() {
         let (done, rest) = track.frames.split_at_mut(t);
@@ -168,6 +210,32 @@ fn stored(track: &Track) -> Track {
                 *r = *prev;
             }
         }
+    }
+    let turns = track.frames.len().saturating_sub(1);
+    let n = track.frames.first().map_or(0, Vec::len);
+    // Stable: a robot's bullets of one frame keep their order.
+    track.bullets.sort_by_key(|b| (b.born, b.owner));
+    let frames = &track.frames;
+    let mut same = (0, 0, 0); // (frame, owner, bullets kept of them so far)
+    track.bullets.retain(|b| {
+        let (t, i) = (b.born as usize, b.owner as usize);
+        if !(1..=turns).contains(&t)
+            || i >= n
+            || (!format.dead_births && frames[t - 1][i].state == RobotState::Dead)
+        {
+            return false;
+        }
+        if (same.0, same.1) != (t, i) {
+            same = (t, i, 0);
+        }
+        same.2 += 1;
+        same.2 <= MAX_BIRTHS
+    });
+    for b in &mut track.bullets {
+        b.end = b.end.filter(|e| {
+            (b.born..=turns as u32).contains(&e.0)
+                && !matches!(e.1, BulletEnd::Robot(v) if v as usize >= n)
+        });
     }
     track
 }
@@ -217,13 +285,17 @@ pub fn decode(bytes: &[u8]) -> Result<Track, DecodeError> {
 }
 
 fn decode_track(bytes: &[u8]) -> Result<Track, DecodeError> {
-    let (engine_version, rest) = match bytes.split_first() {
-        Some((&VERSION, rest)) => read_leb128(rest)?,
-        Some((&VERSION_1, rest)) => (0, rest),
+    let (version, rest) = match bytes.split_first() {
+        Some((&v, rest)) if v == VERSION || v == VERSION_2 || v == VERSION_1 => (v, rest),
         _ => return Err(DecodeError("unknown replay version")),
     };
+    let (engine_version, rest) = if version == VERSION_1 {
+        (0, rest)
+    } else {
+        read_leb128(rest)?
+    };
     let mut dec = Decoder::new(rest);
-    let mut track = run(&mut dec, None)?;
+    let mut track = run(&mut dec, None, Format::of(version))?;
     if dec.overrun() {
         return Err(DecodeError("truncated or corrupt replay"));
     }
@@ -378,6 +450,8 @@ struct Models {
     end_x: IntModel,
     end_y: IntModel,
     fired: [Bit; 3],
+    /// The first birth of a robot that died in an earlier frame (version 3).
+    fired_dead: Bit,
     more: Bit,
     born_ended: Bit,
     power: IntModel,
@@ -402,7 +476,7 @@ struct RobotChoosers {
 
 // ---------------------------------------------------------------- the shared code path
 
-fn run<I: Io>(io: &mut I, src: Option<&Track>) -> Result<Track, DecodeError> {
+fn run<I: Io>(io: &mut I, src: Option<&Track>, format: Format) -> Result<Track, DecodeError> {
     let mut m = Models::default();
     let get = |f: &dyn Fn(&Track) -> i64| src.map_or(0, f);
 
@@ -626,11 +700,14 @@ fn run<I: Io>(io: &mut I, src: Option<&Track>) -> Result<Track, DecodeError> {
         }
         active = still;
 
-        // Bullet births. Context: whether the gun can be cool enough to fire.
+        // Bullet births. Context: whether the gun can be cool enough to fire. A robot that
+        // died in an earlier frame can still fire (classic's `fireBullets` runs for dead
+        // robots too, #116): rare, so its own context, predicted from its death frame.
         io.label(L_BIRTH);
         for i in 0..n {
             hist[i].heat = (hist[i].heat - gun_cooling_milli).max(0);
-            if prev[i].state == RobotState::Dead {
+            let dead = prev[i].state == RobotState::Dead;
+            if dead && !format.dead_births {
                 continue;
             }
             let ctx = match hist[i].heat {
@@ -645,7 +722,9 @@ fn run<I: Io>(io: &mut I, src: Option<&Track>) -> Result<Track, DecodeError> {
                         .get(src_bullet)
                         .is_some_and(|b| b.born as usize == t && b.owner as usize == i)
                 });
-                let model = if first {
+                let model = if first && dead {
+                    &mut m.fired_dead
+                } else if first {
                     &mut m.fired[ctx]
                 } else {
                     &mut m.more
@@ -1101,17 +1180,188 @@ mod tests {
                     });
                 }
             }
+            // Classic lets a robot that already died fire (#116).
+            for (i, r) in frame.iter().enumerate() {
+                if prev[i].state != RobotState::Dead || rnd(12) != 0 {
+                    continue;
+                }
+                let end = match rnd(3) {
+                    0 => None,
+                    _ => Some((
+                        t + rnd(i64::from(turns - t) + 1) as u32,
+                        BulletEnd::Robot(rnd(n as i64) as u8),
+                        edge(&mut rnd, w),
+                        edge(&mut rnd, h),
+                    )),
+                };
+                track.bullets.push(BulletTrack {
+                    owner: i as u8,
+                    born: t,
+                    x: r.x + rnd(9) - 4,
+                    y: r.y + rnd(9) - 4,
+                    heading: rnd(BULLET_ANGLE_STEPS),
+                    power: 10 + rnd(291),
+                    end,
+                });
+            }
             track.frames.push(frame.clone());
         }
+        // The codec stores births per robot in robot order within a frame.
+        track.bullets.sort_by_key(|b| (b.born, b.owner));
         track
     }
 
     #[test]
     fn random_tracks_round_trip() {
+        let mut dead_bullets = 0;
         for seed in 0..400 {
             let track = random_track(seed);
+            dead_bullets += track
+                .bullets
+                .iter()
+                .filter(|b| {
+                    track.frames[b.born as usize - 1][b.owner as usize].state == RobotState::Dead
+                })
+                .count();
             assert_eq!(decode(&encode(&track)).unwrap(), track, "seed {seed}");
         }
+        assert!(dead_bullets > 50, "{dead_bullets} bullets of dead robots");
+    }
+
+    /// A team round as in `185-teams` round 8 (#116): robot 2 dies in frame 400 and fires in
+    /// frame 450 all the same (classic's `fireBullets` runs for dead robots); the others keep
+    /// firing after it. Every bullet comes back.
+    fn dead_robot_fires() -> Track {
+        let mut track = synthetic();
+        let dead = track.frames[450][2];
+        assert_eq!(dead.state, RobotState::Dead);
+        let later = track.bullets.iter().filter(|b| b.born > 450).count();
+        assert!(later > 10, "{later} bullets after the dead robot's");
+        track.bullets.push(BulletTrack {
+            owner: 2,
+            born: 450,
+            x: dead.x,
+            y: dead.y,
+            heading: dead.gun * (BULLET_ANGLE_STEPS / ANGLE_STEPS),
+            power: 50,
+            end: Some((470, BulletEnd::Robot(0), 900, 700)),
+        });
+        track.bullets.sort_by_key(|b| (b.born, b.owner));
+        track
+    }
+
+    #[test]
+    fn a_dead_robots_bullet_and_all_after_it_round_trip() {
+        let track = dead_robot_fires();
+        let back = decode(&encode(&track)).unwrap();
+        assert_eq!(back.bullets.len(), track.bullets.len());
+        assert_eq!(back, track);
+    }
+
+    #[test]
+    fn version_2_drops_only_the_bullet_it_cannot_code() {
+        // Version 2's encoder lost every bullet after a dead robot's; the same format now
+        // leaves out just that bullet (what a version 2 decoder can still read).
+        let track = dead_robot_fires();
+        let (bytes, _) = encode_as(&track, Format::of(VERSION_2));
+        assert_eq!(bytes[0], VERSION_2);
+        let back = decode(&bytes).unwrap();
+        let mut expected = track.clone();
+        expected.bullets.retain(|b| b.owner != 2 || b.born != 450);
+        assert_eq!(back.bullets.len(), track.bullets.len() - 1);
+        assert_eq!(back, expected);
+    }
+
+    #[test]
+    fn bullets_the_format_cannot_hold_are_dropped_not_the_rest() {
+        let mut track = synthetic();
+        let all = track.bullets.clone();
+        let template = all[all.len() / 2].clone();
+        let odd = |born, owner, end| BulletTrack {
+            born,
+            owner,
+            end,
+            ..template.clone()
+        };
+        // Frames f..f+4 without bullets of their own.
+        let f = (100..390)
+            .find(|&f| !all.iter().any(|b| (f..f + 4).contains(&b.born)))
+            .unwrap();
+        // Out of birth order, at the round start, after the last frame, of an unknown robot.
+        track.bullets.reverse();
+        track.bullets.push(odd(0, 0, None));
+        track.bullets.push(odd(601, 0, None));
+        track.bullets.push(odd(f, 7, None));
+        // Ends before the birth, after the last frame, on an unknown robot.
+        let ends = [
+            (f - 1, BulletEnd::Wall),
+            (601, BulletEnd::Wall),
+            (f + 10, BulletEnd::Robot(3)),
+        ];
+        for (k, (at, kind)) in ends.into_iter().enumerate() {
+            track
+                .bullets
+                .push(odd(f + k as u32, 1, Some((at, kind, 0, 0))));
+        }
+        // Ten from one robot in one frame: eight are kept.
+        for _ in 0..10 {
+            track.bullets.push(odd(f + 3, 0, None));
+        }
+        let back = decode(&encode(&track)).unwrap();
+        let mut expected = all.clone();
+        expected.extend((f..f + 3).map(|born| odd(born, 1, None)));
+        expected.extend((0..MAX_BIRTHS).map(|_| odd(f + 3, 0, None)));
+        expected.sort_by_key(|b| (b.born, b.owner));
+        assert_eq!(back.bullets, expected);
+        assert_eq!(back.frames, track.frames);
+    }
+
+    /// Rumble tracks among the website's fixtures, coded by version 2's encoder (released up
+    /// to 0.2.6), decode and code back to the same bytes: version 2 decodes as it always did.
+    #[test]
+    fn version_2_tracks_decode_as_before() {
+        for bytes in [
+            &include_bytes!("../../../web/src/lib/replay/fixtures/melee8.track")[..],
+            &include_bytes!("../../../web/src/lib/replay/fixtures/acero-mailmanx.track")[..],
+        ] {
+            assert_eq!(bytes[0], VERSION_2);
+            let track = decode(bytes).unwrap();
+            assert_eq!(encode_as(&track, Format::of(VERSION_2)).0, bytes);
+            assert_eq!(decode(&encode(&track)).unwrap(), track);
+        }
+    }
+
+    /// The recording #116 was found in: in round 8 (from 0) of `185-teams` a robot that had
+    /// died fires, and version 2 kept 33 of the round's 54 bullets. Needs the difftest corpus:
+    /// `ROBOCODES_CORPUS=<recordings folder> cargo test -p robocode-s-replay --features json
+    /// -- --ignored`.
+    #[cfg(feature = "json")]
+    #[test]
+    #[ignore = "needs the difftest corpus"]
+    fn corpus_round_with_a_dead_robots_bullet_round_trips() {
+        let dir = std::env::var("ROBOCODES_CORPUS").expect("ROBOCODES_CORPUS");
+        let path = std::path::Path::new(&dir).join("185-teams.check.jsonl.gz");
+        let tracks = recording::tracks(&recording::load(&path));
+        for (round, track) in tracks.iter().enumerate() {
+            let expected = stored(track);
+            assert_eq!(expected.bullets.len(), track.bullets.len(), "round {round}");
+            let back = decode(&encode(track)).unwrap();
+            assert_eq!(back.bullets, expected.bullets, "round {round}");
+            assert_eq!(back, expected, "round {round}");
+        }
+        let dead: Vec<usize> = tracks
+            .iter()
+            .map(|t| {
+                t.bullets
+                    .iter()
+                    .filter(|b| {
+                        t.frames[b.born as usize - 1][b.owner as usize].state == RobotState::Dead
+                    })
+                    .count()
+            })
+            .collect();
+        assert_eq!(dead.iter().sum::<usize>(), 1);
+        assert_eq!(dead[8], 1, "round 8 (from 0) has a dead robot's bullet");
     }
 
     #[test]
@@ -1130,7 +1380,7 @@ mod tests {
         // Version 1 had no engine version: the coded stream follows the version byte.
         let mut track = synthetic();
         track.engine_version = 0;
-        let v2 = encode(&track);
+        let v2 = encode_as(&track, Format::of(VERSION_2)).0;
         assert_eq!(v2[1], 0, "engine version 0 is one LEB128 byte");
         let mut v1 = vec![VERSION_1];
         v1.extend_from_slice(&v2[2..]);

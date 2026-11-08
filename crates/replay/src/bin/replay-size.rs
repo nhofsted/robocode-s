@@ -7,7 +7,7 @@
 //! With `--write DIR` first, it also writes each round's track to `DIR/<name>-<round>.track`
 //! (one round per file, as the rumble stores them; the desktop GUI's Watch Battle tab opens them).
 
-use robocode_s_replay::{LABELS, POS_SCALE, decode, encode_with_costs, recording};
+use robocode_s_replay::{LABELS, POS_SCALE, decode, encode_with_costs, recording, stored};
 use std::path::Path;
 
 fn main() {
@@ -44,7 +44,7 @@ fn main() {
                 std::fs::write(&file, &data).expect("writes the track");
             }
             let back = decode(&data).expect("decodes");
-            assert!(back == *track, "{name}: round trip differs");
+            assert!(back == stored(track), "{name}: round trip differs");
             bytes += data.len();
             turns += track.frames.len() - 1;
             for (t, c) in total_costs.iter_mut().zip(&costs) {
