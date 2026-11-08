@@ -12,13 +12,7 @@ use std::thread;
 #[ignore = "needs Java and the built robots"]
 fn listings_at_once_each_have_a_home_of_their_own() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let env = Environment::from_env().rooted_at(&root);
     let host = env.host(false).unwrap();
     let dir = env.data.join(format!("list-test-{}", std::process::id()));
     let listings: Vec<_> = (0..4)
@@ -52,13 +46,7 @@ fn cache_of(dir: &Path) -> std::path::PathBuf {
 #[ignore = "needs Java and the built robots"]
 fn a_cached_listing_is_the_same_as_a_new_one() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let env = Environment::from_env().rooted_at(&root);
     let host = env.host(false).unwrap();
     let dir = env
         .data

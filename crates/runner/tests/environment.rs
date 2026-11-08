@@ -17,12 +17,7 @@ use std::path::{Path, PathBuf};
 /// What testbots.Environ wrote: its `environ.txt`, wherever its data folder is.
 fn seen(sandbox: Sandbox, deterministic: bool) -> Vec<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
+    let mut env = Environment::from_env().rooted_at(&root);
     env.fresh_data = false;
     env.sandbox = sandbox;
     env.jars = env.jars.iter().map(|j| root.join(j)).collect();

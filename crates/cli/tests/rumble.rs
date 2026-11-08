@@ -7,6 +7,8 @@
 //! :robots:samples:jar`) and is ignored by default: `cargo test -p robocode-s-cli --test
 //! rumble -- --ignored` (`ROBOCODES_JAVA` names the JDK to use).
 
+// The loopback HTTP server of rumble-client's tests.
+#[path = "../../rumble-client/tests/support/mod.rs"]
 mod support;
 
 use robocode_s_engine::ENGINE_VERSION;
