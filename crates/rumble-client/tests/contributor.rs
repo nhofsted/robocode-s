@@ -51,12 +51,7 @@ fn temp(name: &str) -> PathBuf {
 /// The tree's robot host, with a data folder of its own (the cache, the pending batches).
 fn environment(data: &Path, sandbox: Sandbox, find_java: bool) -> Environment {
     let root = root();
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
+    let mut env = Environment::from_env().rooted_at(&root);
     env.sandbox = sandbox;
     // Find (or download) Java in the shared data folder, once; the battles use their own.
     if find_java && let Ok(host) = env.host(true) {

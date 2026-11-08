@@ -42,12 +42,7 @@ fn main() {
     let out = args.next().expect("usage: melee-track OUT.track [SEED]");
     let seed: i64 = args.next().map_or(7, |s| s.parse().expect("seed"));
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
+    let mut env = Environment::from_env().rooted_at(&root);
     env.sandbox = Sandbox::None;
     let samples: PathBuf = std::env::var_os("SAMPLES_JAR").map_or_else(
         || root.join("robots/samples/build/libs/samples-0.1.0-SNAPSHOT.jar"),

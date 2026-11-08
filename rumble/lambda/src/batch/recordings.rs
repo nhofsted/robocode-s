@@ -149,52 +149,29 @@ mod tests {
     use crate::batch::Services;
     use crate::cloudfront::MemCdn;
     use crate::s3::{MemObjects, Objects};
-    use rumble_core::ids::WeightClass;
+
     use rumble_core::recordings::IndexFile;
     use rumble_core::slots::{Group, SlotId, recording_key};
-    use rumble_core::store::{
-        BotSource, BotState, MemStore, SlotEntry, SlotStatus, Store, VersionState,
-    };
+    use rumble_core::store::{MemStore, SlotEntry, SlotStatus, Store};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn version(vid: u32, bot: &str) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
             version: "1".into(),
             sha256: format!("{vid:02x}{}", "cd".repeat(31)),
             size: 1,
             codesize: None,
-            class: WeightClass::Mega,
             divisions: vec![Division::OneVsOne, Division::Melee],
-            state: VersionState::Active,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
-            created: 0,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..rumble_core::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, vid: u32) -> BotItem {
         BotItem {
-            id: id.to_string(),
-            author: "a".into(),
-            owner: None,
-            homepage: None,
-            description: None,
-            divisions: vec![Division::OneVsOne],
             versions: vec![vid],
             current: Some(vid),
-            state: BotState::Active,
-            created: 0,
-            source: BotSource::Import,
+            ..rumble_core::testing::bot(id)
         }
     }
 
@@ -277,6 +254,40 @@ mod tests {
         fn site_keys(&self) -> Vec<String> {
             self.objects.keys(Bucket::Site)
         }
+
+        /// Type-checks the index files against `types.ts` with
+        /// `web/scripts/check-rumble-data.mjs`, if Node and the web dependencies are there
+        /// (the batch scenario does the other data files).
+        fn check_types_ts(&self) {
+            let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web");
+            if !web.join("node_modules/typescript").exists() {
+                eprintln!("skipping the types.ts check: web/node_modules has no typescript");
+                return;
+            }
+            let dir = std::env::temp_dir().join(format!("rec-index-{}", std::process::id()));
+            for key in self.site_keys() {
+                let path = dir.join(key.strip_prefix("data/v1/").unwrap());
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let object = self.objects.object(Bucket::Site, &key).unwrap();
+                std::fs::write(&path, object.bytes).unwrap();
+            }
+            let output = std::process::Command::new("node")
+                .arg(web.join("scripts/check-rumble-data.mjs"))
+                .arg(&dir)
+                .output();
+            let _ = std::fs::remove_dir_all(&dir);
+            let Ok(output) = output else {
+                eprintln!("skipping the types.ts check: no node");
+                return;
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "types.ts check failed:\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(stdout.contains("3 files match"), "{stdout}");
+        }
     }
 
     #[test]
@@ -284,7 +295,7 @@ mod tests {
         let rig = Rig::new();
         rig.fill(Group::Pair { lo: 1, hi: 2 }, "a.0", vec![1, 2]);
         rig.fill(Group::Pair { lo: 1, hi: 2 }, "b.0", vec![2, 1]);
-        // No order (legacy): not indexed.
+        // No order: not indexed (its tanks can't be named).
         rig.fill(Group::Pair { lo: 1, hi: 3 }, "a.0", vec![]);
         rig.fill(Group::Version(2), "w.0", vec![2, 1, 3]);
 
@@ -313,9 +324,10 @@ mod tests {
         let text = String::from_utf8(object.bytes).unwrap();
         assert!(text.contains(r#"["a-0",2,"77",5,0]"#), "{text}");
         assert!(text.contains(r#""pairs":[{"opp":"b.B""#), "{text}");
+        rig.check_types_ts();
 
-        // A second run: nothing is read (the cache), nothing written. Only the legacy
-        // group, which has objects the cache lacks, is read again.
+        // A second run: nothing is read (the cache), nothing written. Only the group
+        // without an order, which has objects the cache lacks, is read again.
         let before: Vec<_> = rig
             .site_keys()
             .iter()
@@ -387,84 +399,5 @@ mod tests {
             IndexFile::OneVsOne(serde_json::from_value(value).unwrap())
         };
         assert_eq!(file.rounds(), 1);
-    }
-
-    #[test]
-    fn cleanup_reopens_slots_without_an_order_once() {
-        use crate::batch::cleanup;
-        use rumble_core::Config;
-        let rig = Rig::new();
-        for v in &rig.versions {
-            rig.store.put_version(v).unwrap();
-        }
-        let pair = Group::Pair { lo: 1, hi: 2 };
-        rig.fill(pair, "a.0", vec![1, 2]);
-        rig.fill(pair, "a.1", vec![]);
-        rig.fill(pair, "b.0", vec![]);
-        rig.fill(Group::Version(3), "l.0", vec![]);
-        // An old claim whose upload never came: in a group with tracks it is reopened too.
-        let config = Config {
-            engine_version: 1,
-            ..Config::default()
-        };
-        rig.store
-            .update_slots(
-                1,
-                Division::OneVsOne,
-                &pair.key(),
-                &[("1v1.1.2.a.2".into(), None)],
-                &[(
-                    "1v1.1.2.a.2".into(),
-                    SlotEntry {
-                        status: SlotStatus::Claimed,
-                        batch: "b".into(),
-                        index: 0,
-                        round: 0,
-                        sha256_b64: "x".into(),
-                        size: 1,
-                        claim_until: 5,
-                        seed: 0,
-                        order: vec![],
-                    },
-                )],
-                false,
-            )
-            .unwrap();
-        let batch = rig.batch(0);
-        rig.clock.store(1_000_000, Ordering::SeqCst);
-        let first = cleanup::run(&batch, &config).unwrap();
-        assert_eq!(first.slots_reopened, 4, "the claim without a track as well");
-        assert_eq!(first.reopened_tracks_deleted, 3);
-        let item = rig
-            .store
-            .get_slots(1, Division::OneVsOne, &pair.key())
-            .unwrap()
-            .unwrap();
-        assert_eq!(item.entries.keys().collect::<Vec<_>>(), ["1v1.1.2.a.0"]);
-        assert!(!item.full);
-        let kept = rig.objects.keys(Bucket::Jars);
-        assert_eq!(kept.len(), 1, "{kept:?}");
-        assert!(kept[0].ends_with("/b-0.track") || kept[0].ends_with("/a-0.track"));
-        // Not done yet: a second pass after the grace period finds nothing and finishes.
-        let state: rumble_core::cleanup::CleanupState = batch
-            .read_json(Bucket::State, &cleanup::cleanup_key(1))
-            .unwrap()
-            .unwrap();
-        assert_eq!(state.rec_order.since, Some(1000));
-        assert!(!state.rec_order.done);
-        rig.clock.store(
-            (1000 + rumble_core::cleanup::ORDER_GRACE) * 1000,
-            Ordering::SeqCst,
-        );
-        let second = cleanup::run(&batch, &config).unwrap();
-        assert_eq!(second.slots_reopened, 0);
-        let state: rumble_core::cleanup::CleanupState = batch
-            .read_json(Bucket::State, &cleanup::cleanup_key(1))
-            .unwrap()
-            .unwrap();
-        assert!(state.rec_order.done);
-        // Done: a late legacy fill is no longer looked for.
-        rig.fill(pair, "b.1", vec![]);
-        assert_eq!(cleanup::run(&batch, &config).unwrap().slots_reopened, 0);
     }
 }

@@ -625,25 +625,11 @@ mod tests {
 
     fn version(vid: u32, bot: &str, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
-            version: format!("1.{vid}"),
-            sha256: format!("{vid:064x}"),
-            size: 100,
             codesize: Some(1000),
             class: WeightClass::Mini,
-            divisions: vec![Division::OneVsOne],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
             created: NOW - 1000 + u64::from(vid),
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
@@ -752,17 +738,12 @@ mod tests {
         }
         store
             .put_bot(&BotItem {
-                id: "x.Bot".into(),
                 author: "Ann".into(),
-                owner: None,
-                homepage: None,
-                description: None,
-                divisions: vec![Division::OneVsOne],
                 versions: vec![2, 1],
                 current: Some(1),
-                state: BotState::Active,
                 created: NOW,
                 source: BotSource::Submit,
+                ..crate::testing::bot("x.Bot")
             })
             .unwrap();
         let mut state = State::new(1, Division::OneVsOne, 0);
@@ -1008,17 +989,12 @@ mod tests {
             .unwrap();
         store
             .put_bot(&BotItem {
-                id: "x.Bot".into(),
                 author: "Ann".into(),
                 owner: Some("g1".into()),
-                homepage: None,
-                description: None,
-                divisions: vec![Division::OneVsOne],
                 versions: vec![2, 1],
                 current: Some(1),
-                state: BotState::Active,
                 created: NOW,
-                source: BotSource::Import,
+                ..crate::testing::bot("x.Bot")
             })
             .unwrap();
         let mut state = State::new(1, Division::OneVsOne, 0);

@@ -60,46 +60,22 @@ pub fn archive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{Division, WeightClass};
-    use crate::store::BotSource;
 
     fn version(vid: u32, bot: &str, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
-            version: format!("1.{vid}"),
-            sha256: format!("{vid:064x}"),
             size: 1000 + u64::from(vid),
             codesize: None,
-            class: WeightClass::Mega,
-            divisions: vec![Division::OneVsOne],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
             created: 1_792_843_200,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, state: BotState) -> BotItem {
         BotItem {
-            id: id.to_string(),
             author: format!("author of {id}"),
-            owner: None,
-            homepage: None,
-            description: None,
-            divisions: vec![Division::OneVsOne],
-            versions: vec![],
-            current: None,
             state,
-            created: 0,
-            source: BotSource::Import,
+            ..crate::testing::bot(id)
         }
     }
 

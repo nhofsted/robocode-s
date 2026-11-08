@@ -24,12 +24,7 @@ fn root() -> PathBuf {
 
 fn environment(sandbox: Sandbox) -> Environment {
     let root = root();
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
+    let env = Environment::from_env().rooted_at(&root);
     Environment { sandbox, ..env }
 }
 

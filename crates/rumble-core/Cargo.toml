@@ -11,6 +11,10 @@ publish = false
 [lib]
 name = "rumble_core"
 
+[features]
+# rumble_core::testing: registry items for other crates' tests.
+testing = []
+
 [lints]
 workspace = true
 

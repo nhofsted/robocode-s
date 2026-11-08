@@ -16,13 +16,7 @@ use std::path::Path;
 #[ignore = "needs Java and the built robots"]
 fn robots_that_start_threads_are_reported() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let mut env = Environment::from_env().rooted_at(&root);
     env.jars
         .push(root.join("robots/testbots/build/libs/testbots-0.1.0-SNAPSHOT.jar"));
     let config = ServerConfig {
@@ -61,13 +55,7 @@ fn robots_that_start_threads_are_reported() {
 #[ignore = "needs Java and the built robots"]
 fn a_robot_with_too_many_threads_is_punished_reproducibly() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let mut env = Environment::from_env().rooted_at(&root);
     env.jars
         .push(root.join("robots/testbots/build/libs/testbots-0.1.0-SNAPSHOT.jar"));
     let config = ServerConfig {

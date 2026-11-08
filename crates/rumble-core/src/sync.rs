@@ -773,41 +773,22 @@ mod tests {
         dv: &[Division],
     ) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.into(),
             version: name.into(),
-            sha256: format!("{vid:064x}"),
-            size: 100,
-            codesize: Some(100),
-            class: WeightClass::Mega,
             divisions: dv.to_vec(),
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.into(),
             created: 1,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, versions: &[u32], current: u32, dv: &[Division]) -> BotItem {
         BotItem {
-            id: id.into(),
             author: "Ann".into(),
-            owner: None,
-            homepage: None,
-            description: None,
             divisions: dv.to_vec(),
             versions: versions.to_vec(),
             current: Some(current),
-            state: BotState::Active,
             created: 1,
-            source: BotSource::Import,
+            ..crate::testing::bot(id)
         }
     }
 

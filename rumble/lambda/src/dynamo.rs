@@ -1424,17 +1424,15 @@ mod tests {
         };
         assert_eq!(user_from(&user_item(&user)).unwrap(), user);
         let bot = BotItem {
-            id: "a.B".into(),
             author: "Ann".into(),
             owner: Some("g1".into()),
-            homepage: None,
             description: Some("d".into()),
             divisions: vec![Division::OneVsOne, Division::Melee],
             versions: vec![3, 1],
             current: Some(1),
             state: BotState::Delisted,
             created: 7,
-            source: BotSource::Import,
+            ..rumble_core::testing::bot("a.B")
         };
         assert_eq!(bot_from(&bot_item(&bot)).unwrap(), bot);
         let version = VersionItem {

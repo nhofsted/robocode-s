@@ -392,7 +392,7 @@ impl Model {
                     BattleStatus::Error => self.totals.errors += 1,
                     BattleStatus::NotRun => self.totals.not_run += 1,
                 }
-                if let Some(line) = result_line(&event) {
+                if let Some(line) = event.result_line() {
                     let bad = matches!(status, BattleStatus::Error);
                     self.result(line.clone());
                     if status != BattleStatus::Ok {
@@ -435,58 +435,6 @@ impl Model {
             Event::Error { text } => self.note(now, &format!("error: {text}"), true),
         }
     }
-}
-
-/// The line for a finished battle, if it is worth one (a battle that was only stopped
-/// isn't).
-pub fn result_line(event: &Event) -> Option<String> {
-    let Event::BattleDone {
-        division,
-        bots,
-        status,
-        scores,
-        ranks,
-        duration_ms,
-        detail,
-        ..
-    } = event
-    else {
-        return None;
-    };
-    let seconds = duration_ms.map(|ms| format!(" ({:.0} s)", ms as f64 / 1000.0));
-    let who = match bots.len() {
-        0 | 1 => bots.join(""),
-        2 => format!("{} vs {}", bots[0], bots[1]),
-        n => format!("{} + {} others", bots[0], n - 1),
-    };
-    let outcome = match status {
-        BattleStatus::Ok if bots.len() == 2 && scores.len() == 2 => {
-            let total = scores[0] + scores[1];
-            let share = if total > 0.0 {
-                100.0 * scores[0] / total
-            } else {
-                50.0
-            };
-            format!("{share:.1}%")
-        }
-        BattleStatus::Ok => format!(
-            "rank {} of {}",
-            ranks.first().copied().unwrap_or(0),
-            bots.len()
-        ),
-        BattleStatus::RobotFailed => {
-            format!("robot failed ({})", detail.as_deref().unwrap_or("?"))
-        }
-        BattleStatus::Error => format!("could not run ({})", detail.as_deref().unwrap_or("?")),
-        BattleStatus::NotRun => match detail.as_deref() {
-            Some("stopped") | None => return None,
-            Some(d) => format!("not run ({d})"),
-        },
-    };
-    Some(format!(
-        "{division} {who}: {outcome}{}",
-        seconds.unwrap_or_default()
-    ))
 }
 
 /// "2:05" for a countdown.

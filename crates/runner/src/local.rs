@@ -728,6 +728,19 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// This environment with its relative paths (a built source tree's, see
+    /// [`from_env`](Self::from_env)) taken from `root`, the source tree: for tests and
+    /// examples, which run in a crate's folder.
+    pub fn rooted_at(mut self, root: &Path) -> Self {
+        for path in [&mut self.host_lib, &mut self.agent_jar, &mut self.data] {
+            if path.is_relative() {
+                *path = root.join(&*path);
+            }
+        }
+        self.jars = self.jars.iter().map(|j| root.join(j)).collect();
+        self
+    }
+
     /// From `ROBOCODES_JAVA`, `ROBOCODES_HOST_LIB`, `ROBOCODES_AGENT_JAR`, `ROBOCODES_DATA`
     /// and `ROBOCODES_ROBOT_JARS` (a path list of jars and class folders), else the paths
     /// of a built source tree.

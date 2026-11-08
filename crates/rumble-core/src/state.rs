@@ -4,7 +4,6 @@
 //! pairing the battle count and sums of the pairing score and survival, per version the battle
 //! and failure tallies, and the `pairings.bin` file. Pure: bytes in, bytes out.
 
-use crate::config::Config;
 use crate::ids::Division;
 use crate::record::{Record, division_code, division_from_code, pairing_score, pairing_survival};
 use flate2::Compression;
@@ -127,6 +126,7 @@ impl VersionTally {
     }
 
     /// How many of the last 20 outcomes exist.
+    #[cfg(test)]
     pub fn recent_battles(&self) -> u32 {
         self.battles.min(20)
     }
@@ -171,7 +171,13 @@ impl State {
     }
 
     /// The derived statistics of a pairing (`None` if no battle), from the lower vid's side.
-    pub fn pairing_stats(&self, a: u32, b: u32, config: &Config) -> Option<PairingStats> {
+    #[cfg(test)]
+    pub fn pairing_stats(
+        &self,
+        a: u32,
+        b: u32,
+        config: &crate::config::Config,
+    ) -> Option<PairingStats> {
         let prior = *config.plan.prior_variance.get(self.division);
         self.pairing(a, b)
             .map(|p| p.stats(prior, config.plan.prior_weight))
@@ -289,29 +295,6 @@ impl State {
         self.versions.retain(|vid, _| !set.contains(vid));
         self.pairings
             .retain(|(a, b), _| !set.contains(a) && !set.contains(b));
-    }
-
-    /// Replaces the tallies and pairings of the versions in `set` with those of `from`, a
-    /// state of the same engine and division folded from the log over the same hours (the
-    /// batch `restore` mode: retired versions whose pairings an older planner dropped).
-    /// Returns the pairings restored.
-    pub fn restore_versions(&mut self, from: &State, set: &HashSet<u32>) -> usize {
-        self.versions.retain(|vid, _| !set.contains(vid));
-        self.pairings
-            .retain(|(a, b), _| !set.contains(a) && !set.contains(b));
-        for (vid, tally) in &from.versions {
-            if set.contains(vid) {
-                self.versions.insert(*vid, *tally);
-            }
-        }
-        let mut restored = 0;
-        for (&(a, b), p) in &from.pairings {
-            if set.contains(&a) || set.contains(&b) {
-                self.pairings.insert((a, b), *p);
-                restored += 1;
-            }
-        }
-        restored
     }
 
     /// `pairings.bin`: gzip of the layout in §10.5 (the lengths of the file's header, versions
@@ -645,7 +628,7 @@ mod tests {
         assert_eq!(none.stats(16.0, 3.0).se, 4.0);
 
         // Through the config: 1v1 prior 16, weight 3.
-        let config = Config::default();
+        let config = crate::config::Config::default();
         let via = s.pairing_stats(2, 1, &config).unwrap();
         assert!((via.shrunk_variance - 49.6).abs() < 1e-9);
         assert!(s.pairing_stats(1, 9, &config).is_none());
@@ -662,27 +645,6 @@ mod tests {
         assert!(s.pairing(1, 3).is_some());
         assert_eq!(s.versions.keys().copied().collect::<Vec<_>>(), [1, 3]);
         assert_eq!(s.battles, 3, "the division count is not recomputed");
-    }
-
-    #[test]
-    fn restore_versions() {
-        // The live state lost version 2 (an older planner dropped it) and then folded one late
-        // battle of it; the refolded state has all of its battles.
-        let mut live = state();
-        live.fold(&duel(entry(1, 1.0, 1), entry(3, 1.0, 1)), 1);
-        live.fold(&duel(entry(2, 1.0, 1), entry(3, 3.0, 1)), 2);
-        let mut full = state();
-        full.fold(&duel(entry(1, 1.0, 1), entry(3, 1.0, 1)), 1);
-        full.fold(&duel(entry(1, 1.0, 1), entry(2, 3.0, 1)), 1);
-        full.fold(&duel(entry(2, 1.0, 1), entry(3, 3.0, 1)), 1);
-        full.fold(&duel(entry(2, 1.0, 1), entry(3, 3.0, 1)), 2);
-        assert_eq!(live.restore_versions(&full, &HashSet::from([2])), 2);
-        assert_eq!(live.pairing(1, 2), full.pairing(1, 2));
-        assert_eq!(live.pairing(2, 3).unwrap().n, 2);
-        assert_eq!(live.versions[&2], full.versions[&2]);
-        // Others are left as they were.
-        assert_eq!(live.pairing(1, 3).unwrap().n, 1);
-        assert_eq!(live.battles, 2);
     }
 
     #[test]

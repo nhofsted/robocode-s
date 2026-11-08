@@ -17,13 +17,7 @@ use std::sync::mpsc;
 #[ignore = "needs Java and the built robots"]
 fn a_local_battle_stops_with_the_results_so_far() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let env = Environment::from_env().rooted_at(&root);
     let config = ServerConfig {
         rules: BattleRules {
             num_rounds: 10,

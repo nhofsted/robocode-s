@@ -450,11 +450,6 @@ fn absolute_if_path(p: &Path) -> io::Result<PathBuf> {
     }
 }
 
-/// A fresh home directory for one robot of one battle.
-pub fn robot_home(base: &Path, battle: &str, robot_index: usize) -> PathBuf {
-    base.join(battle).join(format!("robot-{robot_index}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -500,7 +500,7 @@ pub fn hex_to_base64(hex: &str) -> Option<String> {
     Some(STANDARD.encode(bytes))
 }
 
-/// Parses the vid part of a slot item key (for tools).
+/// Parses the vid part of a slot item key (also a recordings cache key).
 pub fn parse_key(division: Division, key: &str) -> Result<Group, String> {
     match division {
         Division::OneVsOne => {

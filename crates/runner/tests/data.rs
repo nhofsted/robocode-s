@@ -18,13 +18,7 @@ use std::sync::Arc;
 
 fn environment(sandbox: Sandbox) -> Environment {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut env = Environment::from_env();
-    for path in [&mut env.host_lib, &mut env.agent_jar, &mut env.data] {
-        if path.is_relative() {
-            *path = root.join(&*path);
-        }
-    }
-    env.jars = env.jars.iter().map(|j| root.join(j)).collect();
+    let env = Environment::from_env().rooted_at(&root);
     Environment { sandbox, ..env }
 }
 

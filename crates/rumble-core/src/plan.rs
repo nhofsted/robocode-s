@@ -295,11 +295,6 @@ impl Priorities {
         self.vids[i]
     }
 
-    /// The index of a vid.
-    pub fn index_of(&self, vid: u32) -> Option<usize> {
-        self.vids.binary_search(&vid).ok()
-    }
-
     /// `contested_{X,r}` of bot `i` in the rumble of `class` (0 if the bot isn't a member).
     pub fn contested(&self, i: usize, class: WeightClass) -> f64 {
         self.contested[i][class_index(class)]

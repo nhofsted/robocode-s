@@ -193,7 +193,6 @@ const post = <T>(path: string, body: unknown, options: Options = {}) =>
 export const loginUrl = (returnPath: string) =>
 	`${API_BASE}/auth/login?return=${encodeURIComponent(returnPath)}`;
 
-export const getInfo = (o?: Options) => get<Info>('info', o);
 export const getMe = (o?: Options) => get<Me>('me', o);
 export const updateMe = (change: { country?: string | null; hidden?: boolean }, o?: Options) =>
 	post<Me | undefined>('me', change, o);

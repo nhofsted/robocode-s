@@ -278,11 +278,6 @@ impl Api {
         }
     }
 
-    pub fn with_token(mut self, token: Option<String>) -> Api {
-        self.token = token;
-        self
-    }
-
     pub fn base_url(&self) -> &str {
         &self.base
     }
@@ -465,11 +460,6 @@ impl Api {
 
     // ---- admin endpoints (§5.4); bodies the importer and tools build themselves ----
 
-    /// `POST admin/jars/upload-url`
-    pub fn admin_upload_url(&self, request: &UploadUrlRequest) -> Result<UploadUrlResponse, Error> {
-        self.post_json("admin/jars/upload-url", request)
-    }
-
     /// `POST admin/bots/import` (§16)
     pub fn admin_import(&self, body: &Value) -> Result<Value, Error> {
         self.post_json("admin/bots/import", body)
@@ -501,11 +491,6 @@ impl Api {
     /// `POST admin/users/update`; `body` has `uid` and any of `rep`, `state`, `admin`.
     pub fn admin_users_update(&self, body: &Value) -> Result<Value, Error> {
         self.post_json("admin/users/update", body)
-    }
-
-    /// `GET admin/alerts`
-    pub fn admin_alerts(&self) -> Result<Value, Error> {
-        self.get_json("admin/alerts")
     }
 
     /// `GET admin/config`

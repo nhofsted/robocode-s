@@ -33,44 +33,12 @@ pub struct CleanupState {
     pub bans: BTreeMap<String, BanCursor>,
     /// Ban removals finished (the alert stays for 90 days; this keeps it from restarting).
     pub banned: BTreeSet<String>,
-    /// M6's reopening of slots without a robot order.
-    #[serde(default)]
-    pub rec_order: RecOrderMigration,
     /// Purges in progress, by purge id ([`PurgeCursor`]).
     #[serde(default)]
     pub purges: BTreeMap<String, PurgeCursor>,
     /// Purges finished (their alert stays for 90 days; this keeps them from restarting).
     #[serde(default)]
     pub purged: BTreeSet<String>,
-}
-
-/// The one-time reopening of slot entries without a robot order (`SlotEntry::order`): the
-/// job passes over all recordings until a pass that began at least [`ORDER_GRACE`] after the
-/// first one has completed, so that claims made before the release (and confirmed late) are
-/// caught too. Then it never looks again.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct RecOrderMigration {
-    /// Unix seconds of the first pass.
-    pub since: Option<u64>,
-    pub done: bool,
-}
-
-/// Two claim lifetimes (`slots::CLAIM_SECONDS`, an hour each): after this, no claim made
-/// before the first pass can be confirmed any more.
-pub const ORDER_GRACE: u64 = 2 * crate::slots::CLAIM_SECONDS;
-
-impl RecOrderMigration {
-    /// Notes a pass that began at `now`; returns whether it was the first.
-    pub fn begin(&mut self, now: u64) {
-        self.since.get_or_insert(now);
-    }
-
-    /// A pass that began at `now` has looked at everything.
-    pub fn complete(&mut self, now: u64) {
-        if self.since.is_some_and(|since| now >= since + ORDER_GRACE) {
-            self.done = true;
-        }
-    }
 }
 
 /// The progress of one ban removal: the log is walked backwards, one hourly partition at a
@@ -506,7 +474,7 @@ pub fn correction_items(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::WeightClass;
+
     use crate::record::Entry;
     use crate::record::FailReason;
     use crate::store::{Reputation, UserState};
@@ -515,25 +483,14 @@ mod tests {
 
     fn version(vid: u32, bot: &str, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
             version: "1".into(),
             sha256: format!("{vid:02x}").repeat(32),
             size: 1,
             codesize: None,
-            class: WeightClass::Mega,
             divisions: vec![Division::OneVsOne, Division::Melee],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
             created: NOW,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
