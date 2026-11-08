@@ -179,6 +179,9 @@ pub struct WorkQuery {
     pub max: u32,
     pub divisions: Vec<Division>,
     pub slots: u32,
+    /// `twice=1`: the client runs a battle twice when told to ([`WorkBattle::twice`], §11.3);
+    /// only such clients are served stage 2 verification items. Absent: false.
+    pub twice: bool,
 }
 
 impl WorkQuery {
@@ -186,17 +189,20 @@ impl WorkQuery {
     pub fn to_query(&self) -> String {
         let divisions: Vec<&str> = self.divisions.iter().map(|d| d.as_str()).collect();
         format!(
-            "engine={}&max={}&divisions={}&slots={}",
+            "engine={}&max={}&divisions={}&slots={}{}",
             self.engine,
             self.max,
             divisions.join(","),
-            self.slots
+            self.slots,
+            if self.twice { "&twice=1" } else { "" }
         )
     }
 
-    /// Parses a query string (`slots` optional, default 1; `divisions` optional, default all).
+    /// Parses a query string (`slots` optional, default 1; `divisions` optional, default all;
+    /// `twice` optional, `1` for true).
     pub fn parse(query: &str) -> Result<WorkQuery, String> {
         let (mut engine, mut max, mut divisions, mut slots) = (None, None, None, 1);
+        let mut twice = false;
         for pair in query.split('&').filter(|pair| !pair.is_empty()) {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
             let number = |name: &str| {
@@ -208,6 +214,7 @@ impl WorkQuery {
                 "engine" => engine = Some(number("engine")?),
                 "max" => max = Some(number("max")?),
                 "slots" => slots = number("slots")?,
+                "twice" => twice = value == "1" || value == "true",
                 "divisions" => {
                     let list = value
                         .split(',')
@@ -228,6 +235,7 @@ impl WorkQuery {
             max,
             divisions: divisions.unwrap_or_else(|| Division::ALL.to_vec()),
             slots,
+            twice,
         })
     }
 }
@@ -278,6 +286,11 @@ pub struct WorkBattle {
     pub rules: Rules,
     /// In the battle's robot order.
     pub bots: Vec<WorkBot>,
+    /// Run the battle twice with the same seed and report the second run's battle hash as
+    /// [`BattleResult::repeat_hash`]: a stage 2 verification (§11.3). Only sent to clients
+    /// that ask with [`WorkQuery::twice`]; absent when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub twice: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -424,6 +437,10 @@ pub struct BattleResult {
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub battle_hash: Option<String>,
+    /// For a battle served with [`WorkBattle::twice`]: the second run's battle hash, when
+    /// both runs were `ok` (§11.3). Absent otherwise and from older clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub robots: Option<Vec<RobotResult>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -978,6 +995,28 @@ mod tests {
     }
 
     #[test]
+    fn twice_and_repeat_hash_are_optional() {
+        // Older servers' work and older clients' results have neither (and round-trip without
+        // them, see `work` and `results`); present, they round-trip.
+        let work: WorkResponse = serde_json::from_str(WORK).unwrap();
+        assert!(!work.battles[0].twice);
+        let results: ResultsRequest = serde_json::from_str(RESULTS).unwrap();
+        assert_eq!(results.battles[0].repeat_hash, None);
+        let twice = WORK.replace(
+            r#""kind": "normal","#,
+            r#""kind": "verify", "twice": true,"#,
+        );
+        let work: WorkResponse = round_trip(&twice);
+        assert!(work.battles[0].twice);
+        let repeated = RESULTS.replace(
+            r#""battleHash": "<hex sha256>","#,
+            r#""battleHash": "<hex sha256>", "repeatHash": "<other>","#,
+        );
+        let results: ResultsRequest = round_trip(&repeated);
+        assert_eq!(results.battles[0].repeat_hash.as_deref(), Some("<other>"));
+    }
+
+    #[test]
     fn seeds_cover_all_of_i64() {
         let mut work: WorkResponse = serde_json::from_str(WORK).unwrap();
         for seed in [i64::MIN, i64::MAX, 0] {
@@ -1108,15 +1147,26 @@ mod tests {
             max: 20,
             divisions: vec![Division::OneVsOne, Division::Melee],
             slots: 4,
+            twice: false,
         };
         assert_eq!(
             query.to_query(),
             "engine=1&max=20&divisions=1v1,melee&slots=4"
         );
-        assert_eq!(WorkQuery::parse(&query.to_query()), Ok(query));
+        assert_eq!(WorkQuery::parse(&query.to_query()), Ok(query.clone()));
+        let twice = WorkQuery {
+            twice: true,
+            ..query
+        };
+        assert_eq!(
+            twice.to_query(),
+            "engine=1&max=20&divisions=1v1,melee&slots=4&twice=1"
+        );
+        assert_eq!(WorkQuery::parse(&twice.to_query()), Ok(twice));
         let minimal = WorkQuery::parse("engine=2&max=5").unwrap();
         assert_eq!(minimal.divisions, Division::ALL.to_vec());
         assert_eq!(minimal.slots, 1);
+        assert!(!minimal.twice);
         assert!(WorkQuery::parse("max=5").is_err());
         assert!(WorkQuery::parse("engine=1&max=0").is_err());
         assert!(WorkQuery::parse("engine=1&max=5&divisions=teams").is_err());

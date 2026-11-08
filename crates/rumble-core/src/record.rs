@@ -389,6 +389,7 @@ mod tests {
             status,
             duration_ms: None,
             battle_hash: None,
+            repeat_hash: None,
             robots: None,
             rounds: None,
             failure: None,

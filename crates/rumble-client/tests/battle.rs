@@ -66,6 +66,7 @@ fn battle(seed: i64, bots: &[&str]) -> WorkBattle {
             hide_enemy_names: false,
         },
         bots: bots.iter().map(|b| bot(b)).collect(),
+        twice: false,
     }
 }
 
@@ -217,4 +218,20 @@ fn a_missing_robot_fails_to_load() {
     assert_eq!(failure.robot, 1);
     assert_eq!(failure.reason, FailureReason::Load);
     assert!(failure.detail.unwrap().contains("not found"));
+}
+
+#[test]
+#[ignore = "needs Java and the built robots"]
+fn a_battle_served_twice_runs_twice() {
+    let runner = runner();
+    let mut work = battle(42, &["sample.Walls", "sample.Crazy"]);
+    work.twice = true;
+    let outcome = run(&runner, &work);
+    ok(&outcome);
+    assert!(outcome.result.repeat_hash.is_some());
+    assert_eq!(outcome.result.repeat_hash, outcome.result.battle_hash);
+    assert_eq!(outcome.tracks.len(), 3, "one run's tracks");
+    let once = run(&runner, &battle(42, &["sample.Walls", "sample.Crazy"]));
+    assert_eq!(once.result.repeat_hash, None);
+    assert_eq!(once.result.battle_hash, outcome.result.battle_hash);
 }

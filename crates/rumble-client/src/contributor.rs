@@ -855,6 +855,8 @@ impl Contributor {
             max,
             divisions: self.offered.clone(),
             slots: self.slots as u32,
+            // Battles with `twice` run twice (`Runner::run_with`, §11.3).
+            twice: true,
         };
         match self.api.work(&query) {
             Ok(crate::http::Work::Wait(after)) => Fetched::Retry {
@@ -1677,6 +1679,7 @@ fn status_only(index: u32, status: BattleStatus) -> BattleResult {
         status,
         duration_ms: None,
         battle_hash: None,
+        repeat_hash: None,
         robots: None,
         rounds: None,
         failure: None,

@@ -123,6 +123,13 @@ pub fn validate(
             if !is_sha256_hex(hash) {
                 return Err("battleHash: not 64 lowercase hex digits".to_string());
             }
+            if battle
+                .repeat_hash
+                .as_deref()
+                .is_some_and(|h| !is_sha256_hex(h))
+            {
+                return Err("repeatHash: not 64 lowercase hex digits".to_string());
+            }
             let robots = battle.robots.as_ref().ok_or("robots missing")?;
             if robots.len() != n {
                 return Err(format!("robots: {} of {n}", robots.len()));
@@ -407,6 +414,8 @@ pub fn apply_results<S: Store + ?Sized>(
                             held: false,
                             colors: run_colors(battle),
                         },
+                        // The second run of a battle served to run twice (§11.3).
+                        battle.repeat_hash.clone().filter(|_| assigned.twice),
                     )),
                     _ => given_back.push(sort.clone()),
                 }
@@ -551,12 +560,14 @@ pub fn apply_results<S: Store + ?Sized>(
     for sort in &hard_limited {
         verify::settle_hard_limit(store, engine, sort, &user.uid, now_ms)?;
     }
-    for (index, sort, run) in runs {
+    for (index, sort, run, repeat) in runs {
         let origin = format!("{}.{index}", payload.id);
-        match verify::resolve(store, config, engine, &sort, run, &origin, now_ms)? {
-            Outcome::Disagreement { log: line, .. } | Outcome::Majority { log: line, .. } => {
-                log.push(line)
-            }
+        let repeat = repeat.as_deref();
+        match verify::resolve_repeated(store, config, engine, &sort, run, repeat, &origin, now_ms)?
+        {
+            Outcome::Disagreement { log: line, .. }
+            | Outcome::Majority { log: line, .. }
+            | Outcome::Unreproducible { log: line, .. } => log.push(line),
             _ => {}
         }
     }
@@ -766,6 +777,7 @@ mod tests {
             rounds: ROUNDS,
             vids: vids.to_vec(),
             item: item.map(str::to_string),
+            twice: false,
         }
     }
 
@@ -828,6 +840,7 @@ mod tests {
             status: BattleStatus::Ok,
             duration_ms: Some(1000),
             battle_hash: Some(hex(hash)),
+            repeat_hash: None,
             robots: Some(vec![robot(330.0, 3), robot(151.5, 1)]),
             rounds: Some(rounds),
             failure: None,
@@ -840,6 +853,7 @@ mod tests {
             status,
             duration_ms: None,
             battle_hash: None,
+            repeat_hash: None,
             robots: None,
             rounds: None,
             failure: (status == BattleStatus::RobotFailed).then_some(Failure {
@@ -1027,6 +1041,7 @@ mod tests {
             &|b| b.battle_hash = Some(hex(0xab).to_uppercase()),
             "battleHash",
         );
+        broken(&|b| b.repeat_hash = Some("abc".into()), "repeatHash");
         broken(&|b| rounds(b)[3].hash = "abc".into(), "rounds[3].hash");
         broken(
             &|b| rounds(b)[3].track.as_mut().unwrap().sha256 = "x".into(),
@@ -1577,6 +1592,84 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn a_tie_breakers_differing_repeat_is_an_alert() {
+        let (store, user) = setup(60, UserState::New);
+        for uid in ["g2", "g3"] {
+            store
+                .create_user(&User {
+                    uid: uid.into(),
+                    ..User::default()
+                })
+                .unwrap();
+        }
+        let run_of = |uid: &str, hash: u8| {
+            let battle = ok(0, hash);
+            let record =
+                Record::from_battle(Division::OneVsOne, uid, &[5, 9], &battle, false).unwrap();
+            Run {
+                uid: uid.into(),
+                hash: Some(hex(hash)),
+                record: record.to_bytes(),
+                held: false,
+                colors: Vec::new(),
+            }
+        };
+        let item = VerifyItem {
+            engine: 1,
+            sort: "0000000000001#x.0".into(),
+            division: Division::OneVsOne,
+            seed: 5,
+            bots: vec![5, 9],
+            rounds: ROUNDS,
+            uids: vec!["g2".into(), "g3".into()],
+            runs: vec![run_of("g2", 7), run_of("g3", 8)],
+            stage: 2,
+            claimant: None,
+            claim_until: None,
+            kind: VerifyKind::Check,
+            ttl: 0,
+        };
+        let mut never = config();
+        never.rep.start_rate = 0.0;
+        never.rep.floor_rate = 0.0;
+        let post = |twice: bool, repeat: u8| {
+            store.put_verify(&item).unwrap();
+            let taken = verify::take_work(&store, 1, "g1", 5, NOW + 3600, NOW).unwrap();
+            assert_eq!(taken.len(), 1);
+            let mut assigned = assigned(BattleKind::Verify, 5, &[5, 9], Some("0000000000001#x.0"));
+            assigned.twice = twice;
+            let mut p = payload("g1", vec![assigned]);
+            p.id = format!("b-{twice}");
+            let mut mine = ok(0, 7);
+            mine.repeat_hash = Some(hex(repeat));
+            post_with(
+                &store,
+                &user,
+                &never,
+                &|_, _| false,
+                &request(&p, vec![mine]),
+                NOW_MS,
+            )
+            .unwrap()
+        };
+        // Its two runs differ: an alert, nobody penalized.
+        let out = post(true, 99);
+        assert_eq!(out.log, ["ALERT nondeterministic-bot 0000000000001#x.0"]);
+        assert!(store.verify_items(1).is_empty());
+        assert_eq!(
+            store.get_user("g3").unwrap().unwrap().reputation.mismatches,
+            0
+        );
+        // A repeat hash on a battle not served twice is ignored: the tie is broken.
+        let out = post(false, 99);
+        assert!(out.log[0].starts_with("PENALTY "), "{:?}", out.log);
+        assert_eq!(
+            store.get_user("g3").unwrap().unwrap().reputation.mismatches,
+            1
+        );
     }
 
     #[test]

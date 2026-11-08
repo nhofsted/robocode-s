@@ -97,6 +97,7 @@ fn main() {
                 hide_enemy_names: false,
             },
             bots,
+            twice: false,
         };
         let outcome = runner.run(&battle, &jars);
         println!(

@@ -131,6 +131,7 @@ pub fn ok_result(batch: &str, battle: &WorkBattle) -> BattleResult {
         battle_hash: Some(sha_hex(
             format!("battle {} {}", battle.seed, battle.index).as_bytes(),
         )),
+        repeat_hash: None,
         robots: Some(
             (0..n)
                 .map(|i| RobotResult {

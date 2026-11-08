@@ -112,6 +112,7 @@ impl Outcome {
                 status,
                 duration_ms: None,
                 battle_hash: None,
+                repeat_hash: None,
                 robots: None,
                 rounds: None,
                 failure: None,
@@ -222,13 +223,38 @@ impl Runner {
     }
 
     /// [`Runner::run`], reporting `progress`; `abort` set stops it (the battle is then
-    /// `notRun`).
+    /// `notRun`). A battle with [`WorkBattle::twice`] runs a second time after an `ok` first
+    /// run ([`with_repeat`]); its progress then counts the rounds of both runs.
     pub fn run_with(
         &self,
         battle: &WorkBattle,
         jars: &[PathBuf],
         abort: Option<&AtomicBool>,
         mut progress: impl FnMut(Progress),
+    ) -> Outcome {
+        if !battle.twice {
+            return self.run_once(battle, jars, abort, &mut progress);
+        }
+        let rounds = battle.rules.rounds;
+        let of = 2 * rounds;
+        let first = self.run_once(battle, jars, abort, &mut |Progress::Round { n, .. }| {
+            progress(Progress::Round { n, of })
+        });
+        if first.result.status != BattleStatus::Ok {
+            return first;
+        }
+        let second = self.run_once(battle, jars, abort, &mut |Progress::Round { n, .. }| {
+            progress(Progress::Round { n: rounds + n, of })
+        });
+        with_repeat(first, second)
+    }
+
+    fn run_once(
+        &self,
+        battle: &WorkBattle,
+        jars: &[PathBuf],
+        abort: Option<&AtomicBool>,
+        progress: &mut dyn FnMut(Progress),
     ) -> Outcome {
         let index = battle.index;
         // A data snapshot this client doesn't understand: running without it would misrun.
@@ -400,6 +426,7 @@ impl Runner {
                 status: BattleStatus::Ok,
                 duration_ms: Some(started.elapsed().as_millis() as u64),
                 battle_hash: Some(hash::hex(&battle_hash)),
+                repeat_hash: None,
                 robots: Some(robots),
                 rounds: Some(rounds),
                 failure: None,
@@ -409,6 +436,47 @@ impl Runner {
             snapshots,
         }
     }
+}
+
+/// A battle run twice (§11.3): the first run's outcome (its tracks, the only ones uploaded)
+/// with the second run's battle hash as `repeatHash`, the time of both runs, and the robots'
+/// `threads` and `hardLimit` of either run (a hard limit in the second run alone would
+/// otherwise look like a nondeterministic robot). A second run that isn't `ok` proves
+/// nothing about the robots: an `error` stays one (this client's failure), anything else
+/// (stopped, a robot that failed this time) is `notRun`, so the item goes back to the queue.
+pub fn with_repeat(mut first: Outcome, second: Outcome) -> Outcome {
+    let index = first.result.index;
+    match second.result.status {
+        BattleStatus::Ok => {}
+        BattleStatus::Error => {
+            return Outcome {
+                why: second.why.map(|why| format!("the second run: {why}")),
+                ..Outcome::status(index, BattleStatus::Error)
+            };
+        }
+        status => {
+            let why = match (&second.result.failure, second.why) {
+                (Some(f), _) => {
+                    format!("the second run: robot {} failed ({:?})", f.robot, f.reason)
+                }
+                (None, Some(why)) => format!("the second run: {why}"),
+                (None, None) => format!("the second run: {status:?}"),
+            };
+            return not_run(index, &why);
+        }
+    }
+    first.result.repeat_hash = second.result.battle_hash;
+    first.result.duration_ms = match (first.result.duration_ms, second.result.duration_ms) {
+        (Some(a), Some(b)) => Some(a + b),
+        (a, b) => a.or(b),
+    };
+    if let (Some(robots), Some(again)) = (&mut first.result.robots, &second.result.robots) {
+        for (robot, again) in robots.iter_mut().zip(again) {
+            robot.threads |= again.threads;
+            robot.hard_limit |= again.hard_limit;
+        }
+    }
+    first
 }
 
 fn error(index: u32, why: &str) -> Outcome {
@@ -602,6 +670,46 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn ok(hash: &str, ms: u64) -> Outcome {
+        let mut outcome = Outcome::status(3, BattleStatus::Ok);
+        outcome.result.battle_hash = Some(hash.into());
+        outcome.result.duration_ms = Some(ms);
+        outcome.result.robots = Some(vec![robot_result(&v1::Results::default()); 2]);
+        outcome.tracks = vec![vec![1, 2, 3]];
+        outcome
+    }
+
+    #[test]
+    fn a_repeated_battle_reports_the_second_hash() {
+        let mut second = ok("b", 20);
+        second.result.robots.as_mut().unwrap()[1].hard_limit = true;
+        second.tracks = vec![vec![9]];
+        let both = with_repeat(ok("a", 10), second);
+        assert_eq!(both.result.status, BattleStatus::Ok);
+        assert_eq!(both.result.battle_hash.as_deref(), Some("a"));
+        assert_eq!(both.result.repeat_hash.as_deref(), Some("b"));
+        assert_eq!(both.result.duration_ms, Some(30));
+        assert_eq!(both.tracks, [vec![1, 2, 3]], "the first run's tracks only");
+        let robots = both.result.robots.unwrap();
+        assert!(!robots[0].hard_limit && robots[1].hard_limit);
+
+        // A second run that isn't ok gives the battle back, or is this client's error.
+        let failed = Outcome::failed(3, 1, FailureReason::Crash, "gone");
+        let back = with_repeat(ok("a", 10), failed);
+        assert_eq!(back.result.status, BattleStatus::NotRun);
+        assert_eq!(back.result.repeat_hash, None);
+        assert!(back.tracks.is_empty());
+        assert_eq!(
+            with_repeat(ok("a", 10), not_run(3, "stopped"))
+                .result
+                .status,
+            BattleStatus::NotRun
+        );
+        let broken = with_repeat(ok("a", 10), error(3, "no JRE"));
+        assert_eq!(broken.result.status, BattleStatus::Error);
+        assert_eq!(broken.why.as_deref(), Some("the second run: no JRE"));
     }
 
     #[test]
