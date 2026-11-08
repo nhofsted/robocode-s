@@ -845,6 +845,14 @@ fn correct<S: Store + ?Sized>(
     now_ms: u64,
 ) -> StoreResult<()> {
     let bad = |e: String| StoreError::Other(format!("verification item {}: {e}", item.sort));
+    // A check and a recheck can both reach a counted wrong record; only the first corrects.
+    let hex: String = wrong.record.iter().map(|b| format!("{b:02x}")).collect();
+    let marker = format!("{}#{hex}", item.seed);
+    match store.mark_corrected(item.engine, &marker, now_ms / 1000 + LOG_TTL) {
+        Ok(()) => {}
+        Err(StoreError::ConditionFailed) => return Ok(()),
+        Err(e) => return Err(e),
+    }
     let (wrong_record, _) = Record::decode(&wrong.record, SYSTEM_UID).map_err(bad)?;
     let (mut right_record, _) = Record::decode(&right.record, SYSTEM_UID).map_err(bad)?;
     right_record.weight = 1;
@@ -1369,6 +1377,46 @@ mod tests {
         assert_eq!(records[1].weight, 1);
         assert_eq!(records[1].contestants[0].score, 2000.0);
         assert_eq!(logs[0].seeds, [77, 77]);
+    }
+
+    #[test]
+    fn a_check_and_a_recheck_of_one_battle_correct_it_once() {
+        let store = MemStore::new();
+        let c = config();
+        for (uid, rep) in [("g1", 30), ("g2", 60), ("g3", 70)] {
+            add_user(&store, uid, rep, UserState::New);
+        }
+        let mut recheck = check_item(run("g1", "bad", 9999.0, false));
+        recheck.sort = "0000000000002#b0.rc00".to_string();
+        recheck.kind = VerifyKind::Recheck;
+        recheck.runs[0].hash = None;
+        store
+            .put_verify(&check_item(run("g1", "bad", 9999.0, false)))
+            .unwrap();
+        store.put_verify(&recheck).unwrap();
+        for sort in ["0000000000001#b0.0", "0000000000002#b0.rc00"] {
+            for (uid, post) in [("g2", "a"), ("g3", "b")] {
+                claim_sort(&store, uid, sort);
+                resolve(
+                    &store,
+                    &c,
+                    1,
+                    sort,
+                    run(uid, "good", 2000.0, false),
+                    &format!("{post}-{sort}"),
+                    NOW_MS,
+                )
+                .unwrap();
+            }
+        }
+        assert!(store.verify_items(1).is_empty(), "both items resolved");
+        let corrections: Vec<_> = store
+            .log_items(1)
+            .into_iter()
+            .filter(|l| l.uid == SYSTEM_UID)
+            .collect();
+        assert_eq!(corrections.len(), 1, "one correction pair, not two");
+        assert_eq!(corrections[0].battles, 2);
     }
 
     #[test]
