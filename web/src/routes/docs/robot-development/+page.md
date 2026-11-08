@@ -3,9 +3,9 @@ title: Developing a robot
 description: How to set up, test, debug and release a Robocode robot with robocode-s, from the first build to the rumble.
 ---
 
-This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages (Python in milestone M5; .NET, Rust, C/C++ and Kotlin in M8) are not started and will get their own sections.
+This guide covers the whole loop: setting up a robot project, running battles, finding out why your robot does what it does, and releasing a version to the rumble. It is written for Java robots on the classic API, the only kind robocode-s runs today; native APIs for other languages (Python, .NET, Rust, C/C++ and Kotlin) are shelved until after 1.0 and will get their own sections then.
 
-> **Status:** running, testing and debugging battles works today from the command line and the GUI. The parts marked *planned* depend on the rumble (M5) or on tools still to come.
+> **Status:** running, testing and debugging battles works today from the command line and the GUI. The parts marked *planned* depend on tools still to come.
 
 ## How your robot runs
 

@@ -4,18 +4,19 @@
 	import { REPO_URL } from '#lib/site.ts';
 	import { VERSION } from '#lib/release.ts';
 
-	const milestones: { id: string; name: string; state: 'done' | 'active' | 'planned' }[] = [
+	const milestones: { id: string; name: string; state: 'done' | 'active' | 'shelved' }[] = [
 		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
 		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'done' },
 		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'done' },
 		{ id: 'M3', name: 'Sandbox, remote runners, installers', state: 'done' },
 		{ id: 'M4', name: 'The rumble: rankings, volunteers, submissions', state: 'done' },
-		{ id: 'M5', name: 'Robots in Python', state: 'planned' },
 		{ id: 'M6', name: 'Battle replays in the browser', state: 'done' },
-		{ id: 'M7', name: 'Online editor', state: 'planned' },
-		{ id: 'M8', name: 'Robots in .NET, Rust, C/C++, Kotlin', state: 'planned' }
+		{ id: '1.0', name: 'First stable release', state: 'active' },
+		{ id: 'M5', name: 'Robots in Python', state: 'shelved' },
+		{ id: 'M7', name: 'Online editor', state: 'shelved' },
+		{ id: 'M8', name: 'Robots in .NET, Rust, C/C++, Kotlin', state: 'shelved' }
 	];
-	const STATE_LABEL = { done: 'Done', active: 'In progress', planned: 'Planned' };
+	const STATE_LABEL = { done: 'Done', active: 'In progress', shelved: 'After 1.0' };
 
 	// The home page shows more of the battlefield floor than content pages.
 	$effect(() => {
@@ -62,10 +63,10 @@
 			</p>
 		</article>
 		<article class="panel">
-			<h2 class="kicker">Any language</h2>
+			<h2 class="kicker">Isolated</h2>
 			<p>
-				Robots talk to the engine over an open protocol, so they can be written in Java, Kotlin,
-				Python, C#, Rust or C/C++ and run locally, in a container or on another machine.
+				Every robot is its own process, sandboxed by the operating system, and runs locally, in a
+				container or on another machine. A robot that crashes or hangs only takes itself down.
 			</p>
 		</article>
 		<article class="panel">
@@ -92,6 +93,11 @@
 			GUI with debug painting, recordings and replays. Robots run sandboxed, locally or on
 			other machines, and battles are deterministic by default. Download it for Windows, Linux
 			and macOS from the <a href={resolve('/download')}>download page</a>. Follow along on <a href={REPO_URL}>GitHub</a>.
+		</p>
+		<p>
+			Next up is 1.0, the first stable release: fixing what is left in the classic robots, the
+			GUI and the rumble rather than adding features. Robots in other languages and the online
+			editor wait until after it.
 		</p>
 		<ol class="milestones">
 			{#each milestones as m (m.id)}
@@ -217,7 +223,8 @@
 		color: var(--text);
 		font-weight: 600;
 	}
-	.planned .name {
-		color: var(--text-2);
+	.shelved .name,
+	.shelved .id {
+		color: var(--muted);
 	}
 </style>
