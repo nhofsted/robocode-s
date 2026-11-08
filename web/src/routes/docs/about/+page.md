@@ -7,7 +7,7 @@ robocode-s rebuilds [Robocode](https://robocode.sourceforge.io/) around three id
 
 - **The engine is separate from the robots.** The battle engine is written in Rust. Robots don't run inside it: every robot is its own process, which talks to the engine over a small, open protocol. A robot that crashes, hangs or eats memory only takes itself down.
 - **Classic robots keep working.** Existing Java robot jars run unmodified, and a battle with the same seed plays out turn for turn exactly as in classic Robocode 1.11.1. That is verified by replaying recorded classic battles, including RoboRumble's top bots, and comparing every turn.
-- **Robots can be written in any language.** Because the protocol is language-neutral, robots can also be written in Kotlin, Python, C#, Rust or C/C++, and run locally, in a container or on another machine.
+- **The protocol is language-neutral.** Robots can run locally, in a container or on another machine. Today every robot is a Java robot on the classic API; client libraries for other languages (Python, .NET, Rust, C/C++, Kotlin) come after 1.0.
 
 On top of that come a GPU-accelerated desktop viewer, a deterministic mode where the same seed always gives the same battle, and [our own rumble](/docs/rumble) with a modern website and battle replays in the browser.
 
@@ -26,10 +26,11 @@ On top of that come a GPU-accelerated desktop viewer, a deterministic mode where
 | M2 | Desktop GUI: battle setup, viewer, debug painting, replay | Done: setup, live viewer with debug paint, exact recordings with replay and scrubbing |
 | M3 | Isolation and distribution: robots over stdin/stdout, a built-in sandbox (Linux, Windows), Docker as an alternative, remote runner agents with TLS, warm pools, release archives and installers | Done ([#73](https://github.com/nhofsted/robocode-s/issues/73)); released as 0.1.0 for Windows, Linux and macOS ([download](/download)) |
 | M4 | The rumble: backend, volunteer client, rankings website | Done: the rumble runs on this site; volunteers contribute battles with `robocode-s rumble` or the GUI's Rumble page ([contributing](/docs/rumble/contributing)), authors [submit](/submit) bots, and the RoboRumble participants are imported; released as 0.2.0 |
-| M5 | Robots in Python | Planned |
 | M6 | Battle replays in the browser | Done: replay pages for the rumble's recorded rounds, listed on pairing and bot pages, and a page for local `.track` files; on-demand replays are a follow-up (#113) |
-| M7 | Online editor: write, build and try a robot in the browser | Planned |
-| M8 | Robots in .NET, Rust, C/C++ and Kotlin | Planned |
+| 1.0 | First stable release | In progress: fixing what is left in the classic robots, the GUI and the rumble rather than adding features |
+| M5 | Robots in Python | Shelved until after 1.0 |
+| M7 | Online editor: write, build and try a robot in the browser | Shelved until after 1.0 |
+| M8 | Robots in .NET, Rust, C/C++ and Kotlin | Shelved until after 1.0 |
 
 ## License and contributing
 

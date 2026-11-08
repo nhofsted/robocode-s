@@ -622,6 +622,8 @@ robocode-s/
 | M8 | Robots in .NET, Rust, C/C++ and Kotlin | Client libraries plus sample robots, each with its own work counting and calibration (#15) |
 | M9+ | Extras | WASM runner, Tank Royale adapter, .NET compat |
 
+**Shelved (2026-11-08):** M5, M7 and M8 wait until after 1.0, the first stable release, which comes next: fixes to what M0–M4 and M6 built, no new features.
+
 ## 17. Open questions
 
 - **O1** ~~LiteRumble contribution~~ Decided: no; it's a non-goal.

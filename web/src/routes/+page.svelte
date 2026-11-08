@@ -4,19 +4,6 @@
 	import { REPO_URL } from '#lib/site.ts';
 	import { VERSION } from '#lib/release.ts';
 
-	const milestones: { id: string; name: string; state: 'done' | 'active' | 'planned' }[] = [
-		{ id: 'M0', name: 'Bootstrap: repository, CI, design', state: 'done' },
-		{ id: 'M1', name: 'Headless engine + classic Java robots, bit-exact', state: 'done' },
-		{ id: 'M2', name: 'Desktop GUI: viewer, debug paint, replay', state: 'done' },
-		{ id: 'M3', name: 'Sandbox, remote runners, installers', state: 'done' },
-		{ id: 'M4', name: 'The rumble: rankings, volunteers, submissions', state: 'done' },
-		{ id: 'M5', name: 'Robots in Python', state: 'planned' },
-		{ id: 'M6', name: 'Battle replays in the browser', state: 'done' },
-		{ id: 'M7', name: 'Online editor', state: 'planned' },
-		{ id: 'M8', name: 'Robots in .NET, Rust, C/C++, Kotlin', state: 'planned' }
-	];
-	const STATE_LABEL = { done: 'Done', active: 'In progress', planned: 'Planned' };
-
 	// The home page shows more of the battlefield floor than content pages.
 	$effect(() => {
 		const root = document.documentElement.style;
@@ -62,10 +49,10 @@
 			</p>
 		</article>
 		<article class="panel">
-			<h2 class="kicker">Any language</h2>
+			<h2 class="kicker">Isolated</h2>
 			<p>
-				Robots talk to the engine over an open protocol, so they can be written in Java, Kotlin,
-				Python, C#, Rust or C/C++ and run locally, in a container or on another machine.
+				Every robot is its own process, sandboxed by the operating system, and runs locally, in a
+				container or on another machine. A robot that crashes or hangs only takes itself down.
 			</p>
 		</article>
 		<article class="panel">
@@ -85,23 +72,19 @@
 	</section>
 
 	<section class="status panel">
-		<h2>Where we are</h2>
+		<h2>robocode-s today</h2>
 		<p>
-			robocode-s {VERSION} is out. Classic Java robots, the samples and real RoboRumble bots
-			alike, fight identically to classic: headless from the command line, or in the desktop
-			GUI with debug painting, recordings and replays. Robots run sandboxed, locally or on
-			other machines, and battles are deterministic by default. Download it for Windows, Linux
-			and macOS from the <a href={resolve('/download')}>download page</a>. Follow along on <a href={REPO_URL}>GitHub</a>.
+			robocode-s {VERSION} runs on Windows, Linux and macOS. Classic Java robots, the samples and
+			real RoboRumble bots alike, fight identically to classic: headless from the command line, or
+			in the desktop GUI with debug painting, recordings and replays. Robots run sandboxed, locally
+			or on other machines, and battles are deterministic by default.
 		</p>
-		<ol class="milestones">
-			{#each milestones as m (m.id)}
-				<li class={m.state}>
-					<span class="id mono">{m.id}</span>
-					<span class="name">{m.name}</span>
-					<span class="state">{STATE_LABEL[m.state]}</span>
-				</li>
-			{/each}
-		</ol>
+		<p>
+			The <a href={resolve('/rankings')}>rumble</a> runs on this site: volunteers contribute battles
+			from the GUI or the command line, authors <a href={resolve('/submit')}>submit</a> their bots,
+			and recorded rounds play back in the browser. Get it from the
+			<a href={resolve('/download')}>download page</a>, and follow along on <a href={REPO_URL}>GitHub</a>.
+		</p>
 	</section>
 </div>
 
@@ -174,50 +157,5 @@
 		margin-top: 2rem;
 		max-width: 48rem;
 		padding: 0.2rem 1.4rem 1.4rem;
-	}
-	.milestones {
-		list-style: none;
-		padding: 0;
-		margin: 1.2rem 0 0;
-		border: 1px solid var(--line);
-		border-radius: var(--radius);
-		background: var(--panel-2);
-	}
-	.milestones li {
-		display: grid;
-		grid-template-columns: 3rem 1fr auto;
-		gap: 0.75rem;
-		padding: 0.55rem 0.9rem;
-		border-bottom: 1px solid var(--line);
-		align-items: baseline;
-	}
-	.milestones li:last-child {
-		border-bottom: 0;
-	}
-	.id {
-		color: var(--muted);
-	}
-	.state {
-		font-size: 0.8rem;
-		color: var(--muted);
-	}
-	.done .state {
-		color: var(--radar);
-	}
-	.done .state::before {
-		content: '✔ ';
-	}
-	.active .state {
-		color: var(--amber);
-	}
-	.active .state::before {
-		content: '▶ ';
-	}
-	.active .name {
-		color: var(--text);
-		font-weight: 600;
-	}
-	.planned .name {
-		color: var(--text-2);
 	}
 </style>
