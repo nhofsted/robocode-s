@@ -24,13 +24,17 @@ use crate::s3::{Bucket, Fetched};
 use rumble_core::Config;
 use rumble_core::cleanup::recording_group;
 use rumble_core::cleanup::{
-    CleanupState, PURGE_ALERT, Pending, PurgeCursor, ban_corrections, ban_cursor, correction_items,
-    correction_prefix, dead_versions, died_before_rumble, doomed, parse_purge_reference,
-    previous_hour, purge_correction_prefix, purge_corrections, purge_cursor, version_dir,
+    BanCursor, CleanupState, PURGE_ALERT, Pending, PurgeCursor, ban_corrections, ban_cursor,
+    correction_items, correction_prefix, dead_versions, died_before_rumble, doomed,
+    parse_purge_reference, previous_hour, purge_correction_prefix, purge_corrections, purge_cursor,
+    version_dir,
 };
 use rumble_core::ids::Division;
 use rumble_core::plan::Plan;
-use rumble_core::store::{LogItem, StoreError, UserState, VersionItem, VersionState, hour_key};
+use rumble_core::record::Record;
+use rumble_core::store::{
+    LogItem, StoreError, UserState, VerifyItem, VersionItem, VersionState, hour_key,
+};
 use rumble_core::verify::BAN_ALERT;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -200,6 +204,139 @@ fn dead_versions_cleanup(
     Ok(())
 }
 
+/// What [`walk_log`] needs of a ban's or a purge's cursor.
+trait LogWalk: Clone {
+    fn queue_done(&mut self) -> &mut bool;
+    fn next(&mut self) -> &mut u32;
+    fn pending(&mut self) -> &mut Option<Pending>;
+    fn corrected(&mut self) -> &mut u64;
+    fn finished(&self) -> bool;
+}
+
+macro_rules! log_walk {
+    ($cursor:ty) => {
+        impl LogWalk for $cursor {
+            fn queue_done(&mut self) -> &mut bool {
+                &mut self.queue_done
+            }
+            fn next(&mut self) -> &mut u32 {
+                &mut self.next
+            }
+            fn pending(&mut self) -> &mut Option<Pending> {
+                &mut self.pending
+            }
+            fn corrected(&mut self) -> &mut u64 {
+                &mut self.corrected
+            }
+            fn finished(&self) -> bool {
+                <$cursor>::finished(self)
+            }
+        }
+    };
+}
+log_walk!(BanCursor);
+log_walk!(PurgeCursor);
+
+/// The first step of a ban removal or purge: deletes the open verification items that
+/// `doomed` picks, so that no release or correction of them follows. Once per cursor.
+fn drop_verify_items<C: LogWalk>(
+    batch: &Batch,
+    engine: u32,
+    cursor: &mut C,
+    doomed: impl Fn(&VerifyItem) -> bool,
+    save: &mut impl FnMut(&C) -> Result<(), String>,
+) -> Result<(), String> {
+    if *cursor.queue_done() {
+        return Ok(());
+    }
+    let store = batch.store();
+    for item in store
+        .query_verify(engine, None, usize::MAX)
+        .map_err(|e| e.to_string())?
+    {
+        if doomed(&item) {
+            ignore_condition(store.delete_verify(engine, &item.sort, None))?;
+        }
+    }
+    *cursor.queue_done() = true;
+    save(cursor)
+}
+
+/// Walks the result log down from the cursor's next hour until it is finished or the time
+/// budget is spent, writing the corrections that `corrections` finds in each hour into the
+/// current hour's partition, under the sort keys `prefix(cursor, hour)` begins (module
+/// docs). `save` stores the cursor and writes the state: before and after each hour's
+/// corrections, and every 100 hours without any.
+#[allow(clippy::too_many_arguments)]
+fn walk_log<C: LogWalk>(
+    batch: &Batch,
+    engine: u32,
+    start_ms: u64,
+    cursor: &mut C,
+    (reads, writes): (&mut Pace, &mut Pace),
+    corrections: impl Fn(&mut C, &[LogItem]) -> Vec<(Record, i64)>,
+    prefix: impl Fn(&C, u32) -> String,
+    save: &mut impl FnMut(&C) -> Result<(), String>,
+) -> Result<(), String> {
+    let store = batch.store();
+    let mut unsaved = 0;
+    while !cursor.finished() {
+        if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
+            break;
+        }
+        let hour = *cursor.next();
+        let items = store.query_log(engine, hour).map_err(|e| e.to_string())?;
+        reads.take(read_units(
+            items
+                .iter()
+                .map(|i| i.records.len() + 8 * i.seeds.len() + 100)
+                .sum(),
+        ));
+        let mut after = cursor.clone();
+        let found = corrections(&mut after, &items);
+        *after.next() = previous_hour(hour);
+        if found.is_empty() {
+            *cursor = after;
+            unsaved += 1;
+            if unsaved >= 100 {
+                save(cursor)?;
+                unsaved = 0;
+            }
+            continue;
+        }
+        let now = batch.now_ms() / 1000;
+        let partition = hour_key(now);
+        let prefix = prefix(cursor, hour);
+        let mut items: Vec<LogItem> = correction_items(engine, &prefix, partition, &found, now);
+        if let Some(pending) = cursor.pending().as_ref().filter(|p| p.source == hour) {
+            // A run stopped while writing these: keep what landed.
+            let written: HashSet<String> = store
+                .query_log(engine, pending.partition)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|i| i.sort)
+                .filter(|s| s.starts_with(&prefix))
+                .collect();
+            items.retain(|i| !written.contains(&i.sort));
+        }
+        *cursor.pending() = Some(Pending {
+            source: hour,
+            partition,
+        });
+        save(cursor)?;
+        for item in &items {
+            writes.take(1.0);
+            ignore_condition(store.append_log(item))?;
+        }
+        *after.pending() = None;
+        *after.corrected() += found.len() as u64;
+        *cursor = after;
+        save(cursor)?;
+        unsaved = 0;
+    }
+    Ok(())
+}
+
 fn bans(
     batch: &Batch,
     engine: u32,
@@ -231,83 +368,27 @@ fn bans(
     let mut writes = Pace::new(batch, WRITE_RATE);
     for uid in uids {
         let mut cursor = state.bans[&uid].clone();
-        if !cursor.queue_done {
-            for item in store
-                .query_verify(engine, None, usize::MAX)
-                .map_err(|e| e.to_string())?
-            {
-                if item.runs.first().is_some_and(|r| r.uid == uid) {
-                    ignore_condition(store.delete_verify(engine, &item.sort, None))?;
-                }
-            }
-            cursor.queue_done = true;
+        let mut save = |cursor: &BanCursor| {
             state.bans.insert(uid.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-        }
-        let mut unsaved = 0;
-        while !cursor.finished() {
-            if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
-                break;
-            }
-            let hour = cursor.next;
-            let items = store.query_log(engine, hour).map_err(|e| e.to_string())?;
-            reads.take(read_units(
-                items
-                    .iter()
-                    .map(|i| i.records.len() + 8 * i.seeds.len() + 100)
-                    .sum(),
-            ));
-            let mut after = cursor.clone();
-            let corrections = ban_corrections(&mut after, &uid, &items);
-            after.next = previous_hour(hour);
-            if corrections.is_empty() {
-                cursor = after;
-                unsaved += 1;
-                if unsaved >= 100 {
-                    state.bans.insert(uid.clone(), cursor.clone());
-                    batch.write_state_json(key, state)?;
-                    unsaved = 0;
-                }
-                continue;
-            }
-            let now = batch.now_ms() / 1000;
-            let partition = hour_key(now);
-            let mut items: Vec<LogItem> = correction_items(
-                engine,
-                &correction_prefix(cursor.started_ms, &uid, hour),
-                partition,
-                &corrections,
-                now,
-            );
-            if let Some(pending) = cursor.pending.as_ref().filter(|p| p.source == hour) {
-                // A run stopped while writing these: keep what landed.
-                let prefix = correction_prefix(cursor.started_ms, &uid, hour);
-                let written: HashSet<String> = store
-                    .query_log(engine, pending.partition)
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .map(|i| i.sort)
-                    .filter(|s| s.starts_with(&prefix))
-                    .collect();
-                items.retain(|i| !written.contains(&i.sort));
-            }
-            cursor.pending = Some(Pending {
-                source: hour,
-                partition,
-            });
-            state.bans.insert(uid.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-            for item in &items {
-                writes.take(1.0);
-                ignore_condition(store.append_log(item))?;
-            }
-            after.pending = None;
-            after.corrected += corrections.len() as u64;
-            cursor = after;
-            state.bans.insert(uid.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-            unsaved = 0;
-        }
+            batch.write_state_json(key, state)
+        };
+        drop_verify_items(
+            batch,
+            engine,
+            &mut cursor,
+            |item| item.runs.first().is_some_and(|r| r.uid == uid),
+            &mut save,
+        )?;
+        walk_log(
+            batch,
+            engine,
+            start_ms,
+            &mut cursor,
+            (&mut reads, &mut writes),
+            |c, items| ban_corrections(c, &uid, items),
+            |c, hour| correction_prefix(c.started_ms, &uid, hour),
+            &mut save,
+        )?;
         report.bans.push(BanReport {
             uid: uid.clone(),
             corrected: cursor.corrected,
@@ -370,79 +451,29 @@ fn purges(
     let mut writes = Pace::new(batch, WRITE_RATE);
     for id in ids {
         let mut cursor: PurgeCursor = state.purges[&id].clone();
-        if !cursor.queue_done {
-            // No verification of a purged battle may correct it after the purge.
-            for item in store
-                .query_verify(engine, None, usize::MAX)
-                .map_err(|e| e.to_string())?
-            {
-                if item.bots.iter().any(|v| cursor.vids.contains(v)) {
-                    ignore_condition(store.delete_verify(engine, &item.sort, None))?;
-                }
-            }
-            cursor.queue_done = true;
+        let mut save = |cursor: &PurgeCursor| {
             state.purges.insert(id.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-        }
-        let mut unsaved = 0;
-        while !cursor.finished() {
-            if batch.now_ms().saturating_sub(start_ms) > batch.budget_ms {
-                break;
-            }
-            let hour = cursor.next;
-            let items = store.query_log(engine, hour).map_err(|e| e.to_string())?;
-            reads.take(read_units(
-                items
-                    .iter()
-                    .map(|i| i.records.len() + 8 * i.seeds.len() + 100)
-                    .sum(),
-            ));
-            let mut after = cursor.clone();
-            let corrections = purge_corrections(&mut after, &items);
-            after.next = previous_hour(hour);
-            if corrections.is_empty() {
-                cursor = after;
-                unsaved += 1;
-                if unsaved >= 100 {
-                    state.purges.insert(id.clone(), cursor.clone());
-                    batch.write_state_json(key, state)?;
-                    unsaved = 0;
-                }
-                continue;
-            }
-            let now = batch.now_ms() / 1000;
-            let partition = hour_key(now);
-            let prefix = purge_correction_prefix(cursor.started_ms, &id, hour);
-            let mut items: Vec<LogItem> =
-                correction_items(engine, &prefix, partition, &corrections, now);
-            if let Some(pending) = cursor.pending.as_ref().filter(|p| p.source == hour) {
-                // A run stopped while writing these: keep what landed.
-                let written: HashSet<String> = store
-                    .query_log(engine, pending.partition)
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .map(|i| i.sort)
-                    .filter(|s| s.starts_with(&prefix))
-                    .collect();
-                items.retain(|i| !written.contains(&i.sort));
-            }
-            cursor.pending = Some(Pending {
-                source: hour,
-                partition,
-            });
-            state.purges.insert(id.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-            for item in &items {
-                writes.take(1.0);
-                ignore_condition(store.append_log(item))?;
-            }
-            after.pending = None;
-            after.corrected += corrections.len() as u64;
-            cursor = after;
-            state.purges.insert(id.clone(), cursor.clone());
-            batch.write_state_json(key, state)?;
-            unsaved = 0;
-        }
+            batch.write_state_json(key, state)
+        };
+        // No verification of a purged battle may correct it after the purge.
+        let vids = cursor.vids.clone();
+        drop_verify_items(
+            batch,
+            engine,
+            &mut cursor,
+            |item| item.bots.iter().any(|v| vids.contains(v)),
+            &mut save,
+        )?;
+        walk_log(
+            batch,
+            engine,
+            start_ms,
+            &mut cursor,
+            (&mut reads, &mut writes),
+            purge_corrections,
+            |c, hour| purge_correction_prefix(c.started_ms, &id, hour),
+            &mut save,
+        )?;
         // After the log: the rankings first, then the recordings.
         if cursor.finished() && cursor.recordings && !cursor.recordings_done {
             all_recordings(
