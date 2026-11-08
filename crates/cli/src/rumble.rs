@@ -15,9 +15,7 @@ use rumble_client::http::Api;
 use rumble_client::import::{self, HttpFetcher};
 use rumble_client::login::{DeviceCode, DeviceFlow, GITHUB};
 use rumble_client::tokenfile::{self, Credentials, TokenFile};
-use rumble_core::api::{
-    AlertsResponse, BattleStatus, Me, NondeterministicRequest, Tier, UserUpdateRequest,
-};
+use rumble_core::api::{AlertsResponse, Me, NondeterministicRequest, Tier, UserUpdateRequest};
 use rumble_core::ids::Division;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -966,53 +964,7 @@ fn describe(event: &Event) -> Option<(bool, String)> {
             false,
             format!("batch {batch}: {battles} {division} battles"),
         )),
-        Event::BattleDone {
-            division,
-            bots,
-            status,
-            scores,
-            ranks,
-            duration_ms,
-            detail,
-            ..
-        } => {
-            let seconds = duration_ms.map(|ms| format!(" ({:.0} s)", ms as f64 / 1000.0));
-            let who = match bots.len() {
-                0 | 1 => bots.join(""),
-                2 => format!("{} vs {}", bots[0], bots[1]),
-                n => format!("{} + {} others", bots[0], n - 1),
-            };
-            let outcome = match status {
-                BattleStatus::Ok if bots.len() == 2 && scores.len() == 2 => {
-                    let total = scores[0] + scores[1];
-                    let share = if total > 0.0 {
-                        100.0 * scores[0] / total
-                    } else {
-                        50.0
-                    };
-                    format!("{share:.1}%")
-                }
-                BattleStatus::Ok => format!(
-                    "rank {} of {}",
-                    ranks.first().copied().unwrap_or(0),
-                    bots.len()
-                ),
-                BattleStatus::RobotFailed => {
-                    format!("robot failed ({})", detail.as_deref().unwrap_or("?"))
-                }
-                BattleStatus::Error => {
-                    format!("could not run ({})", detail.as_deref().unwrap_or("?"))
-                }
-                BattleStatus::NotRun => match detail.as_deref() {
-                    Some("stopped") | None => return None,
-                    Some(d) => format!("not run ({d})"),
-                },
-            };
-            Some((
-                true,
-                format!("{division} {who}: {outcome}{}", seconds.unwrap_or_default()),
-            ))
-        }
+        Event::BattleDone { .. } => event.result_line().map(|line| (true, line)),
         Event::Posted {
             batch,
             accepted,
@@ -1232,6 +1184,7 @@ fn run_history(parsed: &Parsed, o: &ImportOptions, path: &Path) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rumble_core::api::BattleStatus;
 
     fn args(s: &str) -> Vec<String> {
         s.split(' ').map(String::from).collect()
