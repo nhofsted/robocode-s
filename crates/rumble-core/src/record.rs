@@ -380,6 +380,7 @@ mod tests {
             colors: None,
             threads: false,
             hard_limit: false,
+            out_of_memory: false,
         }
     }
 

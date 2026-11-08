@@ -95,11 +95,23 @@ fn main() {
             twice: false,
         };
         let outcome = runner.run(&battle, &jars);
+        // Robots that ran out of memory (#178): that battle may differ between machines.
+        let out_of_memory: Vec<&str> = robots
+            .iter()
+            .zip(outcome.result.robots.iter().flatten())
+            .filter(|(_, r)| r.out_of_memory)
+            .map(|(name, _)| *name)
+            .collect();
         println!(
-            "{name} {:?} {} {}",
+            "{name} {:?} {} {}{}",
             outcome.result.status,
             outcome.result.battle_hash.as_deref().unwrap_or("-"),
-            outcome.why.as_deref().unwrap_or("")
+            outcome.why.as_deref().unwrap_or(""),
+            if out_of_memory.is_empty() {
+                String::new()
+            } else {
+                format!(" out of memory: {}", out_of_memory.join(", "))
+            }
         );
     }
 }

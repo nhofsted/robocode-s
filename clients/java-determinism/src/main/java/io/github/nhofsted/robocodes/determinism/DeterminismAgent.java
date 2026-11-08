@@ -55,6 +55,8 @@ public final class DeterminismAgent {
     static final String THREAD_RUN_KEY = "robocodes.determinism.threadRun";
     static final String THREAD_EXIT_KEY = "robocodes.determinism.threadExit";
     static final String THREAD_INTERRUPT_KEY = "robocodes.determinism.threadInterrupt";
+    /** Hook in {@code Thread.dispatchUncaughtException} (a {@code Consumer<Object[]>}: the thread, what it died of). */
+    static final String THREAD_UNCAUGHT_KEY = "robocodes.determinism.threadUncaught";
     /** Hooks in {@code Thread.sleep} and {@code Thread.join(long)} (each a {@code Predicate<Object[]>}: whether it did the call). */
     static final String THREAD_SLEEP_KEY = "robocodes.determinism.threadSleep";
     static final String THREAD_JOIN_KEY = "robocodes.determinism.threadJoin";
@@ -172,6 +174,9 @@ public final class DeterminismAgent {
         System.getProperties().put(THREAD_RUN_KEY, (Consumer<Object[]>) a -> RobotThreads.entering());
         System.getProperties().put(THREAD_EXIT_KEY, (Consumer<Object[]>) a -> RobotThreads.exiting(a[0]));
         System.getProperties().put(THREAD_INTERRUPT_KEY, (Consumer<Object[]>) a -> RobotThreads.interrupting(a[0]));
+        // A robot's OutOfMemoryError makes its battle depend on the machine (#178).
+        System.getProperties().put(THREAD_UNCAUGHT_KEY, (Consumer<Object[]>) a -> OutOfMemory.caught(a[1]));
+        System.getProperties().put(OutOfMemory.CAUGHT_KEY, (Consumer<Object>) OutOfMemory::caught);
         System.getProperties().put(THREAD_SLEEP_KEY, (Predicate<Object[]>) DeterminismAgent::sleep);
         System.getProperties().put(THREAD_JOIN_KEY, (Predicate<Object[]>) DeterminismAgent::join);
         System.getProperties().put(WAIT_KEY, (Predicate<Object[]>) DeterminismAgent::waitOn);
@@ -407,7 +412,9 @@ public final class DeterminismAgent {
             new ThreadHook("interrupt", "()V", THREAD_INTERRUPT_KEY, false, false),
             new ThreadHook("sleep", "(J)V", THREAD_SLEEP_KEY, true, true),
             new ThreadHook("sleep", "(JI)V", THREAD_SLEEP_KEY, true, true),
-            new ThreadHook("join", "(J)V", THREAD_JOIN_KEY, true, false));
+            new ThreadHook("join", "(J)V", THREAD_JOIN_KEY, true, false),
+            new ThreadHook("dispatchUncaughtException", "(Ljava/lang/Throwable;)V", THREAD_UNCAUGHT_KEY, false,
+                    false));
     /** {@code Object.wait(long)}: {@code wait()} and {@code wait(long, int)} call it (ADR 0025). */
     private static final List<ThreadHook> OBJECT_HOOKS = List.of(
             new ThreadHook("wait", "(J)V", WAIT_KEY, true, false));
@@ -776,6 +783,22 @@ public final class DeterminismAgent {
         @Override
         public byte[] transform(Module module, ClassLoader loader, String className, Class<?> classBeingRedefined,
                 ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            byte[] bytes = transformClass(loader, className, classfileBuffer);
+            if (IdentityHashes.isRobotClassLoader(loader) || OutOfMemory.isClassicRobotSide(className)) {
+                // After the rest: in robot classes, after the work metering (not counted).
+                try {
+                    byte[] reporting = OutOfMemory.patchHandlers(bytes != null ? bytes : classfileBuffer);
+                    if (reporting != null) {
+                        bytes = reporting;
+                    }
+                } catch (Throwable t) {
+                    System.err.println("robocode-s: could not report out of memory errors in " + className + ": " + t);
+                }
+            }
+            return bytes;
+        }
+
+        private byte[] transformClass(ClassLoader loader, String className, byte[] classfileBuffer) {
             if ("robocode/util/Utils".equals(className)) {
                 return patchUtils(classfileBuffer);
             }

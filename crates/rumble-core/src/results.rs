@@ -8,7 +8,7 @@
 
 use crate::api::{
     ApiError, BattleKind, BattleResult, BattleStatus, BotColors, ErrorCode, Rejected,
-    ResultsRequest, ResultsResponse, UploadSlot, UserSummary,
+    ResultsRequest, ResultsResponse, RobotResult, UploadSlot, UserSummary,
 };
 use crate::config::Config;
 use crate::ids::Division;
@@ -353,7 +353,8 @@ pub fn apply_results<S: Store + ?Sized>(
     let mut credit = 0u64;
     let mut checks = Vec::new();
     let mut runs = Vec::new();
-    // Verification runs in which a robot hit the hard limit: no fault (ADR 0025).
+    // Verification runs in which a robot hit the hard limit or ran out of memory: no fault
+    // (ADR 0025).
     let mut hard_limited = Vec::new();
     let mut finished = Vec::new();
     let mut given_back = Vec::new();
@@ -369,8 +370,13 @@ pub fn apply_results<S: Store + ?Sized>(
         let battle = by_index[&index];
         let assigned = &payload.b[index as usize];
         let ran = matches!(battle.status, BattleStatus::Ok | BattleStatus::RobotFailed);
-        // A robot disabled by the hard limit: how far it got depends on the machine (ADR 0025).
-        let hard_limit = battle.robots.iter().flatten().any(|r| r.hard_limit);
+        // A robot disabled by the hard limit, or out of memory: how far it got depends on the
+        // machine (ADR 0025, #178).
+        let hard_limit = battle
+            .robots
+            .iter()
+            .flatten()
+            .any(RobotResult::machine_dependent);
         if ran {
             for (vid, robot) in assigned.vids.iter().zip(battle.robots.iter().flatten()) {
                 if robot.threads {
@@ -810,6 +816,7 @@ mod tests {
             colors: None,
             threads: false,
             hard_limit: false,
+            out_of_memory: false,
         }
     }
 
@@ -1302,8 +1309,26 @@ mod tests {
         assert!(store.verify_items(1).is_empty());
     }
 
+    /// The hard limit or, the same to the server, an out of memory error (#178).
+    fn machine_dependent(robot: &mut RobotResult, out_of_memory: bool) {
+        if out_of_memory {
+            robot.out_of_memory = true;
+        } else {
+            robot.hard_limit = true;
+        }
+    }
+
     #[test]
     fn battles_with_a_hard_limit_are_not_verified_and_flag_nobody() {
+        battles_with_a_hard_limit_are_not_verified_and_flag_nobody_with(false);
+    }
+
+    #[test]
+    fn battles_with_an_out_of_memory_error_are_not_verified_and_flag_nobody() {
+        battles_with_a_hard_limit_are_not_verified_and_flag_nobody_with(true);
+    }
+
+    fn battles_with_a_hard_limit_are_not_verified_and_flag_nobody_with(out_of_memory: bool) {
         let mut always = config();
         always.rep.start_rate = 1.0;
         always.rep.floor_rate = 1.0;
@@ -1313,7 +1338,7 @@ mod tests {
         );
         // Robot 1 (vid 9) was disabled by the hard limit in battle 0.
         let mut slow = ok(0, 1);
-        slow.robots.as_mut().unwrap()[1].hard_limit = true;
+        machine_dependent(&mut slow.robots.as_mut().unwrap()[1], out_of_memory);
         let r = request(&p, vec![slow, ok(1, 2)]);
         let (store, user) = setup(0, UserState::New);
         let out = post_with(&store, &user, &always, &|_, _| false, &r, NOW_MS).unwrap();
@@ -1335,10 +1360,21 @@ mod tests {
 
     #[test]
     fn a_quarantined_users_battles_with_a_hard_limit_are_released_at_once() {
+        a_quarantined_users_battles_with_a_hard_limit_are_released_at_once_with(false);
+    }
+
+    #[test]
+    fn a_quarantined_users_battles_with_an_out_of_memory_error_are_released_at_once() {
+        a_quarantined_users_battles_with_a_hard_limit_are_released_at_once_with(true);
+    }
+
+    fn a_quarantined_users_battles_with_a_hard_limit_are_released_at_once_with(
+        out_of_memory: bool,
+    ) {
         let (store, user) = setup(0, UserState::Quarantined);
         let p = payload("g1", vec![assigned(BattleKind::Normal, 1, &[5, 9], None)]);
         let mut slow = ok(0, 1);
-        slow.robots.as_mut().unwrap()[0].hard_limit = true;
+        machine_dependent(&mut slow.robots.as_mut().unwrap()[0], out_of_memory);
         post_with(
             &store,
             &user,
@@ -1497,6 +1533,15 @@ mod tests {
 
     #[test]
     fn a_verification_run_with_a_hard_limit_judges_nobody() {
+        a_verification_run_with_a_hard_limit_judges_nobody_with(false);
+    }
+
+    #[test]
+    fn a_verification_run_with_an_out_of_memory_error_judges_nobody() {
+        a_verification_run_with_a_hard_limit_judges_nobody_with(true);
+    }
+
+    fn a_verification_run_with_a_hard_limit_judges_nobody_with(out_of_memory: bool) {
         let (store, user) = setup(60, UserState::New);
         store
             .create_user(&User {
@@ -1547,7 +1592,7 @@ mod tests {
         );
         // A different result, but a robot hit the hard limit on g1's machine.
         let mut slow = ok(0, 99);
-        slow.robots.as_mut().unwrap()[0].hard_limit = true;
+        machine_dependent(&mut slow.robots.as_mut().unwrap()[0], out_of_memory);
         let mut never = config();
         never.rep.start_rate = 0.0;
         never.rep.floor_rate = 0.0;

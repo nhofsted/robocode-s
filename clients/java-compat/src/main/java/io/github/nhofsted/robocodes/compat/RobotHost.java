@@ -760,6 +760,7 @@ public final class RobotHost {
                 case ROUND_OVER -> {
                     peer.roundOver();
                     waitForStop(proxy, ide);
+                    peer.reportOutOfMemory();
                 }
                 case BATTLE_OVER -> {
                     if (ide) {

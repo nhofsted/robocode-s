@@ -284,6 +284,12 @@ message Execute {
   // later Execute. It may also come alone, on an Execute whose turn is -1 (never an answer
   // to a Tick), when the thread starts. The server takes it from any Execute.
   bool threads = 10;
+  // The robot's JVM (or process) ran out of memory: when that happens depends on the bytes the
+  // process holds, including the machine's paths, so the robot's battles are not reproducible
+  // (#178; treated like the hard limit, ADR 0025). Sticky like threads; it may also come
+  // alone, on an Execute whose turn is -1, at a round's end. The server takes it from any
+  // Execute.
+  bool out_of_memory = 11;
 }
 
 // A robot's debug property (classic's setDebugProperty): shown in its console. An empty
