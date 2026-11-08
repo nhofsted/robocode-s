@@ -254,6 +254,40 @@ mod tests {
         fn site_keys(&self) -> Vec<String> {
             self.objects.keys(Bucket::Site)
         }
+
+        /// Type-checks the index files against `types.ts` with
+        /// `web/scripts/check-rumble-data.mjs`, if Node and the web dependencies are there
+        /// (the batch scenario does the other data files).
+        fn check_types_ts(&self) {
+            let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web");
+            if !web.join("node_modules/typescript").exists() {
+                eprintln!("skipping the types.ts check: web/node_modules has no typescript");
+                return;
+            }
+            let dir = std::env::temp_dir().join(format!("rec-index-{}", std::process::id()));
+            for key in self.site_keys() {
+                let path = dir.join(key.strip_prefix("data/v1/").unwrap());
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let object = self.objects.object(Bucket::Site, &key).unwrap();
+                std::fs::write(&path, object.bytes).unwrap();
+            }
+            let output = std::process::Command::new("node")
+                .arg(web.join("scripts/check-rumble-data.mjs"))
+                .arg(&dir)
+                .output();
+            let _ = std::fs::remove_dir_all(&dir);
+            let Ok(output) = output else {
+                eprintln!("skipping the types.ts check: no node");
+                return;
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "types.ts check failed:\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(stdout.contains("3 files match"), "{stdout}");
+        }
     }
 
     #[test]
@@ -290,6 +324,7 @@ mod tests {
         let text = String::from_utf8(object.bytes).unwrap();
         assert!(text.contains(r#"["a-0",2,"77",5,0]"#), "{text}");
         assert!(text.contains(r#""pairs":[{"opp":"b.B""#), "{text}");
+        rig.check_types_ts();
 
         // A second run: nothing is read (the cache), nothing written. Only the group
         // without an order, which has objects the cache lacks, is read again.
