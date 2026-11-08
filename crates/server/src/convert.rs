@@ -391,7 +391,6 @@ mod tests {
                 recipient: Some("b".into()),
                 payload: vec![1, 2],
             }],
-            ..Default::default()
         };
         let (commands, passthrough) = self::commands(&sent);
         assert_eq!(commands.bullets.len(), 1);

@@ -505,8 +505,7 @@ fn a_battle_goes_on_when_an_agent_leaves_and_without_its_robots() {
 /// The paths of a built source tree, from the repository root.
 fn environment() -> robocode_s_runner::local::Environment {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let env = robocode_s_runner::local::Environment::from_env().rooted_at(&root);
-    env
+    robocode_s_runner::local::Environment::from_env().rooted_at(&root)
 }
 
 #[test]
