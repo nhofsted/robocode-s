@@ -113,17 +113,10 @@ fn the_lists_drive_the_unclaimed_imported_bots() {
     // A claimed bot that is listed with another version: never touched.
     web.store
         .put_bot(&BotItem {
-            id: "c.C".into(),
             author: "Cy".into(),
             owner: Some("g1".into()),
-            homepage: None,
-            description: None,
             divisions: vec![Division::Melee],
-            versions: vec![],
-            current: None,
-            state: BotState::Active,
-            created: 0,
-            source: BotSource::Import,
+            ..rumble_core::testing::bot("c.C")
         })
         .unwrap();
 

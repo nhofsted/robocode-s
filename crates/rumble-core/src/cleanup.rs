@@ -474,7 +474,7 @@ pub fn correction_items(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::WeightClass;
+
     use crate::record::Entry;
     use crate::record::FailReason;
     use crate::store::{Reputation, UserState};
@@ -483,25 +483,14 @@ mod tests {
 
     fn version(vid: u32, bot: &str, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
             version: "1".into(),
             sha256: format!("{vid:02x}").repeat(32),
             size: 1,
             codesize: None,
-            class: WeightClass::Mega,
             divisions: vec![Division::OneVsOne, Division::Melee],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
             created: NOW,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 

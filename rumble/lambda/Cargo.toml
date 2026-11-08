@@ -51,6 +51,7 @@ tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "
 url = "2.5.7"
 
 [dev-dependencies]
+robocode-s-rumble-core = { path = "../../crates/rumble-core", features = ["testing"] }
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]

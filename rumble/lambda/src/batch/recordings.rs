@@ -149,52 +149,29 @@ mod tests {
     use crate::batch::Services;
     use crate::cloudfront::MemCdn;
     use crate::s3::{MemObjects, Objects};
-    use rumble_core::ids::WeightClass;
+
     use rumble_core::recordings::IndexFile;
     use rumble_core::slots::{Group, SlotId, recording_key};
-    use rumble_core::store::{
-        BotSource, BotState, MemStore, SlotEntry, SlotStatus, Store, VersionState,
-    };
+    use rumble_core::store::{MemStore, SlotEntry, SlotStatus, Store};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn version(vid: u32, bot: &str) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
             version: "1".into(),
             sha256: format!("{vid:02x}{}", "cd".repeat(31)),
             size: 1,
             codesize: None,
-            class: WeightClass::Mega,
             divisions: vec![Division::OneVsOne, Division::Melee],
-            state: VersionState::Active,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
-            created: 0,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..rumble_core::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, vid: u32) -> BotItem {
         BotItem {
-            id: id.to_string(),
-            author: "a".into(),
-            owner: None,
-            homepage: None,
-            description: None,
-            divisions: vec![Division::OneVsOne],
             versions: vec![vid],
             current: Some(vid),
-            state: BotState::Active,
-            created: 0,
-            source: BotSource::Import,
+            ..rumble_core::testing::bot(id)
         }
     }
 

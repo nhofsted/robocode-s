@@ -732,8 +732,8 @@ fn presign<S: Store + ?Sized>(
 mod tests {
     use super::*;
     use crate::api::{ClientInfo, Failure, FailureReason, RobotResult, RoundResult, TrackClaim};
-    use crate::ids::WeightClass;
-    use crate::store::{MemStore, Reputation, VersionItem, VersionState, rfc3339};
+
+    use crate::store::{MemStore, Reputation, VersionItem, rfc3339};
 
     const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const NOW_MS: u64 = 1_792_843_200_000;
@@ -894,25 +894,11 @@ mod tests {
         for (vid, bot) in [(5, "voidious.Diamond"), (9, "jk.mega.DrussGT")] {
             store
                 .put_version(&VersionItem {
-                    vid,
-                    bot: bot.to_string(),
                     version: "1".into(),
                     sha256: hex(vid as u8),
                     size: 1,
                     codesize: None,
-                    class: WeightClass::Mega,
-                    divisions: vec![Division::OneVsOne],
-                    state: VersionState::Active,
-                    probation_battles: 0,
-                    probation_failures: 0,
-                    class_name: bot.to_string(),
-                    created: 0,
-                    retired: None,
-                    url: None,
-                    colors: None,
-                    released: None,
-                    nondeterministic: None,
-                    disagreements: 0,
+                    ..crate::testing::version(vid, bot)
                 })
                 .unwrap();
         }

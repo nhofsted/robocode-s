@@ -578,47 +578,29 @@ mod tests {
     use super::*;
     use crate::ids::WeightClass;
     use crate::record::{Entry, Record};
-    use crate::store::{BotSource, Reputation};
+    use crate::store::Reputation;
 
     const NOW: u64 = 1_792_843_200; // 2026-10-24T12:00:00Z
 
     fn version(vid: u32, bot: &str, class: WeightClass, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
-            version: format!("1.{vid}"),
-            sha256: format!("{vid:064x}"),
-            size: 100,
-            codesize: Some(100),
             class,
-            divisions: vec![Division::OneVsOne],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
             created: NOW - 86_400,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, versions: Vec<u32>, current: u32, owner: Option<&str>) -> BotItem {
         BotItem {
-            id: id.to_string(),
             author: "Ann".into(),
             owner: owner.map(str::to_string),
             homepage: Some("https://example.org".into()),
             description: Some(String::new()),
-            divisions: vec![Division::OneVsOne],
             versions,
             current: Some(current),
-            state: BotState::Active,
             created: NOW,
-            source: BotSource::Import,
+            ..crate::testing::bot(id)
         }
     }
 

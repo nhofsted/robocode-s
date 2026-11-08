@@ -406,46 +406,26 @@ pub fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::WeightClass;
-    use crate::store::{BotSource, SlotEntry, VersionState};
+
+    use crate::store::{SlotEntry, VersionState};
 
     fn version(vid: u32, bot: &str, ver: &str, state: VersionState) -> VersionItem {
         VersionItem {
-            vid,
-            bot: bot.to_string(),
             version: ver.to_string(),
             sha256: format!("{vid:x}{}", "ab".repeat(31)),
             size: 1,
             codesize: None,
-            class: WeightClass::Mega,
             divisions: vec![Division::OneVsOne, Division::Melee],
             state,
-            probation_battles: 0,
-            probation_failures: 0,
-            class_name: bot.to_string(),
-            created: 0,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(vid, bot)
         }
     }
 
     fn bot(id: &str, current: u32) -> BotItem {
         BotItem {
-            id: id.to_string(),
-            author: "a".into(),
-            owner: None,
-            homepage: None,
-            description: None,
-            divisions: vec![Division::OneVsOne],
             versions: vec![current],
             current: Some(current),
-            state: BotState::Active,
-            created: 0,
-            source: BotSource::Import,
+            ..crate::testing::bot(id)
         }
     }
 

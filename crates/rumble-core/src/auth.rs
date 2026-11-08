@@ -328,7 +328,7 @@ pub fn check_submission(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{BotSource, BotState, MemStore, Reputation};
+    use crate::store::{BotSource, MemStore, Reputation};
 
     const NOW: u64 = 1_792_843_200;
 
@@ -523,17 +523,10 @@ mod tests {
 
     fn bot(owner: Option<&str>) -> BotItem {
         BotItem {
-            id: "a.B".into(),
-            author: "a".into(),
             owner: owner.map(str::to_string),
-            homepage: None,
-            description: None,
             divisions: vec![],
-            versions: vec![],
-            current: None,
-            state: BotState::Active,
-            created: 0,
             source: BotSource::Submit,
+            ..crate::testing::bot("a.B")
         }
     }
 
@@ -643,8 +636,6 @@ mod tests {
     #[test]
     fn counting_versions_per_day() {
         let version = |bot: &str, created: u64| VersionItem {
-            vid: 1,
-            bot: bot.into(),
             version: "1".into(),
             sha256: String::new(),
             size: 0,
@@ -652,16 +643,9 @@ mod tests {
             class: crate::ids::WeightClass::Mega,
             divisions: vec![],
             state: crate::store::VersionState::Probation,
-            probation_battles: 0,
-            probation_failures: 0,
             class_name: String::new(),
             created,
-            retired: None,
-            url: None,
-            colors: None,
-            released: None,
-            nondeterministic: None,
-            disagreements: 0,
+            ..crate::testing::version(1, bot)
         };
         let versions = [
             version("a.B", NOW - 10),
