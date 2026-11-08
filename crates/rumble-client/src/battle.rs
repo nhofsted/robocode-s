@@ -390,6 +390,7 @@ impl Runner {
                 colors: observer.colors.get(i).cloned().flatten(),
                 threads: ran.outcome.threads.get(i).copied().unwrap_or(false),
                 hard_limit: ran.outcome.hard_limits.get(i).copied().unwrap_or(false),
+                out_of_memory: ran.outcome.out_of_memory.get(i).copied().unwrap_or(false),
                 ..robot_result(r)
             })
             .collect();
@@ -440,8 +441,8 @@ impl Runner {
 
 /// A battle run twice (§11.3): the first run's outcome (its tracks, the only ones uploaded)
 /// with the second run's battle hash as `repeatHash`, the time of both runs, and the robots'
-/// `threads` and `hardLimit` of either run (a hard limit in the second run alone would
-/// otherwise look like a nondeterministic robot). A second run that isn't `ok` proves
+/// `threads`, `hardLimit` and `outOfMemory` of either run (a hard limit or an out of memory
+/// error in the second run alone would otherwise look like a nondeterministic robot). A second run that isn't `ok` proves
 /// nothing about the robots: an `error` stays one (this client's failure), anything else
 /// (stopped, a robot that failed this time) is `notRun`, so the item goes back to the queue.
 pub fn with_repeat(mut first: Outcome, second: Outcome) -> Outcome {
@@ -474,6 +475,7 @@ pub fn with_repeat(mut first: Outcome, second: Outcome) -> Outcome {
         for (robot, again) in robots.iter_mut().zip(again) {
             robot.threads |= again.threads;
             robot.hard_limit |= again.hard_limit;
+            robot.out_of_memory |= again.out_of_memory;
         }
     }
     first
@@ -518,6 +520,7 @@ fn robot_result(r: &v1::Results) -> RobotResult {
         colors: None,
         threads: false,
         hard_limit: false,
+        out_of_memory: false,
     }
 }
 
@@ -685,6 +688,7 @@ mod tests {
     fn a_repeated_battle_reports_the_second_hash() {
         let mut second = ok("b", 20);
         second.result.robots.as_mut().unwrap()[1].hard_limit = true;
+        second.result.robots.as_mut().unwrap()[0].out_of_memory = true;
         second.tracks = vec![vec![9]];
         let both = with_repeat(ok("a", 10), second);
         assert_eq!(both.result.status, BattleStatus::Ok);
@@ -694,6 +698,7 @@ mod tests {
         assert_eq!(both.tracks, [vec![1, 2, 3]], "the first run's tracks only");
         let robots = both.result.robots.unwrap();
         assert!(!robots[0].hard_limit && robots[1].hard_limit);
+        assert!(robots[0].out_of_memory && !robots[1].out_of_memory);
 
         // A second run that isn't ok gives the battle back, or is this client's error.
         let failed = Outcome::failed(3, 1, FailureReason::Crash, "gone");

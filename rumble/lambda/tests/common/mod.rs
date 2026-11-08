@@ -149,6 +149,7 @@ pub fn ok_result(batch: &str, battle: &WorkBattle) -> BattleResult {
                     colors: None,
                     threads: false,
                     hard_limit: false,
+                    out_of_memory: false,
                 })
                 .collect(),
         ),

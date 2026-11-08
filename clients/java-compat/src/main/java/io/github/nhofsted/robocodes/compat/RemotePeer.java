@@ -3,6 +3,7 @@
  */
 package io.github.nhofsted.robocodes.compat;
 
+import io.github.nhofsted.robocodes.determinism.OutOfMemory;
 import io.github.nhofsted.robocodes.determinism.RobotRandomness;
 import io.github.nhofsted.robocodes.protocol.v1.ClientMessage;
 import io.github.nhofsted.robocodes.protocol.v1.DebugProperty;
@@ -74,6 +75,8 @@ final class RemotePeer implements IRobotPeer {
      */
     private Execute.Builder finalExecute;
     private ExecCommands finalCommands;
+    /** An {@code Execute} with {@code out_of_memory} went out ({@link #reportOutOfMemory}). */
+    private volatile boolean outOfMemorySent;
 
     RemotePeer(OutputStream out) {
         this.out = out;
@@ -95,6 +98,30 @@ final class RemotePeer implements IRobotPeer {
                         .build().writeDelimitedTo(out);
                 out.flush();
             }
+        } catch (IOException e) {
+            // The connection is gone; the battle is over for this robot.
+        }
+    }
+
+    /**
+     * Main thread, at a round's end: an {@code OutOfMemoryError} since the robot's last
+     * {@code Execute} (in a thread of its own, say, or in its last turn's handlers) is reported
+     * now, in an {@code Execute} that answers no turn ({@code turn} -1). Every {@code Execute}
+     * after one carries it too ({@link #send}): the battle depends on the machine (#178).
+     */
+    void reportOutOfMemory() {
+        if (!OutOfMemory.happened() || outOfMemorySent) {
+            return;
+        }
+        try {
+            synchronized (out) {
+                ClientMessage.newBuilder()
+                        .setExecute(Execute.newBuilder().setTurn(-1).setOutOfMemory(true)
+                                .setThreads(RobotRandomness.startedThreads()))
+                        .build().writeDelimitedTo(out);
+                out.flush();
+            }
+            outOfMemorySent = true;
         } catch (IOException e) {
             // The connection is gone; the battle is over for this robot.
         }
@@ -303,11 +330,16 @@ final class RemotePeer implements IRobotPeer {
         if (RobotRandomness.startedThreads()) {
             execute.setThreads(true);
         }
+        boolean outOfMemory = OutOfMemory.happened();
+        if (outOfMemory) {
+            execute.setOutOfMemory(true);
+        }
         try {
             synchronized (out) {
                 ClientMessage.newBuilder().setExecute(execute).build().writeDelimitedTo(out);
                 out.flush();
             }
+            outOfMemorySent |= outOfMemory;
         } catch (IOException e) {
             finished = true;
             throw new AbortedException();

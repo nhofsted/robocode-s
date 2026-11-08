@@ -545,6 +545,13 @@ pub fn run(o: &Options) -> Result<(), String> {
         .filter(|(_, hit)| **hit)
         .map(|(s, _)| s.name.as_str())
         .collect();
+    // Robots whose process ran out of memory: when depends on the machine too (#178).
+    let out_of_memory: Vec<&str> = statics
+        .iter()
+        .zip(&local.outcome.out_of_memory)
+        .filter(|(_, hit)| **hit)
+        .map(|(s, _)| s.name.as_str())
+        .collect();
     if o.json {
         let out = serde_json::json!({
             "seed": seed,
@@ -557,6 +564,7 @@ pub fn run(o: &Options) -> Result<(), String> {
             "robots": statics.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             "threads": threads,
             "hardLimit": hard_limits,
+            "outOfMemory": out_of_memory,
             "skippedTurns": statics.iter().zip(&local.outcome.skipped_turns)
                 .map(|(s, turns)| (s.name.clone(), serde_json::Value::from(turns.len())))
                 .collect::<serde_json::Map<String, serde_json::Value>>(),
@@ -605,6 +613,13 @@ pub fn run(o: &Options) -> Result<(), String> {
                  this battle may end differently elsewhere: {}",
                 ServerConfig::default().hard_limit.as_secs(),
                 hard_limits.join(", ")
+            );
+        }
+        if !out_of_memory.is_empty() {
+            println!(
+                "\nRan out of memory, which depends on the machine, so this battle may end \
+                 differently elsewhere: {}",
+                out_of_memory.join(", ")
             );
         }
     }

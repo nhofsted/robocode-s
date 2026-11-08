@@ -178,6 +178,10 @@ pub struct BattleOutcome {
     /// turn took longer than [`ServerConfig::hard_limit`] in real time, which depends on the
     /// machine, ADR 0025). Empty where that isn't known.
     pub hard_limits: Vec<bool>,
+    /// Per robot, by robot index: whether its process ran out of memory
+    /// (`Execute.out_of_memory`). When that happens depends on the machine, as with the hard
+    /// limit (#178). Empty where that isn't known.
+    pub out_of_memory: Vec<bool>,
     /// Per robot, by robot index: the (round, turn)s it got a `SkippedTurnEvent` for, in
     /// order. Empty where that isn't known.
     pub skipped_turns: Vec<Vec<(i32, i64)>>,
@@ -309,6 +313,8 @@ struct Link {
     threads: bool,
     /// The hard limit disabled the robot.
     hard_limit: bool,
+    /// The robot said its process ran out of memory (`Execute.out_of_memory`).
+    out_of_memory: bool,
     /// The turns it skipped, by round, as it learned of them ([`BattleOutcome::skipped_turns`]).
     skipped_turns: Vec<(i32, i64)>,
 }
@@ -881,6 +887,7 @@ impl<'a> BattleLoop<'a> {
             .collect();
         let threads = self.links.iter().map(|l| l.threads).collect();
         let hard_limits = self.links.iter().map(|l| l.hard_limit).collect();
+        let out_of_memory = self.links.iter().map(|l| l.out_of_memory).collect();
         let skipped_turns = self
             .links
             .iter_mut()
@@ -915,6 +922,7 @@ impl<'a> BattleLoop<'a> {
             connections,
             threads,
             hard_limits,
+            out_of_memory,
             skipped_turns,
         })
     }
@@ -1172,6 +1180,7 @@ impl<'a> BattleLoop<'a> {
                 if let client_message::Msg::Execute(execute) = *message {
                     // From any Execute, also one that is no answer: threads start at any time.
                     self.links[robot].threads |= execute.threads;
+                    self.links[robot].out_of_memory |= execute.out_of_memory;
                     self.on_execute(robot, execute);
                 }
             }
@@ -1555,6 +1564,7 @@ impl<'a> BattleLoop<'a> {
             && let client_message::Msg::Execute(execute) = &**message
         {
             self.links[*robot].threads |= execute.threads;
+            self.links[*robot].out_of_memory |= execute.out_of_memory;
         }
         match incoming {
             Incoming::Control(_)

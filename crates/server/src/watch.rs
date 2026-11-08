@@ -106,6 +106,7 @@ impl Watcher {
                         connections: Vec::new(),
                         threads: Vec::new(),
                         hard_limits: Vec::new(),
+                        out_of_memory: Vec::new(),
                         skipped_turns: Vec::new(),
                     });
                 }

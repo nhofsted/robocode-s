@@ -387,6 +387,19 @@ pub struct RobotResult {
     /// battle, so the battle is never verified (ADR 0023).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hard_limit: bool,
+    /// The robot's process ran out of memory (Java's `OutOfMemoryError`). When that happens
+    /// depends on the bytes the process holds, including the machine's paths, so the battle
+    /// is treated like one with the hard limit (#178, ADR 0025). Absent from older clients.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub out_of_memory: bool,
+}
+
+impl RobotResult {
+    /// How far the robot got depends on the machine, not only on the battle: it hit the hard
+    /// limit or ran out of memory. Such a battle is never verified (ADR 0023, ADR 0025).
+    pub fn machine_dependent(&self) -> bool {
+        self.hard_limit || self.out_of_memory
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
