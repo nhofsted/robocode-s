@@ -703,6 +703,11 @@ pub trait Store {
     /// Deletes the item, condition: it exists and, if `claimant` is given, `cl` is it.
     fn delete_verify(&self, engine: u32, sort: &str, claimant: Option<&str>) -> StoreResult<()>;
 
+    // -- corrections --
+    /// PutItem `C#<E>` / `key` with `ttl`, condition: absent. `ConditionFailed` means the
+    /// battle was corrected already (§11.3).
+    fn mark_corrected(&self, engine: u32, key: &str, ttl: u64) -> StoreResult<()>;
+
     // -- slots --
     fn get_slots(
         &self,
@@ -872,6 +877,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     ) -> StoreResult<()> {
         (**self).update_slots(engine, division, key, expected, set, full)
     }
+    fn mark_corrected(&self, engine: u32, key: &str, ttl: u64) -> StoreResult<()> {
+        (**self).mark_corrected(engine, key, ttl)
+    }
     fn put_alert(&self, alert: &Alert) -> StoreResult<()> {
         (**self).put_alert(alert)
     }
@@ -940,6 +948,7 @@ struct Tables {
     verify: BTreeMap<(u32, String), VerifyItem>,
     slots: BTreeMap<(u32, Division, String), SlotItem>,
     alerts: BTreeMap<String, Alert>,
+    corrected: BTreeMap<(u32, String), u64>,
 }
 
 /// An in-memory [`Store`] with the same conditions as the DynamoDB one, for tests.
@@ -1340,6 +1349,16 @@ impl Store for MemStore {
             }
             item.full = full;
             Ok(())
+        })
+    }
+
+    fn mark_corrected(&self, engine: u32, key: &str, ttl: u64) -> StoreResult<()> {
+        self.with(|t| match t.corrected.entry((engine, key.to_string())) {
+            std::collections::btree_map::Entry::Occupied(_) => Err(StoreError::ConditionFailed),
+            std::collections::btree_map::Entry::Vacant(e) => {
+                e.insert(ttl);
+                Ok(())
+            }
         })
     }
 

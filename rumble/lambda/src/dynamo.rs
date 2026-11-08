@@ -1322,6 +1322,12 @@ impl Store for DynamoStore {
         Ok(())
     }
 
+    fn mark_corrected(&self, engine: u32, correction: &str, ttl: u64) -> StoreResult<()> {
+        let mut item = key(format!("C#{engine}"), correction);
+        item.insert("ttl".into(), n(ttl));
+        self.put(item, Some("attribute_not_exists(pk)"))
+    }
+
     fn put_alert(&self, alert: &Alert) -> StoreResult<()> {
         let mut item = key("ALERT", &alert.sort);
         item.insert("kind".into(), s(&alert.kind));
