@@ -1,6 +1,6 @@
 # 0028. A round's start allows classic's wait, in counted work
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-09
 
 ## Context
@@ -43,5 +43,5 @@ Deterministic mode follows classic's round start (rules version 4: `DETERMINISTI
   - Classic times wall clock: class loading and code that isn't compiled yet (the first round's start above all) take time that counted work doesn't price. A robot close to 756 ms of counted work can already be late in classic.
   - A robot that keeps computing at a later round's start is never disabled in classic (the check above finds nothing), it only idles until it executes; robocode-s's cutoff ends it after 1.58 s, as a crash with its energy drained. Classic's endless loop never ends either way; a robot this slow loses those rounds in both.
   - Other machines: the wait follows the CPU constant (and Windows rounds each wait to its timer tick), as ADR 0018 says for turns; the allowance follows the calibration machine.
-- **Robot hosts and rules.** A robot host of rules 3 counted no round start, so the runner refuses it for deterministic battles (ADR 0018). `ENGINE_VERSION` stays 1 for now, as for rules 2 and 3: only battles of robots that work for more than 756 ms before a round's first `execute` change. That is for the owner to confirm.
+- **Robot hosts and rules.** A robot host of rules 3 counted no round start, so the runner refuses it for deterministic battles (ADR 0018). `ENGINE_VERSION` stays 1, as for rules 2 and 3 (the owner's decision): only battles of robots that work for more than 756 ms before a round's first `execute` change.
 - Amends ADR 0018 (the round start was free) and ADR 0025's note on the first turn.
