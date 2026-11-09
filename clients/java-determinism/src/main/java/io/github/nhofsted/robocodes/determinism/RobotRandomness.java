@@ -86,6 +86,11 @@ public final class RobotRandomness {
     /** Classic's {@code RobotPeer.startRound()}: a new round for the peer (a {@code Consumer<Object>}). */
     static final String PEER_ROUND_KEY = "robocodes.determinism.peerRound";
     /**
+     * Classic's robot side, {@code HostingRobotProxy.run()}: a robot thread starts its round,
+     * before the robot is created (a {@code Runnable}).
+     */
+    static final String ROUND_START_KEY = "robocodes.determinism.roundStart";
+    /**
      * Classic's {@code RobotPeer.executeImpl()}, on the robot's thread: its turn's work is done
      * (a {@code Consumer<Object[]>}: the peer, the turn it was woken for and its
      * {@code AtomicReference} of published commands).
@@ -147,14 +152,31 @@ public final class RobotRandomness {
      */
     public static final long FIRST_TURN_BUDGETS = 7;
     /**
+     * Counted work (as virtual time) a robot may do at a round's start, before its first
+     * execute (ADR 0028): classic's {@code RobotPeer.startRound} waits once for it, 300 CPU
+     * constants: {@code wait(756)} on the machine the clock was calibrated on (756.2 ms on
+     * Linux), about 236 budgets. A robot still busy then runs into turn 1's wait. The same in
+     * robocode-s's server ({@code ROUND_START_NANOS}).
+     */
+    public static final long ROUND_START_NANOS = 300 * CPU_CONSTANT_NANOS;
+    /**
      * Counted work (as virtual time) after which a robot's code throws (ADR 0018): it has run
      * this long since its last turn started, so it is late for more turns than any robot may
      * skip (240 for I/O robots, after turn 1's seven budgets). An endless loop then crashes at
-     * the same instruction everywhere instead of keeping the battle waiting.
+     * the same instruction everywhere instead of keeping the battle waiting. At a round's
+     * start it throws {@link #ROUND_START_NANOS} later ({@link #ROUND_START_CUTOFF_NANOS}).
      */
     public static final long WORK_CUTOFF_NANOS = 256 * TURN_BUDGET_NANOS;
     /** {@link #WORK_CUTOFF_NANOS} in counted instructions. */
     static final long CUTOFF_INSTRUCTIONS = WORK_CUTOFF_NANOS * 1000 / PICOS_PER_UNIT;
+    /**
+     * The work cutoff from a round's start until the robot's first execute (ADR 0028): classic's
+     * wait at the start, then as many budgets as the cutoff of any turn, so a robot that classic
+     * lets finish its start in time never reaches it.
+     */
+    public static final long ROUND_START_CUTOFF_NANOS = ROUND_START_NANOS + WORK_CUTOFF_NANOS;
+    /** {@link #ROUND_START_CUTOFF_NANOS} in counted instructions. */
+    static final long ROUND_START_CUTOFF_INSTRUCTIONS = ROUND_START_CUTOFF_NANOS * 1000 / PICOS_PER_UNIT;
 
     /**
      * Version of the deterministic rules: the constants above and how they decide skipped
@@ -166,7 +188,8 @@ public final class RobotRandomness {
     public static int rulesVersion() {
         // 2: robots' own threads on one virtual CPU per robot, sleeps on the virtual clock (ADR 0025).
         // 3: work priced per kind of instruction and JDK call, new arrays per element (ADR 0026).
-        return 3;
+        // 4: a round's start allows classic's wait of 300 CPU constants, not unlimited work (ADR 0028).
+        return 4;
     }
 
     /** Work counters, one per robot class loader (in classic: one per robot). */
@@ -502,12 +525,13 @@ public final class RobotRandomness {
     static Object fuel(Object loader) {
         long[] fuel;
         synchronized (FUEL) {
-            // The count, and the limit for the robot's work until its first turn.
+            // The count, and the limit for the robot's work until its first execute: the round
+            // start's cutoff (ADR 0028).
             fuel = FUEL.computeIfAbsent((ClassLoader) loader, l -> {
                 // Calibration: the profile's slots after the count (WorkProfile).
                 long[] f = new long[WorkProfile.ON ? WorkProfile.SLOTS : 2];
-                f[0] = CUTOFF_INSTRUCTIONS;
-                f[1] = -CUTOFF_INSTRUCTIONS;
+                f[0] = ROUND_START_CUTOFF_INSTRUCTIONS;
+                f[1] = -ROUND_START_CUTOFF_INSTRUCTIONS;
                 return f;
             });
         }
@@ -647,14 +671,58 @@ public final class RobotRandomness {
     /**
      * How many turns late a robot answers that woke for {@code turn} and did {@code workNanos}
      * of counted work: classic waits a budget for each robot each turn (seven on turn 1) and
-     * otherwise runs the turn without it. As robocode-s's server ({@code late_turns}).
+     * otherwise runs the turn without it. At a round's start (turn 0) it waits
+     * {@link #ROUND_START_NANOS}; a robot still busy then runs into turn 1's wait (ADR 0028).
+     * As robocode-s's server ({@code late_turns}).
      */
     public static long lateTurns(long workNanos, long turn) {
+        if (turn == 0) {
+            return workNanos < ROUND_START_NANOS ? 0 : 1 + lateTurns(workNanos - ROUND_START_NANOS, 1);
+        }
         long allowance = turn == 1 ? FIRST_TURN_BUDGETS * TURN_BUDGET_NANOS : TURN_BUDGET_NANOS;
         return turn < 1 || workNanos < allowance ? 0 : 1 + (workNanos - allowance) / TURN_BUDGET_NANOS;
     }
 
-    /** Classic: a new round for this robot peer; its first turn starts its work count. */
+    /**
+     * A robot's virtual time for skipped turns: its counted work and the lateness its main
+     * thread's sleeps took (ADR 0025). What robocode-s's robot host reports differences of.
+     */
+    private static long workNanos(Stream stream) {
+        if (stream == null) {
+            return 0;
+        }
+        long[] fuel = stream.fuel;
+        return (fuel == null ? 0 : elapsedNanos(0, count(fuel))) + stream.late();
+    }
+
+    /**
+     * Classic's robot side, on a robot thread as its round starts, before the robot is
+     * created: its work from here to its first execute is the round start's (ADR 0028),
+     * cut off at {@link #ROUND_START_CUTOFF_NANOS}. The robot's threads of the round before
+     * are gone by now (classic waits for them to stop).
+     */
+    static void roundStart() {
+        RobotRandomness randomness = current;
+        Stream stream = randomness == null ? null : randomness.currentStream();
+        if (stream == null) {
+            return;
+        }
+        synchronized (stream) {
+            stream.roundStart = workNanos(stream);
+            long[] fuel = stream.fuel;
+            if (fuel != null) {
+                stream.cutoffAt = count(fuel) + ROUND_START_CUTOFF_INSTRUCTIONS;
+                if (stream.threads == null) {
+                    limit(fuel, stream.cutoffAt);
+                }
+            }
+        }
+        if (TRACE != null && stream.fuel != null) {
+            trace("round start fuel " + count(stream.fuel));
+        }
+    }
+
+    /** Classic: a new round for this robot peer; its first execute ends the round start's work. */
     static void peerRound(Object peer) {
         synchronized (PEERS) {
             PEERS.put(peer, new PeerTurns());
@@ -673,14 +741,18 @@ public final class RobotRandomness {
         var published = (java.util.concurrent.atomic.AtomicReference<Object>) args[2];
         RobotRandomness randomness = current;
         Stream stream = randomness == null ? null : randomness.currentStream();
-        long now = stream == null || stream.fuel == null ? 0 : elapsedNanos(0, count(stream.fuel)) + stream.late();
+        long now = workNanos(stream);
+        long roundStart = stream == null ? 0 : stream.roundStart();
         synchronized (PEERS) {
             PeerTurns turns = PEERS.computeIfAbsent(peer, p -> new PeerTurns());
-            long work = turns.work < 0 ? 0 : Math.max(0, now - turns.work);
+            // The round's first execute answers its start (turn 0) with its work since then
+            // (ADR 0028). Classic's currentExecutionTime still holds the round before's turn.
+            boolean first = turns.work < 0;
+            long work = Math.max(0, now - (first ? roundStart : turns.work));
             turns.work = now;
             // Calibration: no skipped turns, as in the unmetered run (classic waits for every
             // robot there), so both runs play the same turns; heavy robots would diverge.
-            turns.late = CALIBRATING ? 0 : lateTurns(work, turn);
+            turns.late = CALIBRATING ? 0 : lateTurns(work, first ? 0 : turn);
             if (turns.late > 0) {
                 // Not published yet: these stay in effect while it is late.
                 turns.oldCommands = published.get();
@@ -861,6 +933,8 @@ public final class RobotRandomness {
         volatile long cutoffAt;
         /** Count when its main thread's last turn ended, for the turn's spare budget (ADR 0025). */
         long turnStart;
+        /** Its work ({@link #workNanos}) when its round started (ADR 0028). */
+        private long roundStart;
         /** Whether a class of the robot uses what its threads' scheduler doesn't cover (ADR 0025). */
         volatile boolean uncovered;
         /** Calibration: clock reads, and the CPU time of the robot's threads at its turns. */
@@ -937,6 +1011,10 @@ public final class RobotRandomness {
 
         synchronized long late() {
             return late;
+        }
+
+        synchronized long roundStart() {
+            return roundStart;
         }
 
         /** From now on its turns take classic's time (ADR 0025): it has threads of its own. */

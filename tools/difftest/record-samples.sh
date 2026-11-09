@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: EPL-2.0
 #
 # Records a fixed corpus of classic battles with the sample robots, and with test robots
-# that skip turns, for the engine replay test (crates/difftest).
+# that skip turns (also at a round's start), for the engine replay test (crates/difftest).
 # Usage: tools/difftest/record-samples.sh <output dir> [extra jars]
 # Requires ./gradlew :tools:difftest:installDist :robots:samples:jar :robots:testbots:jar
 #   :clients:java-determinism:jar
@@ -48,6 +48,12 @@ record junior-target sample.MyFirstJuniorRobot,sample.Target,sample.PaintingRobo
 # Robots that sleep on their main thread skip turns (ADR 0025); Oversleeper is disabled for it.
 record sleeper-crazy testbots.Sleeper,sample.Crazy 11 10 & pids+=($!)
 record oversleeper-fire testbots.Oversleeper,sample.Fire 12 6 & pids+=($!)
+# Robots that work before a round's first execute (ADR 0028): within classic's 756 ms, just
+# over (late, from turn 1 on) and well over (disabled in the first round). In later rounds a
+# late start finds no skipped turns: classic compares with the round before's last turn.
+record slowstart500-walls testbots.SlowStart500,sample.Walls 13 3 & pids+=($!)
+record slowstart800-walls testbots.SlowStart800,sample.Walls 14 3 & pids+=($!)
+record slowstart1000-walls testbots.SlowStart1000,sample.Walls 15 3 & pids+=($!)
 status=0
 for pid in "${pids[@]}"; do wait "$pid" || status=1; done
 exit $status

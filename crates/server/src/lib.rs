@@ -57,16 +57,31 @@ pub const DETERMINISTIC_BUDGET_NANOS: u64 = 3_200_000;
 /// Budgets a robot may use in turn 1: classic waits 21 milliseconds then instead of 3.
 pub const FIRST_TURN_BUDGETS: u64 = 7;
 
+/// Counted work (as virtual time) a robot may do at a round's start, before its first
+/// `Execute` (ADR 0028): classic's `RobotPeer.startRound` waits once, `wait(756)` for 300
+/// times the calibration machine's CPU constant of 2.52 ms (756.2 ms on Linux), about 236
+/// budgets. `RobotRandomness.ROUND_START_NANOS` on the Java side.
+pub const ROUND_START_NANOS: u64 = 756_000_000;
+
 /// Version of the deterministic rules (`RobotRandomness.rulesVersion()` on the Java side):
 /// deterministic battles need a robot host that follows the same ones. Version 2: robots'
-/// own threads run on one virtual CPU per robot (ADR 0025).
-pub const DETERMINISTIC_RULES: u32 = 3;
+/// own threads run on one virtual CPU per robot (ADR 0025). Version 3: work prices per kind
+/// (ADR 0026). Version 4: a round's start allows [`ROUND_START_NANOS`] (ADR 0028).
+pub const DETERMINISTIC_RULES: u32 = 4;
 
 /// How many turns late a robot's `Execute` for `turn` counts in deterministic mode, after
 /// `work` nanoseconds of counted work. As classic, which waits a budget for each robot each
 /// turn (seven on turn 1, `Battle.wakeupRobots`) and otherwise runs the turn without it: the
-/// robot answers after the turns whose wait ran out. A round's start (`turn` 0) is free.
+/// robot answers after the turns whose wait ran out. A round's start (`turn` 0) waits
+/// [`ROUND_START_NANOS`]; a robot still busy then runs into turn 1's wait (ADR 0028).
 pub fn late_turns(work: u64, turn: i64, budget: u64) -> i64 {
+    if turn == 0 {
+        return if work < ROUND_START_NANOS {
+            0
+        } else {
+            1 + late_turns(work - ROUND_START_NANOS, 1, budget)
+        };
+    }
     let allowance = if turn == 1 {
         FIRST_TURN_BUDGETS * budget
     } else {
@@ -307,6 +322,10 @@ struct Link {
     late_execute: Option<(i64, v1::Execute)>,
     /// The turn of the `Tick` a robot answered late; it skipped the turns after it.
     answered_late: Option<i64>,
+    /// The turn the robot last woke in, as classic's `currentExecutionTime`, which carries
+    /// over into the next round: a late answer to a round's start compares with it
+    /// ([`skipped::carried_last`]).
+    last_woken: i64,
     /// A robot from an IDE ([`RobotEntry::debug`]): never timed.
     debug: bool,
     /// The robot said it started threads of its own (`Execute.threads`).
@@ -1016,7 +1035,14 @@ impl<'a> BattleLoop<'a> {
                 break;
             }
         }
+        let last_turn = self.battle().time;
         for i in 0..self.links.len() {
+            // Classic interrupts a robot still asleep in `executeImpl` (here: one whose
+            // `Execute` is awaited or held), and its `checkSkippedTurn` runs once more.
+            let link = &mut self.links[i];
+            if link.active && (link.awaiting.is_some() || link.late_execute.is_some()) {
+                link.last_woken = last_turn;
+            }
             self.send(i, server_message::Msg::RoundOver(v1::RoundOver { round }));
         }
         let result = recording::round_result(self.battle());
@@ -1311,9 +1337,9 @@ impl<'a> BattleLoop<'a> {
             } else {
                 None
             };
-            let skipped = answered_late.map(|answered| {
+            let skipped = answered_late.and_then(|answered| {
                 skipped::skipped(
-                    answered,
+                    skipped::carried_last(answered, self.links[i].last_woken),
                     turn,
                     self.battle().robots[i].is_alive(),
                     self.links[i].io_robot,
@@ -1395,6 +1421,8 @@ impl<'a> BattleLoop<'a> {
                 paint_enabled: link.paint_enabled,
                 budget_nanos: budget,
             };
+            // Classic's `checkSkippedTurn` runs as the robot wakes with this.
+            link.last_woken = turn;
             if running {
                 link.awaiting = Some(turn);
             } else {

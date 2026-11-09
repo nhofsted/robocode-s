@@ -131,9 +131,6 @@ final class RemotePeer implements IRobotPeer {
     void newRound() {
         inbox.clear();
         lastTurn = 0;
-        // A round's start is free: no skipped turns for the work before the first execute,
-        // as in the classic oracle (RobotRandomness.peerRound).
-        cpuAtReturn = -1;
         stopping = false;
         dead = false;
         winner = false;
@@ -141,7 +138,11 @@ final class RemotePeer implements IRobotPeer {
         drained = false;
         disabled = false;
         roundOver = false;
-        cpuAtReturn = -1;
+        // Counted work: the first execute reports the robot's work since now, before the
+        // robot is created (its round start, which classic waits 300 CPU constants for, ADR
+        // 0028; the robot's code doesn't run until then). In real time, its CPU time isn't
+        // the main thread's: none is reported.
+        cpuAtReturn = countedWork ? cpu() : -1;
         finalExecute = null;
         finalCommands = null;
     }

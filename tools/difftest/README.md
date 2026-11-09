@@ -53,7 +53,7 @@ Each `turn` line also has, per robot (in index order), what classic's engine did
 - `remaining`: the remaining body/gun/radar turn and distance reported back at the end of the turn (`publishStatus`); `null` for dead robots, for the same reason.
 - `events`: every event the engine generates for the robot, in order, with all fields (radians; bullets with id, owner, victim, position, power and active flag). Classic only queues an event while the robot's thread runs, which is timing-dependent shortly after a death; delivery is the server's job in robocode-s. A late robot's `SkippedTurnEvent`s are among them, in the turn it woke in, after that turn's other events.
 - `actions` (only when something happened): what robot threads did to their robot in the turn, `drainEnergy` or `disable:<reason>` (`disable:SKIPPED_TOO_MANY_TURNS` for a robot over the skipped-turn limit).
-- `late` (format 4, only when a robot answered late): per robot, the turn it last executed in, or `null`. It is what classic's `checkSkippedTurn` started from when the battle woke the robot (`currentExecutionTime`), so the replay can apply the same lateness to the engine and check the server's logic (`robocode_s_server::skipped`) against classic's events and disables. The deterministic oracle makes a robot late by its counted work and its main thread's sleeps (ADR 0018, 0025).
+- `late` (format 4, only when a robot answered late): per robot, the turn it last executed in, or `null`. It is what classic's `checkSkippedTurn` started from when the battle woke the robot (`currentExecutionTime`), so the replay can apply the same lateness to the engine and check the server's logic (`robocode_s_server::skipped`) against classic's events and disables. The deterministic oracle makes a robot late by its counted work and its main thread's sleeps (ADR 0018, 0025). A late answer to a round's start compares with the turn the robot last woke in during the round before: classic never resets `currentExecutionTime`, so it is recorded only when that check finds skipped turns (ADR 0028).
 
 Format 3 recordings (without `late`) still replay, but only battles in which no robot skipped a turn.
 
@@ -69,7 +69,7 @@ Recording costs about 1% of the battle time.
 `crates/difftest` replays recordings in the robocode-s engine: it feeds each turn's recorded commands into the engine and compares robot states, bullets, remaining values and events bit for bit, reporting the first difference.
 
 ```sh
-tools/difftest/record-samples.sh /tmp/recordings          # 11 sample and test-robot battles, ~15 s
+tools/difftest/record-samples.sh /tmp/recordings          # 14 sample and test-robot battles, ~30 s
 cargo run --release -p robocode-s-difftest --bin replay -- /tmp/recordings/*.jsonl.gz
 ROBOCODES_RECORDINGS=/tmp/recordings cargo test -p robocode-s-difftest
 ```
@@ -87,7 +87,7 @@ The server replay (`cargo test -p robocode-s-difftest --test server_replay`) dri
 cargo run --release -p robocode-s-difftest --bin live -- /tmp/recordings/*.jsonl.gz
 ```
 
-`ROBOCODES_JAVA` selects the Java runtime; without it the pinned Temurin JRE is downloaded. `ROBOCODES_ROBOT_JARS` (a path list) adds robot jars, e.g. RoboRumble bots.
+`ROBOCODES_JAVA` selects the Java runtime; without it the pinned Temurin JRE is downloaded. `ROBOCODES_ROBOT_JARS` (a path list) sets the robot jars instead of the samples, e.g. RoboRumble bots; for the test robots, list both `robots/testbots/build/libs/testbots-*.jar` and the samples jar.
 
 The command-line battle runner is checked the same way: `cargo test -p robocode-s-cli` with `ROBOCODES_RECORDINGS` set fights each recorded battle with `robocode-s battle` and compares the robot names and the final results with classic's.
 

@@ -53,9 +53,18 @@ class PeerPatchTest {
     }
 
     @Test
-    void turnZeroIsNeverLate() {
+    void theRoundStartAllowsClassicsWaitThenRunsIntoTurnOne() {
+        long start = RobotRandomness.ROUND_START_NANOS;
+        assertEquals(756_000_000L, start);
         assertEquals(0, RobotRandomness.lateTurns(0, 0));
-        assertEquals(0, RobotRandomness.lateTurns(100 * TURN_BUDGET_NANOS, 0));
+        assertEquals(0, RobotRandomness.lateTurns(500_000_000L, 0));
+        assertEquals(0, RobotRandomness.lateTurns(start - 1, 0));
+        assertEquals(1, RobotRandomness.lateTurns(start, 0));
+        assertEquals(1, RobotRandomness.lateTurns(start + 7 * TURN_BUDGET_NANOS - 1, 0));
+        assertEquals(2, RobotRandomness.lateTurns(start + 7 * TURN_BUDGET_NANOS, 0));
+        assertEquals(31, RobotRandomness.lateTurns(start + 36 * TURN_BUDGET_NANOS, 0));
+        // The cutoff at a round's start stops only robots late for more turns than any may skip.
+        assertEquals(251, RobotRandomness.lateTurns(RobotRandomness.ROUND_START_CUTOFF_NANOS, 0));
     }
 
     /** Robot code doing counted work. */

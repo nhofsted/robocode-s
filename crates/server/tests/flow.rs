@@ -6,8 +6,8 @@ use robocode_s_engine::BattleRules;
 use robocode_s_protocol::v1::{self, client_message, event, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{
-    BattleOutcome, DETERMINISTIC_BUDGET_NANOS, RobotEntry, RobotPipe, ServerConfig, late_turns,
-    run_battle, run_battle_piped,
+    BattleOutcome, DETERMINISTIC_BUDGET_NANOS, ROUND_START_NANOS, RobotEntry, RobotPipe,
+    ServerConfig, late_turns, run_battle, run_battle_piped,
 };
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -303,9 +303,20 @@ fn deterministic_mode_disables_robots_over_the_hard_limit() {
 /// nothing otherwise). Returns what B saw: the turns of its Ticks, its SkippedTurn events,
 /// and whether a RobotDeath for B reached A.
 fn work_battle(at: i64, work: u64) -> (Vec<i64>, Vec<i64>, bool) {
+    let (ticks, skipped, saw_death) = work_battle_rounds(at, work, 1);
+    (
+        ticks,
+        skipped.into_iter().map(|(_, t)| t).collect(),
+        saw_death,
+    )
+}
+
+/// [`work_battle`] over `rounds` rounds, `at` in each; its SkippedTurn events by round.
+fn work_battle_rounds(at: i64, work: u64, rounds: i32) -> (Vec<i64>, Vec<(i32, i64)>, bool) {
     let config = ServerConfig {
         rules: BattleRules {
             inactivity_time: 400,
+            num_rounds: rounds,
             ..small_rules()
         },
         deterministic: true,
@@ -339,15 +350,19 @@ fn work_battle(at: i64, work: u64) -> (Vec<i64>, Vec<i64>, bool) {
     };
     let mut b = connect(&address, PROTOCOL_VERSION.major, v1::Role::Robot, "b");
     let (mut ticks, mut skipped) = (Vec::new(), Vec::new());
+    let mut round = -1;
     while let Some(msg) = receive(&mut b) {
         match msg {
-            server_message::Msg::RoundStart(_) => execute(&mut b, 0),
+            server_message::Msg::RoundStart(_) => {
+                round += 1;
+                execute_with_work(&mut b, 0, if at == 0 { work } else { 0 });
+            }
             server_message::Msg::Tick(t) => {
                 assert_eq!(t.budget_nanos, DETERMINISTIC_BUDGET_NANOS);
                 ticks.push(t.turn);
                 for e in &t.events {
                     if let Some(event::Kind::SkippedTurn(s)) = &e.kind {
-                        skipped.push(s.turn);
+                        skipped.push((round, s.turn));
                     }
                 }
                 let work = if t.turn == at { work } else { 0 };
@@ -378,9 +393,18 @@ fn late_turns_counts_the_turns_a_robot_overran() {
     assert_eq!(late_turns(7 * b - 1, 1, b), 0);
     assert_eq!(late_turns(7 * b, 1, b), 1);
     assert_eq!(late_turns(9 * b, 1, b), 3);
-    // Turn 0 (the round's start) is never late.
+    // Turn 0 (the round's start) allows 756 ms (ADR 0028), then runs into turn 1's seven
+    // budgets, then one turn per budget.
+    let start = ROUND_START_NANOS;
     assert_eq!(late_turns(0, 0, b), 0);
-    assert_eq!(late_turns(1000 * b, 0, b), 0);
+    assert_eq!(late_turns(500_000_000, 0, b), 0);
+    assert_eq!(late_turns(start - 1, 0, b), 0);
+    assert_eq!(late_turns(start, 0, b), 1);
+    assert_eq!(late_turns(start + 7 * b - 1, 0, b), 1);
+    assert_eq!(late_turns(start + 7 * b, 0, b), 2);
+    // Classic disables it past 30 skipped turns (in the first round).
+    assert_eq!(late_turns(start + 36 * b - 1, 0, b), 30);
+    assert_eq!(late_turns(start + 36 * b, 0, b), 31);
 }
 
 #[test]
@@ -404,6 +428,42 @@ fn deterministic_mode_disables_robots_that_overrun_too_many_turns() {
     // B's Execute for turn 5 counts as 40 turns late: the Tick after it is turn 46 (the
     // one that reports its death) and there is none after that.
     assert_eq!(ticks.last(), Some(&46), "ticks {ticks:?}");
+}
+
+#[test]
+fn deterministic_mode_allows_classics_wait_at_a_rounds_start() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    // Half a second before the first Execute: on time (classic waits 756 ms).
+    let (ticks, skipped, _) = work_battle(0, 500_000_000);
+    assert_eq!(ticks.first(), Some(&1));
+    assert!(skipped.is_empty());
+    // Just over: it misses turn 1, and learns of it in turn 2.
+    let (ticks, skipped, saw_death) = work_battle(0, ROUND_START_NANOS + b);
+    assert!(!saw_death);
+    assert_eq!(ticks.first(), Some(&2), "ticks {ticks:?}");
+    assert_eq!(skipped, vec![1]);
+}
+
+#[test]
+fn deterministic_mode_disables_robots_that_start_too_slowly() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    // 31 turns late: turn 1's wait, then 30 more.
+    let (ticks, skipped, saw_death) = work_battle(0, ROUND_START_NANOS + 36 * b);
+    assert!(saw_death, "B should be disabled; ticks {ticks:?}");
+    assert_eq!(ticks, vec![32]);
+    assert_eq!(skipped, (1..=31).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_slow_start_in_a_later_round_compares_with_the_round_before() {
+    let b = DETERMINISTIC_BUDGET_NANOS;
+    // As classic's `currentExecutionTime`, which carries over: in the second round B last
+    // woke in turn 41 of the first (when it was disabled), so waking in turn 41 again finds
+    // no skipped turn, and it isn't disabled.
+    let (_, skipped, saw_death) = work_battle_rounds(0, ROUND_START_NANOS + 45 * b, 2);
+    assert!(saw_death, "disabled in the first round");
+    assert_eq!(skipped.iter().filter(|(r, _)| *r == 0).count(), 40);
+    assert!(skipped.iter().all(|(r, _)| *r == 0), "skipped {skipped:?}");
 }
 
 fn control(observer: &mut TcpStream, control: v1::observer_control::Control) {
