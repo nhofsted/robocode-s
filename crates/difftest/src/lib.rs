@@ -357,8 +357,13 @@ fn skip_turns(battle: &mut Battle, line: &Value, turn: i64, io: &[bool]) -> Vec<
         let Some(answered) = last.as_i64() else {
             continue;
         };
-        let skipped =
-            robocode_s_server::skipped::skipped(answered, turn, battle.robots[i].is_alive(), io[i]);
+        // Classic recorded `currentExecutionTime` (also the one carried over from the round
+        // before), and only when the check found skipped turns.
+        let Some(skipped) =
+            robocode_s_server::skipped::skipped(answered, turn, battle.robots[i].is_alive(), io[i])
+        else {
+            continue;
+        };
         battle.robots[i]
             .events
             .extend(skipped.events.map(|turn| Event::SkippedTurn { turn }));

@@ -13,7 +13,8 @@ use robocode_s_engine::Commands;
 use robocode_s_protocol::v1::{self, client_message, server_message};
 use robocode_s_protocol::{PROTOCOL_VERSION, read_message, write_message};
 use robocode_s_server::{
-    DETERMINISTIC_BUDGET_NANOS, FIRST_TURN_BUDGETS, RobotEntry, ServerConfig, run_battle,
+    DETERMINISTIC_BUDGET_NANOS, FIRST_TURN_BUDGETS, ROUND_START_NANOS, RobotEntry, ServerConfig,
+    run_battle,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -93,8 +94,11 @@ fn late_answers(round: &Round, index: usize) -> HashMap<i64, i64> {
 }
 
 /// The counted work that makes an answer to `turn` `late` turns late on the server
-/// (`late_turns`).
+/// (`late_turns`). A round's start (turn 0) allows `ROUND_START_NANOS`, then turn 1's.
 fn work_for(turn: i64, late: i64) -> u64 {
+    if turn == 0 {
+        return ROUND_START_NANOS + if late > 1 { work_for(1, late - 1) } else { 0 };
+    }
     let allowance = if turn == 1 {
         FIRST_TURN_BUDGETS * DETERMINISTIC_BUDGET_NANOS
     } else {
@@ -147,10 +151,15 @@ fn robot(
             server_message::Msg::RoundStart(r) => {
                 round = r.round as usize;
                 late = late_answers(&rounds[round], index);
-                answered_late = None;
+                // Late at the round's start (ADR 0028): as late as classic recorded. (In
+                // later rounds classic records none when it finds no skipped turns: it
+                // compares with the round before's last turn. Then this robot can't tell.)
+                let wakes = late.get(&0).copied();
+                answered_late = wakes.map(|_| 0);
                 let execute = v1::Execute {
                     turn: 0,
-                    commands: Some(commands(round, 1)),
+                    commands: Some(commands(round, wakes.map_or(1, |w| w as usize))),
+                    cpu_nanos: wakes.map_or(0, |w| work_for(0, w - 1)),
                     ..Default::default()
                 };
                 send(&mut stream, client_message::Msg::Execute(execute));

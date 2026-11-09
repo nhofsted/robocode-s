@@ -156,6 +156,7 @@ public final class DeterminismAgent {
         System.getProperties().put(RobotRandomness.CLOCK_MILLIS_KEY,
                 (ToLongFunction<Object>) RobotRandomness::virtualMillis);
         System.getProperties().put(RobotRandomness.TURN_KEY, (Runnable) RobotRandomness::turn);
+        System.getProperties().put(RobotRandomness.ROUND_START_KEY, (Runnable) RobotRandomness::roundStart);
         System.getProperties().put(RobotRandomness.API_TRACE_KEY,
                 (java.util.function.BiConsumer<Object, Object>) RobotRandomness::traceApi);
         System.getProperties().put(STOP_KEY, (Predicate<Object>) DeterminismAgent::awaitRobotThread);
@@ -305,6 +306,22 @@ public final class DeterminismAgent {
      * of a robot thread is a turn for the robot's virtual clock.
      */
     private static byte[] patchTurns(byte[] classfileBuffer) {
+        return patchRunnableHook(classfileBuffer, RobotRandomness.TURN_KEY, "BasicRobotProxy",
+                "executeImpl", "waitForBattleEndImpl");
+    }
+
+    /**
+     * Classic's robot side: {@code HostingRobotProxy.run()}, a robot thread's round, first
+     * calls {@code roundStart()}: the round start's work and cutoff begin (ADR 0028).
+     */
+    private static byte[] patchRoundStart(byte[] classfileBuffer) {
+        return patchRunnableHook(classfileBuffer, RobotRandomness.ROUND_START_KEY, "HostingRobotProxy", "run");
+    }
+
+    /** Each of {@code methods} ({@code ()V}) first runs the {@code Runnable} under {@code key}. */
+    private static byte[] patchRunnableHook(byte[] classfileBuffer, String key, String className,
+            String... methods) {
+        java.util.List<String> names = java.util.List.of(methods);
         try {
             ClassReader reader = new ClassReader(classfileBuffer);
             ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
@@ -314,8 +331,7 @@ public final class DeterminismAgent {
                 public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
                         String[] exceptions) {
                     MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-                    if (!descriptor.equals("()V")
-                            || !(name.equals("executeImpl") || name.equals("waitForBattleEndImpl"))) {
+                    if (!descriptor.equals("()V") || !names.contains(name)) {
                         return mv;
                     }
                     patched[0]++;
@@ -325,7 +341,7 @@ public final class DeterminismAgent {
                             super.visitCode();
                             mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperties",
                                     "()Ljava/util/Properties;", false);
-                            mv.visitLdcInsn(RobotRandomness.TURN_KEY);
+                            mv.visitLdcInsn(key);
                             mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Properties", "get",
                                     "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                             mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Runnable");
@@ -334,12 +350,12 @@ public final class DeterminismAgent {
                     };
                 }
             }, 0);
-            if (patched[0] != 2) {
-                throw new IllegalStateException("expected executeImpl and waitForBattleEndImpl, found " + patched[0]);
+            if (patched[0] != names.size()) {
+                throw new IllegalStateException("expected " + names + ", found " + patched[0]);
             }
             return writer.toByteArray();
         } catch (Throwable t) {
-            System.err.println("DeterminismAgent: could not patch BasicRobotProxy: " + t);
+            System.err.println("DeterminismAgent: could not patch " + className + ": " + t);
             return null;
         }
     }
@@ -848,6 +864,9 @@ public final class DeterminismAgent {
             }
             if ("net/sf/robocode/host/proxies/BasicRobotProxy".equals(className)) {
                 return patchTurns(classfileBuffer);
+            }
+            if ("net/sf/robocode/host/proxies/HostingRobotProxy".equals(className)) {
+                return patchRoundStart(classfileBuffer);
             }
             if ("net/sf/robocode/host/security/RobotThreadManager".equals(className)) {
                 return patchStop(classfileBuffer);

@@ -129,6 +129,8 @@ After all robots are placed, active participants and sentries are counted again.
 
 `currentTime = 0`, `endTimer = 0`, `inactiveTurnCount = 0`. Then, in **one shuffled order**, each robot's statistics are reset (§10) and it receives its initial status at time 0. Its thread starts and runs the robot's code up to its first `execute` (§11). Commands from that first `execute` take effect in turn 1.
 
+The battle waits for each robot once, `wait(waitMillis, waitNanos)` for `min(300 × cpuConstant, 10 s)` (the JDK rounds a nonzero `waitNanos` up to a whole millisecond), and then goes on without it ("still has not started ... giving up"). A robot still busy then isn't woken in turn 1 (it isn't asleep); turn 1's wait (ten times the turn's, §11.3) waits for it all the same, and it wakes in the turn after the one whose wait it falls asleep in, with the turns before as skipped turns (§11.3). In deterministic mode this is counted work (ADR 0028).
+
 ### 4.4 Round loop and round end (`BaseBattle.runRound`)
 
 Turns run until `isRoundOver()`, i.e. until `endTimer > 150` (5 × 30). `endTimer` only grows inside `shutdownTurn` (§5, step 6), which runs every turn once the battle is aborted or **one team remains**. So a round continues for **151 more turns** after its outcome is decided:
@@ -523,7 +525,7 @@ When a robot executes, it gets back:
 
 ### 11.3 Skipped turns
 
-On each execute, the engine compares the current turn with the turn of the previous execute. If turns were skipped:
+On each execute, the engine compares the current turn with the turn of the previous execute (`currentExecutionTime`, the turn the robot last woke in). Classic never resets that between rounds: a robot that answers a round's start late compares with the turn it last woke in during the round before (the round's last turn, or the turn it died or was disabled in), so it usually finds no skipped turns, and keeps its events. If turns were skipped:
 - non-critical events in the queue are cleared;
 - one `SkippedTurnEvent(turn)` is added per skipped turn (if alive);
 - more than 30 consecutive skipped turns (240 for I/O robots) halt and disable the robot.
