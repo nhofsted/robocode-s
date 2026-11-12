@@ -17,7 +17,7 @@ use aws_sdk_dynamodb::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_dynamodb::types::{
     AttributeValue, Delete, Put, ReturnValue, TransactWriteItem, Update,
 };
-use rumble_core::api::{BotColors, Rejected};
+use rumble_core::api::{BotColors, Llm, LlmUse, Rejected};
 use rumble_core::ids::{Division, WeightClass, parse_vid36, vid36};
 use rumble_core::store::{
     Alert, BatchMarker, BotItem, BotSource, BotState, LogItem, Reputation, ResultsTransaction, Run,
@@ -388,6 +388,12 @@ fn version_item(version: &VersionItem) -> Item {
     if version.disagreements > 0 {
         item.insert("ndn".into(), n(version.disagreements));
     }
+    if let Some(llm) = &version.llm {
+        item.insert("llm".into(), s(llm.usage.as_str()));
+        if let Some(model) = &llm.model {
+            item.insert("llmm".into(), s(model));
+        }
+    }
     item
 }
 
@@ -431,6 +437,13 @@ fn version_from(item: &Item) -> StoreResult<VersionItem> {
         released: opt_n(item, "rd")?,
         nondeterministic: opt_s(item, "nd")?,
         disagreements: n_or(item, "ndn", 0)?,
+        llm: match opt_s(item, "llm")? {
+            Some(usage) => Some(Llm {
+                usage: LlmUse::parse(&usage).ok_or_else(|| bad("llm"))?,
+                model: opt_s(item, "llmm")?,
+            }),
+            None => None,
+        },
     })
 }
 
@@ -1485,6 +1498,23 @@ mod tests {
         let item = version_item(&colored);
         assert_eq!(item["col"], s(r##"{"body":"#000000","radar":"#ffffff"}"##));
         assert_eq!(version_from(&item).unwrap(), colored);
+        for llm in [
+            Llm {
+                usage: LlmUse::None,
+                model: None,
+            },
+            Llm {
+                usage: LlmUse::Generated,
+                model: Some("Claude Opus 4.5".into()),
+            },
+        ] {
+            let declared = VersionItem {
+                llm: Some(llm),
+                ..colored.clone()
+            };
+            let item = version_item(&declared);
+            assert_eq!(version_from(&item).unwrap(), declared);
+        }
         let marker = BatchMarker {
             batch_id: "b-1".into(),
             uid: "g1".into(),

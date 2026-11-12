@@ -338,6 +338,47 @@ pub struct BotColors {
     pub radar: Option<String>,
 }
 
+/// How far a large language model helped write a bot version: the robot properties'
+/// `robot.llm` (`none`, `assisted`, `generated`). Self-declared; nothing checks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmUse {
+    None,
+    Assisted,
+    Generated,
+}
+
+impl LlmUse {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LlmUse::None => "none",
+            LlmUse::Assisted => "assisted",
+            LlmUse::Generated => "generated",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<LlmUse> {
+        match s {
+            "none" => Some(LlmUse::None),
+            "assisted" => Some(LlmUse::Assisted),
+            "generated" => Some(LlmUse::Generated),
+            _ => None,
+        }
+    }
+}
+
+/// A bot version's LLM declaration (`Llm` in `web/src/lib/rumble/types.ts`): `robot.llm` and
+/// `robot.llm.model` of its properties; absent for versions that declare nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Llm {
+    #[serde(rename = "use")]
+    pub usage: LlmUse,
+    /// The model(s), free text as the author wrote it (`Claude Opus 4.5, GPT-5`); only with
+    /// `assisted` or `generated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 impl BotColors {
     /// The colours of a protocol ARGB value (the alpha is dropped).
     pub fn hex(argb: i32) -> String {

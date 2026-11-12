@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Flag from '#lib/components/Flag.svelte';
+	import LlmBadge from '#lib/components/LlmBadge.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import UpdateTimes from '#lib/components/UpdateTimes.svelte';
@@ -159,7 +160,9 @@
 								<span class="ver mono">{r.version}</span>
 							</a>
 						</td>
-						<td class="author"><span class="who" title={r.author}><Flag code={r.country} /> {r.author}</span></td>
+						<td class="author">
+							<span class="byline"><span class="who" title={r.author}><Flag code={r.country} /> {r.author}</span><LlmBadge llm={r.llm} /></span>
+						</td>
 						{#each METRICS as m (m.key)}
 							<td class="num" class:key={m.key === sortKey}>{formatNumber(r[m.key], m.digits)}</td>
 						{/each}
@@ -283,8 +286,16 @@
 	.author {
 		color: var(--text-2);
 	}
+	/* The author's name gives way (ellipsis) to the LLM badge, which stays on its line. */
+	.byline {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 11.5rem;
+	}
 	.who {
 		display: block;
+		min-width: 0;
 		max-width: 10rem;
 		white-space: nowrap;
 		overflow: hidden;

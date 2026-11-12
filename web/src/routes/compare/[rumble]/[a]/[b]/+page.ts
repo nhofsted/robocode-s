@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { loadBot, loadIndex, loadRankings, loadVersion } from '#lib/rumble/data.ts';
-import type { BotColors, BotDetails, RumbleId } from '#lib/rumble/types.ts';
+import type { BotColors, BotDetails, Llm, RumbleId } from '#lib/rumble/types.ts';
 import type { PageLoad } from './$types';
 
 /** One side of a comparison: a bot's ranked version, or (`?b=<version>`) an earlier one. */
@@ -8,6 +8,8 @@ export interface Side {
 	bot: BotDetails;
 	version: string;
 	colors: BotColors | null | undefined;
+	/** The version's LLM declaration, where it has one. */
+	llm: Llm | null | undefined;
 	/** Rank in the rumble; null for an earlier version (not ranked). */
 	rank: number | null;
 	/** The ranked APS, or an earlier version's mean score against today's field. */
@@ -23,6 +25,7 @@ function ranked(bot: BotDetails, rumble: RumbleId): Side {
 		bot,
 		version: entry.history.at(-1)?.version ?? bot.versions[0].version,
 		colors: bot.versions[0]?.colors,
+		llm: bot.versions[0]?.llm,
 		rank: entry.rank,
 		aps: entry.aps,
 		retiredAt: null,
@@ -55,6 +58,7 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 			bot: botB,
 			version: v.version,
 			colors: v.colors,
+			llm: v.llm,
 			rank: null,
 			aps: entry.aps,
 			retiredAt: v.retiredAt,

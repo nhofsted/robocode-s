@@ -4,6 +4,7 @@
 	// earlier version (`?b=<version>`), usually of the same bot: what changed with the update?
 	import { resolve } from '$app/paths';
 	import Flag from '#lib/components/Flag.svelte';
+	import LlmBadge from '#lib/components/LlmBadge.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import ScatterChart from '#lib/components/ScatterChart.svelte';
 	import Tank from '#lib/components/Tank.svelte';
@@ -107,7 +108,7 @@
 				<div>
 					<a class="name" href={resolve('/bot/[id]', { id: s.bot.id }) + `?rumble=${rumble}`}>{shortName(s.bot.id)}</a>
 					<div class="small muted">
-						<Flag code={s.bot.author.country} /> {s.bot.author.name} ·
+						<Flag code={s.bot.author.country} /> {s.bot.author.name} <LlmBadge llm={s.llm} /> ·
 						{#if s.rank === null}
 							<span class="mono">{s.version}</span> · {s.retiredAt ? `retired ${formatDate(s.retiredAt)}` : 'not ranked'} ·
 							<span class="mono" title="Mean score against today's field, as far as this version met it">avg {formatNumber(s.aps, 2)}</span>

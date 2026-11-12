@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import BotReplays from '#lib/components/BotReplays.svelte';
 	import Flag from '#lib/components/Flag.svelte';
+	import LlmBadge from '#lib/components/LlmBadge.svelte';
 	import PairingStrip from '#lib/components/PairingStrip.svelte';
 	import ScatterChart from '#lib/components/ScatterChart.svelte';
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
@@ -147,6 +148,10 @@
 					<a href="https://github.com/{bot.author.github}">{bot.author.name}</a>
 				{:else}
 					{bot.author.name}
+				{/if}
+				<LlmBadge llm={current.llm} />
+				{#if current.llm?.use === 'none'}
+					<span class="muted" title="The author declares no LLM helped write this version">· no LLM</span>
 				{/if}
 				{#if current.codesize !== null}
 					· <span title="Codesize in bytes">{CLASS_NAMES[current.weightClass]} ({formatCount(current.codesize)} bytes)</span>
@@ -385,6 +390,7 @@
 								{:else}
 									{v.version}
 								{/if}
+								<LlmBadge llm={v.llm} size={14} />
 							</td>
 							<td>{released(v)}</td>
 							<td>{formatDate(v.addedAt)}</td>

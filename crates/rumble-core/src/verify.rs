@@ -1153,6 +1153,7 @@ mod tests {
                     released: None,
                     nondeterministic: None,
                     disagreements: 0,
+                    llm: None,
                 })
                 .unwrap();
         }

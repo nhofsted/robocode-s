@@ -367,6 +367,9 @@ pub struct VersionItem {
     /// `ndn` (new): three-way disagreements of verification items the version was in
     /// ([`Store::add_version_disagreement`]); counted towards the automatic flag (§11.5).
     pub disagreements: u32,
+    /// `llm`, `llmm` (new): the robot properties' `robot.llm` and `robot.llm.model`; `None`
+    /// where the jar declares nothing.
+    pub llm: Option<crate::api::Llm>,
 }
 
 // ---- results ----
