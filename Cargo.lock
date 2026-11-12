@@ -2762,6 +2762,7 @@ name = "robocode-s-rumble-client"
 version = "0.2.6"
 dependencies = [
  "getrandom 0.3.4",
+ "log",
  "prost",
  "robocode-s-engine",
  "robocode-s-protocol",
@@ -3816,8 +3817,6 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
 dependencies = [
  "android_system_properties",
  "arrayvec",
