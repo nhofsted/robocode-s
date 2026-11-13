@@ -8,7 +8,7 @@
 //   node web/scripts/check-rumble-data.mjs <dir>
 //
 // <dir> holds the files as under /data/v1: rumbles.json, rankings/*.json, bots/*.json,
-// versions/<id>/*.json, rec/1v1/*.json, rec/melee/*.json, contributors.json and archive.json
+// map/*.json, versions/<id>/*.json, rec/1v1/*.json, rec/melee/*.json, contributors.json and archive.json
 // (each optional). Exits 1 on any error. Used by the rumble batch Lambda's tests.
 
 import fs from 'node:fs';
@@ -34,6 +34,7 @@ add(path.join(dir, 'contributors.json'), 'Contributors');
 add(path.join(dir, 'archive.json'), 'Archive');
 for (const [sub, type] of [
 	['rankings', 'Rankings'],
+	['map', 'StyleMap'],
 	['bots', 'BotDetails'],
 	['rec/1v1', 'Recordings1v1'],
 	['rec/melee', 'RecordingsMelee']
@@ -57,7 +58,7 @@ if (files.length === 0) {
 	process.exit(1);
 }
 
-let source = `import type { RumbleIndex, Rankings, BotDetails, Contributors, Archive, VersionDetails, Recordings1v1, RecordingsMelee } from ${JSON.stringify(types)};\n`;
+let source = `import type { RumbleIndex, Rankings, BotDetails, Contributors, Archive, VersionDetails, Recordings1v1, RecordingsMelee, StyleMap } from ${JSON.stringify(types)};\n`;
 files.forEach(([file, type], i) => {
 	source += `// ${file}\nexport const v${i}: ${type} = ${fs.readFileSync(file, 'utf8')};\n`;
 });
