@@ -410,10 +410,7 @@ impl Objects for S3Objects {
                 .presigned(config)
                 .await
                 .map_err(|e| format!("presigning {key}: {}", describe(&e)))?;
-            let mut headers: BTreeMap<String, String> = request
-                .headers()
-                .map(|(name, value)| (canonical_header(name), value.to_string()))
-                .collect();
+            let mut headers = signed_headers(request.uri(), request.headers());
             headers
                 .entry("Content-Length".to_string())
                 .or_insert_with(|| spec.size.to_string());
@@ -424,6 +421,31 @@ impl Objects for S3Objects {
             })
         })
     }
+}
+
+/// The headers of a presigned request that its `X-Amz-SignedHeaders` names (except `host`),
+/// canonically named: what the uploader must send. The SDK also puts unsigned headers on the
+/// request, such as `x-amzn-trace-id` from the Lambda's `_X_AMZN_TRACE_ID`; a browser sending
+/// those fails the bucket's CORS preflight, so they are left out.
+fn signed_headers<'a>(
+    uri: &str,
+    headers: impl Iterator<Item = (&'a str, &'a str)>,
+) -> BTreeMap<String, String> {
+    let signed: Vec<String> = url::Url::parse(uri)
+        .ok()
+        .and_then(|url| {
+            url.query_pairs()
+                .find(|(k, _)| k == "X-Amz-SignedHeaders")
+                .map(|(_, v)| v.split(';').map(str::to_ascii_lowercase).collect())
+        })
+        .unwrap_or_default();
+    headers
+        .filter(|(name, _)| {
+            let name = name.to_ascii_lowercase();
+            name != "host" && signed.contains(&name)
+        })
+        .map(|(name, value)| (canonical_header(name), value.to_string()))
+        .collect()
 }
 
 /// `content-length` → `Content-Length`; `x-amz-*` headers stay lower case (§5.4 example).
@@ -611,6 +633,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_signed_headers_go_to_the_uploader() {
+        let uri = "https://state-b.s3.eu-west-1.amazonaws.com/uploads/u/x.jar?X-Amz-Algorithm=AWS4-HMAC-SHA256\
+                   &X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-checksum-sha256\
+                   &X-Amz-Signature=abc";
+        let headers = signed_headers(
+            uri,
+            [
+                ("content-type", "application/java-archive"),
+                ("x-amz-checksum-sha256", "c2hh"),
+                (
+                    "x-amzn-trace-id",
+                    "Root=1-6af6688d-1bdb80890e776be7734e0203;Sampled=0",
+                ),
+                ("content-length", "15"),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            headers.into_iter().collect::<Vec<_>>(),
+            [
+                ("Content-Length".to_string(), "15".to_string()),
+                (
+                    "Content-Type".to_string(),
+                    "application/java-archive".to_string()
+                ),
+                ("x-amz-checksum-sha256".to_string(), "c2hh".to_string()),
+            ]
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn presigned_puts_sign_length_and_checksum() {
         let config = aws_config::SdkConfig::builder()
@@ -670,5 +723,9 @@ mod tests {
         assert_eq!(presigned.headers["Cache-Control"], IMMUTABLE);
         assert_eq!(presigned.expires, "2026-10-24T13:00:00Z");
         assert!(presigned.url.contains("X-Amz-Expires=3600"));
+        for name in presigned.headers.keys() {
+            let name = name.to_ascii_lowercase();
+            assert!(signed.contains(&name.as_str()), "{name} is not signed");
+        }
     }
 }

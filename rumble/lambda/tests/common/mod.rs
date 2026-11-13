@@ -198,6 +198,7 @@ pub fn version(vid: u32) -> VersionItem {
         released: None,
         nondeterministic: None,
         disagreements: 0,
+        llm: None,
     }
 }
 
