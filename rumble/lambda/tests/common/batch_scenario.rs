@@ -163,6 +163,7 @@ fn version(vid: u32, bot: u32, version: &str, state: VersionState) -> VersionIte
         released: None,
         nondeterministic: None,
         disagreements: 0,
+        llm: None,
     }
 }
 

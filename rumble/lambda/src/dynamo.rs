@@ -1468,6 +1468,7 @@ mod tests {
             released: Some(1_792_843_200_123),
             nondeterministic: Some("threads".into()),
             disagreements: 2,
+            llm: None,
         };
         let item = version_item(&version);
         assert_eq!(item["sk"], s("V#rs"));
