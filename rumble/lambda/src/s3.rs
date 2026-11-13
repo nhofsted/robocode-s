@@ -68,6 +68,9 @@ pub trait Objects: Send + Sync {
         content_type: &str,
         cache_control: Option<&str>,
     ) -> S3Result<()>;
+    /// PUTs a robot jar into the jars bucket: jar type, immutable, and saved by browsers and
+    /// `curl -OJ` as `file_name` (`Content-Disposition`) instead of `<sha256>.jar`.
+    fn put_jar(&self, key: &str, bytes: &[u8], file_name: &str) -> S3Result<()>;
     /// HeadObject: whether the object exists.
     fn exists(&self, bucket: Bucket, key: &str) -> S3Result<bool>;
     /// HeadObject with `ChecksumMode=ENABLED`: `None` if missing, else its `ChecksumSHA256`.
@@ -109,6 +112,9 @@ impl<O: Objects + ?Sized> Objects for std::sync::Arc<O> {
     ) -> S3Result<()> {
         (**self).put(bucket, key, bytes, content_type, cache_control)
     }
+    fn put_jar(&self, key: &str, bytes: &[u8], file_name: &str) -> S3Result<()> {
+        (**self).put_jar(key, bytes, file_name)
+    }
     fn exists(&self, bucket: Bucket, key: &str) -> S3Result<bool> {
         (**self).exists(bucket, key)
     }
@@ -142,6 +148,29 @@ impl<O: Objects + ?Sized> Objects for std::sync::Arc<O> {
 /// The SHA-256 of bytes in S3's checksum form.
 pub fn sha256_b64(bytes: &[u8]) -> String {
     STANDARD.encode(Sha256::digest(bytes))
+}
+
+/// The name a robot jar is saved under: classic's `classname_version.jar`
+/// (`jd.MyRobot_1.2.jar`), with characters that are unsafe in a file name or a quoted
+/// header (a version is any printable ASCII but a comma) replaced by `_`.
+pub fn jar_file_name(bot_id: &str, version: &str) -> String {
+    let safe = |s: &str| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '$' | '+') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
+    format!("{}_{}.jar", safe(bot_id), safe(version))
+}
+
+/// `Content-Disposition` for a download saved as `file_name` (already safe: no quotes).
+pub fn attachment(file_name: &str) -> String {
+    format!("attachment; filename=\"{file_name}\"")
 }
 
 /// The MD5 of bytes in hex: S3's ETag of an object put in one part (SSE-S3).
@@ -293,6 +322,24 @@ impl Objects for S3Objects {
                 .key(key)
                 .content_type(content_type)
                 .set_cache_control(cache_control.map(str::to_string))
+                .checksum_sha256(sha256_b64(bytes))
+                .body(ByteStream::from(bytes.to_vec()))
+                .send()
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("S3 PUT {key}: {}", describe(&e)))
+        })
+    }
+
+    fn put_jar(&self, key: &str, bytes: &[u8], file_name: &str) -> S3Result<()> {
+        block_on(async {
+            self.client
+                .put_object()
+                .bucket(&self.jars)
+                .key(key)
+                .content_type(JAR_TYPE)
+                .cache_control(IMMUTABLE)
+                .content_disposition(attachment(file_name))
                 .checksum_sha256(sha256_b64(bytes))
                 .body(ByteStream::from(bytes.to_vec()))
                 .send()
@@ -471,6 +518,7 @@ pub struct MemObject {
     pub bytes: Vec<u8>,
     pub content_type: String,
     pub cache_control: Option<String>,
+    pub content_disposition: Option<String>,
     pub sha256_b64: String,
     pub etag: String,
 }
@@ -542,6 +590,7 @@ impl Objects for MemObjects {
             bytes: bytes.to_vec(),
             content_type: content_type.to_string(),
             cache_control: cache_control.map(str::to_string),
+            content_disposition: None,
             sha256_b64: sha256_b64(bytes),
             etag: format!("\"{}\"", md5_hex(bytes)),
         };
@@ -549,6 +598,19 @@ impl Objects for MemObjects {
             .lock()
             .unwrap()
             .insert((bucket, key.to_string()), object);
+        Ok(())
+    }
+
+    fn put_jar(&self, key: &str, bytes: &[u8], file_name: &str) -> S3Result<()> {
+        self.put(Bucket::Jars, key, bytes, JAR_TYPE, Some(IMMUTABLE))?;
+        if let Some(object) = self
+            .objects
+            .lock()
+            .unwrap()
+            .get_mut(&(Bucket::Jars, key.to_string()))
+        {
+            object.content_disposition = Some(attachment(file_name));
+        }
         Ok(())
     }
 
@@ -630,6 +692,18 @@ mod tests {
         assert_eq!(
             canonical_header("x-amz-checksum-sha256"),
             "x-amz-checksum-sha256"
+        );
+    }
+
+    #[test]
+    fn jar_file_names() {
+        assert_eq!(jar_file_name("jd.MyRobot", "1.2"), "jd.MyRobot_1.2.jar");
+        assert_eq!(jar_file_name("a.B$C", "1.0-beta+2"), "a.B$C_1.0-beta+2.jar");
+        // A version is any printable ASCII but a comma: nothing may break the quoted header.
+        assert_eq!(jar_file_name("a.B", "2 \"x\";/\\.y"), "a.B_2__x____.y.jar");
+        assert_eq!(
+            attachment("a.B_1.jar"),
+            "attachment; filename=\"a.B_1.jar\""
         );
     }
 

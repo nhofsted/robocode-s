@@ -12,7 +12,9 @@ use crate::http::{
     rate_limited,
 };
 use crate::limits::Limiter;
-use crate::s3::{Bucket, Fetched, IMMUTABLE, JAR_TYPE, Objects, PutSpec, TRACK_TYPE};
+use crate::s3::{
+    Bucket, Fetched, IMMUTABLE, JAR_TYPE, Objects, PutSpec, TRACK_TYPE, jar_file_name,
+};
 use crate::{DETERMINISTIC_RULES, ENGINE_VERSION};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -29,7 +31,7 @@ use rumble_core::bots;
 use rumble_core::config::Config;
 use rumble_core::flags;
 use rumble_core::ids::{Division, parse_uid};
-use rumble_core::jar;
+use rumble_core::jar::{self, JarInfo};
 use rumble_core::plan::Plan;
 use rumble_core::results::{self, Presigned, Presigner, ResultsContext};
 use rumble_core::slots::{self, SlotId, is_sha256_hex};
@@ -1004,13 +1006,14 @@ impl App {
         }
     }
 
-    /// Puts the jar into `jars/<sha>.jar` unless it is there.
-    fn publish_jar(&self, sha256: &str, bytes: &[u8]) -> Result<(), ApiError> {
+    /// Puts the jar into `jars/<sha>.jar` unless it is there, downloaded as
+    /// `classname_version.jar` (a jar shared by several versions keeps its first name).
+    fn publish_jar(&self, info: &JarInfo, bytes: &[u8]) -> Result<(), ApiError> {
         let objects = &self.services.objects;
-        let key = jar_key(sha256);
+        let key = jar_key(&info.sha256);
         if !objects.exists(Bucket::Jars, &key).map_err(busy)? {
             objects
-                .put(Bucket::Jars, &key, bytes, JAR_TYPE, Some(IMMUTABLE))
+                .put_jar(&key, bytes, &jar_file_name(&info.bot_id, &info.version))
                 .map_err(busy)?;
         }
         Ok(())
@@ -1050,7 +1053,7 @@ impl App {
         };
         let info = jar::validate(&bytes, config)
             .map_err(|messages| bad_request(format!("invalid ({})", messages.join("; "))))?;
-        self.publish_jar(&info.sha256, &bytes)?;
+        self.publish_jar(&info, &bytes)?;
         let response = bots::submit(
             self.store(),
             config,
@@ -1118,7 +1121,7 @@ impl App {
         };
         let info = bots::validate_import(&bytes, config, &body)?;
         if !published {
-            self.publish_jar(&info.sha256, &bytes)?;
+            self.publish_jar(&info, &bytes)?;
         }
         let response = bots::import(self.store(), &body, &info, now_ms / 1000)?;
         if !published {

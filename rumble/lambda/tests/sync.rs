@@ -150,11 +150,14 @@ fn the_lists_drive_the_unclaimed_imported_bots() {
         .unwrap()
         .unwrap();
     assert_eq!(n.url.as_deref(), Some("http://mirror/n.New_1.0.jar"));
-    for sha in [&v.sha256, &n.sha256] {
-        assert!(
-            web.objects
-                .object(Bucket::Jars, &format!("jars/{sha}.jar"))
-                .is_some()
+    for (sha, name) in [(&v.sha256, "a.A_1.jar"), (&n.sha256, "n.New_1.0.jar")] {
+        let object = web
+            .objects
+            .object(Bucket::Jars, &format!("jars/{sha}.jar"))
+            .unwrap();
+        assert_eq!(
+            object.content_disposition,
+            Some(format!("attachment; filename=\"{name}\""))
         );
     }
     assert_eq!(v.sha256, sha_hex(&jar("a.A", Some("1"))));
