@@ -119,6 +119,41 @@ export interface RankingRow extends Metrics {
 	llm?: Llm | null;
 }
 
+/**
+ * `/data/v1/map/<rumble>.json` (additive, 2026-11-13): the style map, written daily by the `map`
+ * batch (`rumble_core::map`). Bots with similar strengths and weaknesses are near each other.
+ *
+ * A model fits each pairing score as the two bots' strengths plus `rank` intransitive
+ * (rock-paper-scissors) patterns; a bot's style is what the patterns say about it, with its
+ * strength taken out. The style distance of two bots is how differently they score against the
+ * field once strength is taken out (root mean square over all members, in score points at an
+ * even match). The layout (t-SNE) keeps neighbourhoods, not the distances between groups, so
+ * `near` lists the true nearest neighbours and `trustworthiness` says how far to trust the map's.
+ * A rumble with too few bots has no file (404).
+ */
+export interface StyleMap {
+	schema: typeof SCHEMA_VERSION;
+	rumble: RumbleId;
+	generatedAt: string;
+	engineVersion: number;
+	/** Intransitive patterns in the model. */
+	rank: number;
+	/** 0–1: how many of each bot's 10 map neighbours are among its 10 true ones (rank-weighted). */
+	trustworthiness: number;
+	bots: MapBot[];
+	/** Ranked bots with too few pairings yet (under a quarter of the field) to place. */
+	unplaced: BotId[];
+}
+
+export interface MapBot {
+	id: BotId;
+	/** Position, -1..1; the layout's longer side spans the range. Only relative positions mean anything. */
+	x: number;
+	y: number;
+	/** The 10 nearest bots by style distance, nearest first: [index into `bots`, distance in score points]. */
+	near: [index: number, distance: number][];
+}
+
 /** `/data/v1/bots/<id>.json` */
 export interface BotDetails {
 	schema: typeof SCHEMA_VERSION;

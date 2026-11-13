@@ -15,6 +15,7 @@ pub mod data;
 pub mod flags;
 pub mod ids;
 pub mod jar;
+pub mod map;
 pub mod metrics;
 pub mod participants;
 pub mod plan;

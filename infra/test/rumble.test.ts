@@ -259,13 +259,14 @@ test('dev distribution has no domain and no certificate', () => {
 	assert.equal(config.ViewerCertificate, undefined);
 });
 
-test('schedules: plan, publish, cleanup, sync with their inputs', () => {
-	prod.resourceCountIs('AWS::Scheduler::Schedule', 4);
+test('schedules: plan, publish, cleanup, sync, map with their inputs', () => {
+	prod.resourceCountIs('AWS::Scheduler::Schedule', 5);
 	const expected = {
 		'rumble-plan': ['cron(12 * * * ? *)', '{"mode":"plan"}'],
 		'rumble-publish': ['cron(30 3,9,15,21 * * ? *)', '{"mode":"publish"}'],
 		'rumble-cleanup': ['cron(45 4 * * ? *)', '{"mode":"cleanup"}'],
-		'rumble-sync': ['cron(15 5 * * ? *)', '{"mode":"sync"}']
+		'rumble-sync': ['cron(15 5 * * ? *)', '{"mode":"sync"}'],
+		'rumble-map': ['cron(55 3 * * ? *)', '{"mode":"map"}']
 	};
 	for (const [name, [expression, input]] of Object.entries(expected)) {
 		prod.hasResourceProperties('AWS::Scheduler::Schedule', {

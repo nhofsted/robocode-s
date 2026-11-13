@@ -9,13 +9,15 @@
 //! - `cleanup` (daily): recordings, slot items and jars of dead versions, ban removals
 //!   ([`cleanup`]);
 //! - `sync` (daily): the unclaimed imported bots follow the RoboWiki participants lists
-//!   ([`sync`]).
+//!   ([`sync`]);
+//! - `map` (daily, after a `publish`): the style map of each rumble ([`map`]).
 //!
 //! Reserved concurrency 1 makes it the only writer of the state files. Like the `api`, it
 //! runs on a blocking thread and drives the SDK with [`crate::block_on`].
 
 pub mod archive;
 pub mod cleanup;
+pub mod map;
 pub mod plan;
 pub mod publish;
 pub mod recordings;
@@ -47,9 +49,10 @@ pub enum Mode {
     Publish,
     Cleanup,
     Sync,
+    Map,
 }
 
-/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup" | "sync"}`.
+/// The invocation's input: `{"mode": "plan" | "publish" | "cleanup" | "sync" | "map"}`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Event {
     pub mode: Mode,
@@ -149,6 +152,7 @@ impl Batch {
             Mode::Publish => publish::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Cleanup => cleanup::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
             Mode::Sync => sync::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
+            Mode::Map => map::run(self, &config).map(|r| serde_json::to_value(r).unwrap()),
         }
     }
 }

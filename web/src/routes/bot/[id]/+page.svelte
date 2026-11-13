@@ -308,6 +308,10 @@
 						{#if r.id !== bot.id}<option value={r.id}></option>{/if}
 					{/each}
 				</datalist>
+				<p class="map-link">
+					<a href={resolve('/map/[rumble]', { rumble }) + `?bot=${encodeURIComponent(bot.id)}`}>Bots that play like {shortName(bot.id)}</a>
+					<span class="muted">on the style map</span>
+				</p>
 			</form>
 		</div>
 
@@ -556,6 +560,10 @@
 	.compare input {
 		flex: 1;
 		min-width: 10rem;
+	}
+	.map-link {
+		margin: 0.8rem 0 0;
+		font-size: 0.85rem;
 	}
 	.table-tools {
 		display: flex;

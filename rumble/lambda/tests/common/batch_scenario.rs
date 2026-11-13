@@ -13,6 +13,7 @@ use rumble_core::api::UserUpdateRequest;
 use rumble_core::bots;
 use rumble_core::data::{Archive, BotDetails, Contributors, Rankings, RumbleIndex, VersionDetails};
 use rumble_core::ids::{Division, WeightClass};
+use rumble_core::map::StyleMap;
 use rumble_core::plan::Plan;
 use rumble_core::record::{Entry, Record};
 use rumble_core::state::State;
@@ -21,6 +22,7 @@ use rumble_core::store::{
     Store, User, UserState, VerifyKind, VersionItem, VersionState, hour_key,
 };
 use rumble_lambda::batch::cleanup::CleanupReport;
+use rumble_lambda::batch::map::MapReport;
 use rumble_lambda::batch::plan::{PlanReport, state_key};
 use rumble_lambda::batch::publish::PublishReport;
 use rumble_lambda::batch::{Batch, Mode, Services};
@@ -496,6 +498,40 @@ pub fn run(world: &World, data_dir: &Path) {
     assert_eq!(one, vec!["2.0"], "the new version is ranked");
     let nano: Rankings = world.json("data/v1/rankings/1v1-nano.json");
     assert!(nano.bots.len() < 50 && !nano.bots.is_empty());
+
+    // ---- the style maps, from the published rankings. ----
+    let mapped: MapReport =
+        serde_json::from_value(world.batch(u64::MAX).run(Mode::Map).expect("map")).unwrap();
+    assert!(mapped.deferred.is_empty());
+    assert!(mapped.maps.iter().any(|m| m.rumble == "1v1"), "{mapped:?}");
+    let map: StyleMap = world.json("data/v1/map/1v1.json");
+    assert_eq!(map.engine_version, 1);
+    assert_eq!(map.bots.len() + map.unplaced.len(), rankings.bots.len());
+    for bot in &map.bots {
+        assert!(rankings.bots.iter().any(|r| r.id == bot.id));
+        assert!(bot.x.abs() <= 1.0 && bot.y.abs() <= 1.0);
+        assert!(
+            bot.near
+                .iter()
+                .all(|&(j, d)| (j as usize) < map.bots.len() && d >= 0.0)
+        );
+    }
+    assert!(
+        world.get(Bucket::State, "state/e1/map/1v1.json").is_some(),
+        "the model is kept for the next run"
+    );
+    let again: MapReport =
+        serde_json::from_value(world.batch(u64::MAX).run(Mode::Map).expect("map")).unwrap();
+    let iterations = |r: &MapReport| {
+        r.maps
+            .iter()
+            .find(|m| m.rumble == "1v1")
+            .map(|m| m.iterations)
+    };
+    assert!(
+        iterations(&again).unwrap().0 < iterations(&mapped).unwrap().0,
+        "the second run starts from the first's model"
+    );
     let bot3: BotDetails = world.json("data/v1/bots/syn.Bot3.json");
     assert_eq!(bot3.author.github.as_deref(), Some("login-g101"));
     assert_eq!(bot3.author.country.as_deref(), Some("nl"));

@@ -11,6 +11,7 @@ import type {
 	RecordingsMelee,
 	RumbleId,
 	RumbleIndex,
+	StyleMap,
 	VersionDetails
 } from './types.ts';
 import { pairRounds, type PairRounds } from './recordings.ts';
@@ -41,6 +42,10 @@ export const loadRankings = (fetch: Fetch, rumble: RumbleId) =>
 
 export const loadBot = (fetch: Fetch, id: BotId) =>
 	load<BotDetails>(fetch, `bots/${encodeURIComponent(id)}.json`, `bot "${id}"`);
+
+/** The style map of a rumble; a 404 error where it has none. */
+export const loadMap = (fetch: Fetch, rumble: RumbleId) =>
+	load<StyleMap>(fetch, `map/${encodeURIComponent(rumble)}.json`, `style map of "${rumble}"`);
 
 /** A retired version's pairings (`BotVersion.shared` says which versions have them). */
 export const loadVersion = (fetch: Fetch, id: BotId, sha256: string) =>

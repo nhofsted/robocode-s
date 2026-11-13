@@ -18,6 +18,7 @@ import {
 	type Contributor,
 	type Contributors,
 	type Division,
+	type StyleMap,
 	type HistoryPoint,
 	type Metrics,
 	type Pairing,
@@ -55,6 +56,7 @@ export interface Fixtures {
 	/** The recordings index of a bot's current version, undefined where it has no rounds. */
 	recordings(division: '1v1', id: BotId): Recordings1v1 | undefined;
 	recordings(division: 'melee', id: BotId): RecordingsMelee | undefined;
+	styleMap(rumble: RumbleId): StyleMap | undefined;
 }
 
 interface Bot {
@@ -355,6 +357,49 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 			}))
 	});
 
+	// A made-up style map: a handful of styles (a bot keeps its style in every rumble), strong
+	// bots drifting towards one side as in the real maps, true neighbours by layout distance.
+	const styleMap = (rumble: RumbleId): StyleMap | undefined => {
+		const r = rumbles.get(rumble);
+		if (!r) return undefined;
+		const need = Math.ceil((r.rows.length - 1) / 4);
+		const placed = r.rows.filter((row) => row.pairings >= need);
+		const styles = 7;
+		const points = placed.map((row) => {
+			const h = hash(row.id);
+			const rand = mulberry32(h);
+			const angle = ((h % styles) / styles) * 2 * Math.PI;
+			const strength = (row.aps - 50) / 50;
+			const gauss = () => (rand() + rand() + rand() - 1.5) * 0.35;
+			return [Math.cos(angle) * 0.6 + gauss() + strength * 0.3, Math.sin(angle) * 0.6 + gauss() - strength * 0.4];
+		});
+		const xs = points.map((p) => p[0]);
+		const ys = points.map((p) => p[1]);
+		const half = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 2 || 1;
+		const mid = [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2];
+		const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
+		return {
+			schema: SCHEMA_VERSION,
+			rumble,
+			generatedAt,
+			engineVersion: ENGINE_VERSION,
+			rank: 8,
+			trustworthiness: 0.97,
+			bots: placed.map((row, i) => ({
+				id: row.id,
+				x: round((points[i][0] - mid[0]) / half, 4),
+				y: round((points[i][1] - mid[1]) / half, 4),
+				near: points
+					.map((q, j): [number, number] => [j, Math.hypot(q[0] - points[i][0], q[1] - points[i][1])])
+					.filter(([j]) => j !== i)
+					.sort((a, b) => a[1] - b[1] || a[0] - b[0])
+					.slice(0, 10)
+					.map(([j, d]): [number, number] => [j, round(2 + d * 12, 2)])
+			})),
+			unplaced: r.rows.filter((row) => row.pairings < need).map((row) => row.id)
+		};
+	};
+
 	const get = (path: string): unknown | undefined => {
 		const clean = path.replace(/^\/+/, '');
 		if (clean === 'rumbles.json') return index();
@@ -362,6 +407,8 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		if (clean === 'archive.json') return archive();
 		let m = /^rankings\/([^/]+)\.json$/.exec(clean);
 		if (m) return rankings(decodeURIComponent(m[1]));
+		m = /^map\/([^/]+)\.json$/.exec(clean);
+		if (m) return styleMap(decodeURIComponent(m[1]));
 		m = /^bots\/([^/]+)\.json$/.exec(clean);
 		if (m) return bot(decodeURIComponent(m[1]));
 		m = /^versions\/([^/]+)\/([0-9a-f]{16})\.json$/.exec(clean);
@@ -374,7 +421,7 @@ export function createFixtures(options: FixtureOptions = {}): Fixtures {
 		return undefined;
 	};
 
-	return { get, index, rankings, bot, contributors, archive, recordings: ((division: string, id: BotId) => (division === '1v1' ? recordings1v1(id) : recordingsMelee(id))) as Fixtures['recordings'] };
+	return { get, index, rankings, bot, contributors, archive, styleMap, recordings: ((division: string, id: BotId) => (division === '1v1' ? recordings1v1(id) : recordingsMelee(id))) as Fixtures['recordings'] };
 }
 
 const LOGIN_FIRST = ['quiet', 'rusty', 'pixel', 'bit', 'lazy', 'neon', 'arc', 'orbit', 'tiny', 'grumpy', 'swift', 'night', 'cold', 'dusty'];
