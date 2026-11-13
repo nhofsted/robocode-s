@@ -334,7 +334,7 @@ For a battle and two of its contestants A and B (in melee, each of the 45 pairs)
 | Bucket | Served | Prefixes |
 |---|---|---|
 | Site bucket (exists) | `/*` | `data/v1/...` is written by `publish` (the sample-data deployment is turned off in prod once it runs, §14.6) |
-| **Jars bucket** (new; `RemovalPolicy.RETAIN`) | `/jars/*`, `/rec/*` | `jars/<sha256>.jar` (immutable, `Cache-Control: public, max-age=31536000, immutable`, `Content-Type: application/java-archive`); `rec/e<E>/<division>/...` recordings (§12.5) |
+| **Jars bucket** (new; `RemovalPolicy.RETAIN`) | `/jars/*`, `/rec/*` | `jars/<sha256>.jar` (immutable, `Cache-Control: public, max-age=31536000, immutable`, `Content-Type: application/java-archive`, `Content-Disposition: attachment; filename="<classname>_<version>.jar"` of the first version registered with it; `tools/rumble/jar-names.py` backfilled jars stored before 2026-11-13); `rec/e<E>/<division>/...` recordings (§12.5) |
 | **State bucket** (new; private, `RETAIN`, versioned, noncurrent versions expire after 7 days) | no | `state/config.json`; `state/sync.json` (§16.5); `state/e<E>/<division>/pairings.bin`; `state/e<E>/<division>/plan.json.gz`; `state/e<E>/snapshots/<rumble>/<date>.json`, `.../snapshots/users/<date>.json`; `state/e<E>/probation.json` (probation items issued), `state/e<E>/cleanup.json` (cleaned versions, ban-removal cursors), `state/users.json` (every uid seen in the log: the users list of `publish`); `uploads/<uid>/<sha256>.jar` (lifecycle: expire after 1 day) |
 
 Two buckets so that CloudFront's OAC grant (`s3:GetObject` on the whole bucket) can never expose state or uploads. Removing a jar (takedown) deletes `jars/<sha>.jar` and invalidates `/jars/<sha>.jar`.

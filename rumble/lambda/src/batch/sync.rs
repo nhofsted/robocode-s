@@ -15,7 +15,7 @@
 use super::{Batch, Pace, READ_RATE};
 use crate::batch::cleanup::cleanup_key;
 use crate::routes::jar_key;
-use crate::s3::{Bucket, IMMUTABLE, JAR_TYPE};
+use crate::s3::{Bucket, jar_file_name};
 use rumble_core::Config;
 use rumble_core::cleanup::CleanupState;
 use rumble_core::flags::{FLAGS_KEY, FlagMap, MAX_FLAGS_BYTES, parse_flags};
@@ -162,7 +162,11 @@ fn fetch_jar(
                     let key = jar_key(&info.sha256);
                     let objects = batch.objects();
                     if !objects.exists(Bucket::Jars, &key)? {
-                        objects.put(Bucket::Jars, &key, &bytes, JAR_TYPE, Some(IMMUTABLE))?;
+                        objects.put_jar(
+                            &key,
+                            &bytes,
+                            &jar_file_name(&info.bot_id, &info.version),
+                        )?;
                     }
                     return Ok(FetchedJar { info, url });
                 }

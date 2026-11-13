@@ -626,6 +626,10 @@ fn uploads_and_submissions() {
         .unwrap();
     assert_eq!(published.bytes, bytes);
     assert_eq!(published.cache_control.as_deref(), Some(IMMUTABLE));
+    assert_eq!(
+        published.content_disposition.as_deref(),
+        Some("attachment; filename=\"ann.Bot_1.0.jar\"")
+    );
     assert!(
         h.objects
             .object(Bucket::State, &format!("uploads/g1/{sha}.jar"))
