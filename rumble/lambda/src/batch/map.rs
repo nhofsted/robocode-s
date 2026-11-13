@@ -24,13 +24,25 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MapReport {
-    /// Per rumble with a map: id, bots on it, trustworthiness, optimiser iterations and
-    /// milliseconds.
-    pub maps: Vec<(String, usize, f64, (usize, usize), u64)>,
+    /// The rumbles with a map.
+    pub maps: Vec<MapLine>,
     /// Rumbles without a map (no rankings, or too few bots with enough pairings).
     pub skipped: Vec<String>,
     /// Rumbles left for the next run (time budget).
     pub deferred: Vec<String>,
+}
+
+/// One rumble's map in the report.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapLine {
+    pub rumble: String,
+    /// Bots on the map.
+    pub bots: usize,
+    pub trustworthiness: f64,
+    /// Optimiser iterations: the fit and the layout.
+    pub iterations: (usize, usize),
+    pub millis: u64,
 }
 
 pub fn run(batch: &Batch, config: &Config) -> Result<MapReport, String> {
@@ -40,10 +52,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<MapReport, String> {
     let generated_at = rfc3339(now);
     let mut report = MapReport::default();
 
-    let versions = batch
-        .store()
-        .list_versions()
-        .map_err(|e| e.to_string())?;
+    let versions = batch.store().list_versions().map_err(|e| e.to_string())?;
     let vids: HashMap<(&str, &str), u32> = versions
         .iter()
         .map(|v| ((v.bot.as_str(), v.version.as_str()), v.vid))
@@ -78,13 +87,7 @@ pub fn run(batch: &Batch, config: &Config) -> Result<MapReport, String> {
             let previous: Option<MapState> =
                 batch.read_json(Bucket::State, &state_key(engine, &rumble))?;
             let began = batch.now_ms();
-            match map::compute(
-                &pairings,
-                previous.as_ref(),
-                &rumble,
-                &generated_at,
-                engine,
-            ) {
+            match map::compute(&pairings, previous.as_ref(), &rumble, &generated_at, engine) {
                 Some(run) => {
                     batch.objects().put(
                         Bucket::Site,
@@ -94,13 +97,13 @@ pub fn run(batch: &Batch, config: &Config) -> Result<MapReport, String> {
                         Some(DATA_CACHE),
                     )?;
                     batch.write_state_json(&state_key(engine, &rumble), &run.state)?;
-                    report.maps.push((
+                    report.maps.push(MapLine {
                         rumble,
-                        run.map.bots.len(),
-                        run.map.trustworthiness,
-                        run.iterations,
-                        batch.now_ms() - began,
-                    ));
+                        bots: run.map.bots.len(),
+                        trustworthiness: run.map.trustworthiness,
+                        iterations: run.iterations,
+                        millis: batch.now_ms() - began,
+                    });
                 }
                 None => {
                     batch.objects().delete(Bucket::Site, &map_key(&rumble))?;

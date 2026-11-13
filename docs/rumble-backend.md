@@ -778,6 +778,10 @@ At 1,500 bots the run takes a few minutes: about 1,500 GETs and up to 1,500 PUTs
 
 `cleanup` (daily 04:45): delete slot items and recordings of versions retired, failed or removed (not delisted ones, §16.5; a version the sync makes active again is forgotten by `cleanup.json`, so it is cleaned again when it retires); run ban removals (§11.3); trim the watch cache (deferred after M6, #113).
 
+### 15.1 Style maps (`batch map`, daily at 03:55; ADR 0029)
+
+After the first publish of the day, clear of the plan at :12 (the batch function runs one invocation at a time). Per rumble: members are the bots of the published `data/v1/rankings/<rumble>.json` (their ranked vids from `REG`, one Query); their pairings come from the division's `pairings.bin` as the last plan left it. `rumble_core::map::compute` fits strengths and 8 intransitive planes, places the bots with at least a quarter of the pairings by t-SNE of their style distances, starting from `state/e<E>/map/<rumble>.json` (the previous model and layout, by bot id), and returns the file and the new state. Writes `data/v1/map/<rumble>.json` (`DATA_CACHE`) and the state; a rumble without a map loses its file; then one invalidation of `/data/v1/map/*`. A run past the time budget leaves the remaining rumbles for the next day (`deferred` in the report).
+
 ## 16. Seeding import
 
 ### 16.1 Sources

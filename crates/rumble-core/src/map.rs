@@ -228,12 +228,7 @@ pub fn compute(
             y: round(xy[2 * k + 1], 4),
             near: near[k]
                 .iter()
-                .map(|&j| {
-                    (
-                        j as u32,
-                        round(d2[k * m + j].sqrt() * POINTS_PER_LOGIT, 2),
-                    )
-                })
+                .map(|&j| (j as u32, round(d2[k * m + j].sqrt() * POINTS_PER_LOGIT, 2)))
                 .collect(),
         });
     }
@@ -322,7 +317,13 @@ fn loss(obs: &[Obs], n: usize, x: &[f64], grad: &mut [f64]) -> f64 {
             eta += ui[2 * c] * uj[2 * c + 1] - ui[2 * c + 1] * uj[2 * c];
         }
         // Cross-entropy of p against sigmoid(eta), stable for large |eta|.
-        let softplus = |t: f64| if t > 0.0 { t + (-t).exp().ln_1p() } else { t.exp().ln_1p() };
+        let softplus = |t: f64| {
+            if t > 0.0 {
+                t + (-t).exp().ln_1p()
+            } else {
+                t.exp().ln_1p()
+            }
+        };
         total += o.w * (o.p * softplus(-eta) + (1.0 - o.p) * softplus(eta));
         let q = 1.0 / (1.0 + (-eta).exp());
         let g = o.w * (q - o.p);
@@ -357,7 +358,10 @@ fn fit(pairings: &Pairings, previous: Option<&MapState>) -> (Vec<f64>, Vec<f64>,
     let mut x = vec![0.0; n + n * dim];
     let mut known = 0;
     for (i, id) in pairings.ids.iter().enumerate() {
-        match previous.and_then(|p| p.bots.get(id)).filter(|b| b.u.len() == dim) {
+        match previous
+            .and_then(|p| p.bots.get(id))
+            .filter(|b| b.u.len() == dim)
+        {
             Some(b) => {
                 x[i] = b.s;
                 x[n + i * dim..n + (i + 1) * dim].copy_from_slice(&b.u);
@@ -480,7 +484,13 @@ fn profiles(u: &[f64], n: usize) -> Vec<f64> {
         *v /= n as f64;
     }
     // (J v)_{2c} = v_{2c+1}, (J v)_{2c+1} = -v_{2c}: C = J G Jᵀ.
-    let jidx = |k: usize| if k % 2 == 0 { (k + 1, 1.0) } else { (k - 1, -1.0) };
+    let jidx = |k: usize| {
+        if k % 2 == 0 {
+            (k + 1, 1.0)
+        } else {
+            (k - 1, -1.0)
+        }
+    };
     let mut c = vec![0.0; dim * dim];
     for a in 0..dim {
         for b in 0..dim {
@@ -612,10 +622,19 @@ fn pca_layout(z: &[f64], m: usize, dim: usize) -> Vec<f64> {
     let mut y = vec![0.0; 2 * m];
     for c in 0..2 {
         let mut col: Vec<f64> = (0..m)
-            .map(|i| (0..dim).map(|k| (z[i * dim + k] - mean[k]) * v[k * dim + c]).sum())
+            .map(|i| {
+                (0..dim)
+                    .map(|k| (z[i * dim + k] - mean[k]) * v[k * dim + c])
+                    .sum()
+            })
             .collect();
-        let big = col.iter().copied().fold(0.0f64, |acc, t| if t.abs() > acc.abs() { t } else { acc });
-        let sd = (col.iter().map(|t| t * t).sum::<f64>() / m as f64).sqrt().max(1e-300);
+        let big = col
+            .iter()
+            .copied()
+            .fold(0.0f64, |acc, t| if t.abs() > acc.abs() { t } else { acc });
+        let sd = (col.iter().map(|t| t * t).sum::<f64>() / m as f64)
+            .sqrt()
+            .max(1e-300);
         let sign = if big < 0.0 { -1.0 } else { 1.0 };
         for t in &mut col {
             *t *= sign * 1e-4 / sd;
@@ -767,11 +786,9 @@ fn affinities(d2: &[f64], m: usize, perplexity: f64) -> Vec<f64> {
             }
             let sum = sum.max(1e-300);
             let mut h = 0.0;
-            for j in 0..m {
-                if row[j] > 0.0 {
-                    let pj = row[j] / sum;
-                    h -= pj * pj.ln();
-                }
+            for &v in row.iter().filter(|&&v| v > 0.0) {
+                let pj = v / sum;
+                h -= pj * pj.ln();
             }
             for v in row.iter_mut() {
                 *v /= sum;
@@ -781,7 +798,11 @@ fn affinities(d2: &[f64], m: usize, perplexity: f64) -> Vec<f64> {
             }
             if h > target {
                 lo = beta;
-                beta = if hi.is_finite() { (beta + hi) / 2.0 } else { beta * 2.0 };
+                beta = if hi.is_finite() {
+                    (beta + hi) / 2.0
+                } else {
+                    beta * 2.0
+                };
             } else {
                 hi = beta;
                 beta = (beta + lo) / 2.0;
@@ -883,9 +904,13 @@ mod tests {
             xp[k] += h;
             let mut xm = x.clone();
             xm[k] -= h;
-            let fd = (loss(&obs, n, &xp, &mut scratch) - loss(&obs, n, &xm, &mut scratch))
-                / (2.0 * h);
-            assert!((fd - g[k]).abs() < 1e-5 * (1.0 + fd.abs()), "{k}: {fd} vs {}", g[k]);
+            let fd =
+                (loss(&obs, n, &xp, &mut scratch) - loss(&obs, n, &xm, &mut scratch)) / (2.0 * h);
+            assert!(
+                (fd - g[k]).abs() < 1e-5 * (1.0 + fd.abs()),
+                "{k}: {fd} vs {}",
+                g[k]
+            );
         }
     }
 
