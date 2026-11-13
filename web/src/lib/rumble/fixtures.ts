@@ -11,6 +11,7 @@ import {
 	type Archive,
 	type BotDetails,
 	type BotColors,
+	type Llm,
 	type BotId,
 	type BotRumble,
 	type BotVersion,
@@ -498,8 +499,23 @@ function createVersions(rand: () => number, id: string, codesize: number, now: D
 	// doesn't move); some colour only the body.
 	const h = hash(`colors:${id}`);
 	if (h % 3 === 0) versions[0].colors = fixtureColors(h);
+	// A few newest versions declare an LLM (robot.llm), now and then a model the site has no
+	// logo for, or none named.
+	const l = hash(`llm:${id}`) % 48;
+	if (l < LLM_FIXTURES.length) versions[0].llm = LLM_FIXTURES[l];
 	return versions;
 }
+
+const LLM_FIXTURES: Llm[] = [
+	{ use: 'generated', model: 'Claude Opus 4.5' },
+	{ use: 'assisted', model: 'GPT-5' },
+	{ use: 'assisted', model: 'Gemini 2.5 Pro, Claude Sonnet 4.5' },
+	{ use: 'generated', model: 'DeepSeek V3' },
+	{ use: 'assisted', model: 'Grok 4' },
+	{ use: 'generated', model: 'Falcon 180B' },
+	{ use: 'assisted' },
+	{ use: 'none' }
+];
 
 function fixtureColors(h: number): BotColors {
 	const hex = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0');
@@ -510,6 +526,11 @@ function fixtureColors(h: number): BotColors {
 /** `{ colors }` where the version has colours, to spread into data that carries them. */
 function colorsOf(v: BotVersion): { colors?: BotColors } {
 	return v.colors ? { colors: v.colors } : {};
+}
+
+/** `{ llm }` where the version declares one. */
+function llmOf(v: BotVersion): { llm?: Llm } {
+	return v.llm ? { llm: v.llm } : {};
 }
 
 function buildRumble(
@@ -650,7 +671,8 @@ function buildRumble(
 			pairings: m.pairings,
 			battles: m.battles,
 			rankWeekAgo: weekAgo,
-			...colorsOf(bot.versions[0])
+			...colorsOf(bot.versions[0]),
+			...llmOf(bot.versions[0])
 		};
 	});
 

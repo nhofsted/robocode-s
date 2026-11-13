@@ -2,6 +2,7 @@
 
 //! Static validation of a submitted robot jar (spec §12.1), on the bytes alone.
 
+use crate::api::{Llm, LlmUse};
 use crate::codesize::{self, MAX_CLASS_MAJOR};
 use crate::config::Config;
 use crate::ids::{WeightClass, validate_bot_id, validate_version};
@@ -26,6 +27,9 @@ pub struct JarInfo {
     pub author: String,
     pub description: String,
     pub webpage: String,
+    /// `robot.llm` and `robot.llm.model`: how far an LLM helped write the robot, where the
+    /// author declared it.
+    pub llm: Option<Llm>,
     pub codesize: u32,
     pub weight_class: WeightClass,
     /// Lowercase hex SHA-256 of the jar bytes.
@@ -203,6 +207,15 @@ fn validate_inner(
     if let Err(why) = validate_bot_id(&classname) {
         problems.push(format!("robot.classname {classname:?}: {why}"));
     }
+    // Imports (`want`) take a bad declaration as none: a classic jar is not rejected for it.
+    let llm = match parse_llm(get("robot.llm"), get("robot.llm.model")) {
+        Ok(llm) => llm,
+        Err(why) if want.is_none() => {
+            problems.push(why);
+            None
+        }
+        Err(_) => None,
+    };
     if !problems.is_empty() {
         return Err(problems);
     }
@@ -272,6 +285,7 @@ fn validate_inner(
         author,
         description: get("robot.description").unwrap_or_default(),
         webpage: get("robot.webpage").unwrap_or_default(),
+        llm,
         codesize,
         weight_class: WeightClass::of(codesize, &config.weight_limits),
         sha256: sha256_hex(bytes),
@@ -377,6 +391,46 @@ fn bad_name(name: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// The longest `robot.llm.model` accepted.
+pub const MAX_LLM_MODEL_CHARS: usize = 80;
+
+/// `robot.llm` (`none`, `assisted` or `generated`; any case) and `robot.llm.model` (free
+/// text, only with `assisted` or `generated`). Both absent or empty: no declaration.
+fn parse_llm(usage: Option<String>, model: Option<String>) -> Result<Option<Llm>, String> {
+    let usage = usage.filter(|u| !u.is_empty());
+    let model = model.filter(|m| !m.is_empty());
+    let Some(usage) = usage else {
+        return match model {
+            None => Ok(None),
+            Some(_) => {
+                Err("robot.llm.model needs robot.llm=assisted or robot.llm=generated".to_string())
+            }
+        };
+    };
+    let Some(parsed) = LlmUse::parse(&usage.to_ascii_lowercase()) else {
+        return Err(format!(
+            "robot.llm {usage:?}: must be none, assisted or generated"
+        ));
+    };
+    if let Some(model) = &model {
+        if parsed == LlmUse::None {
+            return Err("robot.llm.model is set but robot.llm is none".to_string());
+        }
+        if model.chars().count() > MAX_LLM_MODEL_CHARS {
+            return Err(format!(
+                "robot.llm.model is longer than {MAX_LLM_MODEL_CHARS} characters"
+            ));
+        }
+        if model.chars().any(char::is_control) {
+            return Err("robot.llm.model contains control characters".to_string());
+        }
+    }
+    Ok(Some(Llm {
+        usage: parsed,
+        model,
+    }))
 }
 
 /// Java `.properties` files are ISO-8859-1.
@@ -602,6 +656,54 @@ mod tests {
         assert_eq!(info.sha256, sha256_hex(&jar));
         assert_eq!(info.sha256.len(), 64);
         assert_eq!(jar_codesize(&jar, &Config::default()), Ok(120));
+    }
+
+    fn with_props(extra: &str) -> Vec<(&'static str, Vec<u8>)> {
+        let mut files = good_files();
+        files[2].1 = format!("{GOOD_PROPS}{extra}").into_bytes();
+        files
+    }
+
+    #[test]
+    fn llm_declarations() {
+        let info = |extra: &str| validate(&build_vec(&with_props(extra)), &Config::default());
+        assert_eq!(info("").unwrap().llm, None);
+        assert_eq!(
+            info("robot.llm=none\n").unwrap().llm,
+            Some(Llm {
+                usage: LlmUse::None,
+                model: None
+            })
+        );
+        assert_eq!(
+            info("robot.llm=Generated\nrobot.llm.model= Claude Opus 4.5, GPT-5 \n")
+                .unwrap()
+                .llm,
+            Some(Llm {
+                usage: LlmUse::Generated,
+                model: Some("Claude Opus 4.5, GPT-5".to_string())
+            })
+        );
+        assert_eq!(
+            info("robot.llm=assisted\nrobot.llm.model=\n").unwrap().llm,
+            Some(Llm {
+                usage: LlmUse::Assisted,
+                model: None
+            })
+        );
+        let error = |extra: &str| info(extra).unwrap_err().join("; ");
+        assert!(error("robot.llm=yes\n").contains("must be none, assisted or generated"));
+        assert!(error("robot.llm.model=GPT-5\n").contains("needs robot.llm"));
+        assert!(error("robot.llm=none\nrobot.llm.model=GPT-5\n").contains("is none"));
+        let long = "x".repeat(MAX_LLM_MODEL_CHARS + 1);
+        assert!(error(&format!("robot.llm=assisted\nrobot.llm.model={long}\n")).contains("longer"));
+    }
+
+    #[test]
+    fn imports_drop_a_bad_llm_declaration() {
+        let jar = build_vec(&with_props("robot.llm=yes\n"));
+        let (info, _) = validate_named(&jar, &Config::default(), None, "my.Bot").unwrap();
+        assert_eq!(info.llm, None);
     }
 
     #[test]

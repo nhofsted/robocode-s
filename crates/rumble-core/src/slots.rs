@@ -670,6 +670,7 @@ mod tests {
                 country: None,
                 rank_week_ago: None,
                 colors: None,
+                llm: None,
             })
             .collect();
         let metrics = compute(members, &state);

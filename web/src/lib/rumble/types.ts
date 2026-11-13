@@ -32,6 +32,18 @@ export interface BotColors {
 	radar?: string;
 }
 
+/**
+ * A bot version's LLM declaration, from its robot properties (`robot.llm`, `robot.llm.model`):
+ * how far a large language model helped write it. Self-declared; nothing checks it. Absent
+ * (or null) where the version declares nothing, which is not the same as `none`. Added
+ * within v1.
+ */
+export interface Llm {
+	use: 'none' | 'assisted' | 'generated';
+	/** The model(s) as the author wrote them, comma separated; only with assisted/generated. */
+	model?: string | null;
+}
+
 /** `/data/v1/rumbles.json` */
 export interface RumbleIndex {
 	schema: typeof SCHEMA_VERSION;
@@ -103,6 +115,8 @@ export interface RankingRow extends Metrics {
 	rankWeekAgo: number | null;
 	/** The ranked version's colours (additive; absent where unknown). */
 	colors?: BotColors | null;
+	/** The ranked version's LLM declaration (additive; absent where it declares none). */
+	llm?: Llm | null;
 }
 
 /** `/data/v1/bots/<id>.json` */
@@ -168,6 +182,8 @@ export interface BotVersion {
 	 * date (else `addedAt`), newest first.
 	 */
 	releasedAt?: string | null;
+	/** The version's LLM declaration (additive; absent where it declares none). */
+	llm?: Llm | null;
 	/**
 	 * Per rumble, the opponents both this earlier version and the bot's ranked version have
 	 * battles against (added within v1; absent: none). Where it is above 0,

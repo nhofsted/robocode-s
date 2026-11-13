@@ -17,6 +17,9 @@ use std::collections::BTreeMap;
 /// none (the site then derives colours from the bot id).
 pub use crate::api::BotColors;
 
+/// A bot version's LLM declaration (`Llm` in `types.ts`): absent where it declares none.
+pub use crate::api::{Llm, LlmUse};
+
 /// The `schema` of every file, and the `/data/v1` URL prefix.
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -96,6 +99,9 @@ pub struct RankingRow {
     /// The ranked version's colours (additive; absent where unknown).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colors: Option<BotColors>,
+    /// The ranked version's LLM declaration (additive; absent where it declares none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm: Option<Llm>,
     #[serde(flatten)]
     pub metrics: Metrics,
 }
@@ -152,6 +158,9 @@ pub struct BotVersion {
     /// The release date as well as it is known (additive; absent where unknown).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_at: Option<String>,
+    /// The version's LLM declaration (additive; absent where it declares none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm: Option<Llm>,
     /// Per rumble, the opponents both this earlier version and the bot's ranked version have
     /// battles against (additive; absent: none). Where it is above 0,
     /// `/data/v1/versions/<id>/<sha16>.json` has this version's pairings.
@@ -465,6 +474,7 @@ mod tests {
             battles: 3,
             rank_week_ago: None,
             colors: None,
+            llm: None,
             metrics: Metrics {
                 aps: 50.0,
                 pwin: 50.0,

@@ -147,6 +147,7 @@ pub fn submit<S: Store + ?Sized>(
         released: None,
         nondeterministic: None,
         disagreements: 0,
+        llm: info.llm.clone(),
     };
     let homepage = homepage.and_then(non_empty);
     let item = match &bot {
@@ -279,6 +280,7 @@ pub(crate) fn imported_version(
         released,
         nondeterministic: None,
         disagreements: 0,
+        llm: info.llm.clone(),
     }
 }
 
@@ -903,6 +905,7 @@ mod tests {
             author: "Ann".into(),
             description: "a bot".into(),
             webpage: "https://example.org/bot".into(),
+            llm: None,
             codesize: 600,
             weight_class: WeightClass::Micro,
             sha256: sha.to_string().repeat(64),

@@ -43,6 +43,8 @@ pub struct Member {
     pub rank_week_ago: Option<u32>,
     /// The version's colours, where known.
     pub colors: Option<crate::data::BotColors>,
+    /// The version's LLM declaration, where it has one.
+    pub llm: Option<crate::data::Llm>,
 }
 
 /// One pairing of a bot, from its side.
@@ -429,6 +431,7 @@ impl RumbleMetrics {
                         battles: bot.battles,
                         rank_week_ago: member.rank_week_ago,
                         colors: member.colors.clone(),
+                        llm: member.llm.clone(),
                         metrics: rounded(&bot.metrics),
                     }
                 })
@@ -488,6 +491,7 @@ mod tests {
             country: None,
             rank_week_ago: None,
             colors: None,
+            llm: None,
         }
     }
 

@@ -1133,6 +1133,7 @@ mod tests {
                 author: "Ann".into(),
                 description: String::new(),
                 webpage: String::new(),
+                llm: None,
                 codesize: 600,
                 weight_class: WeightClass::Micro,
                 sha256: sha.to_string().repeat(64),

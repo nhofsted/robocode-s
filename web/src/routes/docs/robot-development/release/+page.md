@@ -20,6 +20,22 @@ Classic's packager names the jar `classname_version.jar` (`jd.MyRobot_1.2.jar`),
 
 The rumble identifies a robot as `classname version` (here `jd.MyRobot 1.2`), so **every release needs a new version string**. Classic's packager in the Robocode GUI writes this file for you; with Maven or Gradle, write it as a resource and let the build fill in the version, as [Your first robot](/docs/robot-development/example) shows.
 
+### Declaring LLM use
+
+If a large language model helped you write the robot, you can say so with two optional properties:
+
+```properties
+robot.llm=generated
+robot.llm.model=Claude Opus 4.5, GPT-5
+```
+
+- `robot.llm` is `none`, `assisted` (an LLM helped: suggestions, parts of the code, tuning) or `generated` (an LLM wrote most of it).
+- `robot.llm.model` names the model or models, comma separated, at most 80 characters. It is only allowed with `assisted` or `generated`.
+
+The rankings, the bot page and the battle pages then show a small badge after your name: the logo of each model's maker (a 🤖 for a model the site has no logo for, or when you name none) on an outlined tile for `assisted` and a solid tile for `generated`. Hovering it says which, and the model. `none` shows no badge; the bot page says "no LLM". Without `robot.llm` the site shows nothing, as for every robot released before these properties existed.
+
+The declaration belongs to the version: release a new version to change it. It is what you declare, and nothing checks it; it doesn't affect scoring. Classic Robocode ignores both properties. A value other than the three above, or a model without `assisted` or `generated`, fails the static checks with a message.
+
 **Codesize** decides your robot's weight class: under 250 bytes is a nano bot, under 750 a micro, under 1500 a mini, anything larger competes only in the general rumbles. Codesize counts the bytecode of your classes, not the jar size.
 
 ## Release it to the rumble

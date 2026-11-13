@@ -206,6 +206,7 @@ pub fn compute_rumble(
                 country: catalog.country(bot),
                 rank_week_ago: week_ago.and_then(|s| s.get(&v.bot)).map(|row| row.0),
                 colors: v.colors.clone(),
+                llm: v.llm.clone(),
             })
         })
         .collect();
@@ -304,6 +305,7 @@ pub fn bot_details(
                     .map(rfc3339),
                 colors: v.colors.clone(),
                 released_at: v.released.map(|ms| rfc3339(ms / 1000)),
+                llm: v.llm.clone(),
                 shared: BTreeMap::new(),
             })
             .collect(),

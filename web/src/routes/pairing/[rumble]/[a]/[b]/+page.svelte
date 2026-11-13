@@ -3,6 +3,7 @@
 	import SampleNotice from '#lib/components/SampleNotice.svelte';
 	import FighterText from '#lib/components/FighterText.svelte';
 	import Flag from '#lib/components/Flag.svelte';
+	import LlmBadge from '#lib/components/LlmBadge.svelte';
 	import Tank from '#lib/components/Tank.svelte';
 	import { tankColors } from '#lib/components/tank-colors.ts';
 	import { css } from '#lib/components/sprites.ts';
@@ -40,7 +41,7 @@
 				<div>
 					<a class="name" href={botHref(s.bot.id)}>{shortName(s.bot.id)}</a>
 					<div class="muted small">
-						<Flag code={s.bot.author.country} /> {s.bot.author.name} ·
+						<Flag code={s.bot.author.country} /> {s.bot.author.name} <LlmBadge llm={s.bot.versions[0].llm} /> ·
 						<span class="mono">{s.bot.versions[0].version} · #{s.entry.rank}</span>
 					</div>
 				</div>
