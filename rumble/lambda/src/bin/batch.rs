@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
 //! The `batch` Lambda (spec §14.2): invoked by EventBridge Scheduler with
-//! `{"mode": "plan" | "publish" | "cleanup" | "sync"}`. Environment: `TABLE`, `JARS_BUCKET`,
+//! `{"mode": "plan" | "publish" | "cleanup" | "sync" | "map"}`. Environment: `TABLE`, `JARS_BUCKET`,
 //! `STATE_BUCKET`, `SITE_BUCKET`, `DISTRIBUTION_ID`. A failed run logs
 //! `ALERT batch-error <mode> ...` (the alarm's metric filter) and fails the invocation.
 

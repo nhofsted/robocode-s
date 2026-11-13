@@ -118,7 +118,44 @@ pub struct MapRun {
     pub iterations: (usize, usize),
 }
 
-/// Builds the style map of a rumble. `None` when too few members have enough pairings.
+/// `data/v1/map/<rumble>.json`.
+pub fn map_key(rumble: &str) -> String {
+    format!("{}/map/{rumble}.json", crate::publish::DATA_PREFIX)
+}
+
+/// The previous run's model: `state/e<E>/map/<rumble>.json`.
+pub fn state_key(engine: u32, rumble: &str) -> String {
+    format!("state/e{engine}/map/{rumble}.json")
+}
+
+/// The pairings between `members` (bot id and ranked vid) in a division's state.
+pub fn pairings(state: &crate::state::State, members: &[(String, u32)]) -> Pairings {
+    let n = members.len();
+    let mut score = vec![0.0; n * n];
+    let mut battles = vec![0; n * n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let (vi, vj) = (members[i].1, members[j].1);
+            let Some(p) = state.pairing(vi, vj).filter(|p| p.n > 0) else {
+                continue;
+            };
+            // The state keeps the lower vid's side.
+            let low = p.s / f64::from(p.n);
+            let mean = if vi < vj { low } else { 100.0 - low };
+            score[i * n + j] = mean;
+            score[j * n + i] = 100.0 - mean;
+            battles[i * n + j] = p.n;
+            battles[j * n + i] = p.n;
+        }
+    }
+    Pairings {
+        ids: members.iter().map(|m| m.0.clone()).collect(),
+        score,
+        battles,
+    }
+}
+
+/// Builds the style map of a rumble.`None` when too few members have enough pairings.
 pub fn compute(
     pairings: &Pairings,
     previous: Option<&MapState>,
