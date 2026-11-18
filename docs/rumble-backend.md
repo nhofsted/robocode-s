@@ -435,11 +435,13 @@ gain(n)   = σ² / ((n + ½)(n + 1½))                 expected variance reducti
 close     = plan.closeFactor (10) if |m − 50| ≤ 1.96·SE, else 1        (n = 0: 10)
 contested_X,r = 1 + plan.rankFactor · exp(−z²/2),   z = gap_X,r / √(SE_APS_X² + SE_APS_nb²)
                 gap = APS distance to the nearer neighbour in rumble r's APS order (nb that neighbour)
-                (a bot with no SE yet, i.e. P_X < 2: contested = 1 + rankFactor)
+                (a bot with no SE yet, i.e. P_X < 2: contested = 1 + rankFactor;
+                 n = 0: 1 + rankFactor for both bots, as an unfought pairing counts as close)
 coverage_X,r  = 1 + missing_X,r / members_r          bots with incomplete pairings get more
 V(A,B)    = gain(n) · close · mean_{r ∈ R(A,B)} ½ (contested_A,r · coverage_A,r + contested_B,r · coverage_B,r)
 ```
 
+- An unfought pairing counts as contested (full `rankFactor`) for both bots, so `coverage` alone orders the unfought work. `contested` measures the gap to the nearest neighbour: mid-table bots always have one within hundredths of a point (contested ≈ 3), while the ends of the ladder are sparse. Before this, the leader kc.mega.BeepBoop, 1.0 point clear of #2 (z ≈ 2, contested 1.28), stayed at 252 of 1,216 pairings for three weeks behind 137k unfought mid-table pairings (2026-11-19).
 - Fewest battles first falls out of `gain` (it falls with n²), uncertainty out of σ², closeness out of `close` (pairing score near 50, LiteRumble's ×10) and `contested` (bots close in rank). The rumble terms are averaged over the rumbles holding both bots, not summed: a sum made a nano pairing worth four mega ones, and after launch the unfought mega bots waited hours for the nano pairings.
 - Probation versions, failed, retired and removed versions are not in the normal plan.
 - **Hourly target** `H_D = max(plan.minHourly_D, plan.headroom · battles_D in the last full hour)`.
