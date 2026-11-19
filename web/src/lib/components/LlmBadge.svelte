@@ -1,32 +1,47 @@
 <script lang="ts">
 	// A bot version's LLM declaration (`robot.llm`) after its author's name: the declared
-	// model's vendor logo (a robot for a model the site has no logo for) on a small tile,
-	// outlined for `assisted`, solid for `generated`. The logo itself is drawn as its vendor
-	// draws it: stroking line-art marks would make them heavier, not lighter. The hover text
-	// always says which. `none` shows nothing.
+	// model's vendor logo, in the vendor's colours where it has them (a robot for a model the
+	// site has no logo for). Assisted and generated look the same; the hover text says which.
+	// `none` shows nothing.
 	import type { Llm } from '#lib/rumble/types.ts';
-	import { LOGOS } from '#lib/llm/logos.ts';
+	import { LOGOS, type Vendor } from '#lib/llm/logos.ts';
 	import { llmLabel, vendorIcons } from '#lib/llm/vendors.ts';
 
 	interface Props {
 		llm: Llm | null | undefined;
-		/** The tile's size in pixels. */
+		/** The space each logo takes, in pixels. */
 		size?: number;
 	}
 	let { llm, size = 16 }: Props = $props();
 
+	// The logos' gradient ids, made unique to this badge: a page shows many badges, and an id
+	// that resolves to another badge's copy breaks when that copy is hidden.
+	const uid = $props.id();
+
 	const label = $derived(llm ? llmLabel(llm) : '');
 	const icons = $derived(llm && llm.use !== 'none' ? vendorIcons(llm.model) : []);
-	const inner = $derived(Math.round(size * 0.7));
+	const inner = $derived(Math.round(size * 0.85));
+
+	function body(vendor: Vendor): string {
+		return LOGOS[vendor].body.replaceAll(`llm-${vendor}-`, `llm-${uid}-${vendor}-`);
+	}
 </script>
 
 {#if icons.length}
-	<span class="llm" class:generated={llm?.use === 'generated'} title={label}>
+	<span class="llm" title={label}>
 		{#each icons as vendor (vendor ?? '')}
-			<span class="tile" style:width="{size}px" style:height="{size}px">
+			<span class="slot" style:width="{size}px" style:height="{size}px">
 				{#if vendor}
-					<svg viewBox="0 0 24 24" width={inner} height={inner} fill-rule="evenodd" aria-hidden="true">
-						{#each LOGOS[vendor].paths as p (p.d)}<path d={p.d} opacity={p.opacity} />{/each}
+					<svg
+						viewBox="0 0 24 24"
+						width={inner}
+						height={inner}
+						fill="currentColor"
+						fill-rule={LOGOS[vendor].evenodd ? 'evenodd' : undefined}
+						aria-hidden="true"
+					>
+						<!-- Generated from LobeHub's SVGs (logos.ts), not user input. -->
+						{@html body(vendor)}
 					</svg>
 				{:else}
 					<span class="robot" style:font-size="{inner}px" aria-hidden="true">🤖</span>
@@ -44,25 +59,14 @@
 		align-items: center;
 		vertical-align: -3px;
 		flex: none;
-		color: var(--text-2);
-		cursor: help;
+		color: var(--text);
 	}
-	.tile {
+	.slot {
 		display: inline-grid;
 		place-items: center;
-		box-sizing: border-box;
-		border: 1px solid currentColor;
-		border-radius: 4px;
-	}
-	.generated .tile {
-		background: currentColor;
 	}
 	svg {
 		display: block;
-		fill: currentColor;
-	}
-	.generated svg {
-		fill: var(--panel);
 	}
 	.robot {
 		line-height: 1;
