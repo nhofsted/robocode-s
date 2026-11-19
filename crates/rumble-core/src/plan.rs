@@ -254,17 +254,26 @@ impl Priorities {
             base: Vec::new(),
             n,
         };
-        let suffix: Vec<[f64; CLASSES]> = (0..count)
-            .map(|x| {
-                let mut s = [0.0; CLASSES];
-                let mut total = 0.0;
-                for r in (priorities.classes[x]..CLASSES).rev() {
-                    total += priorities.contested[x][r] * priorities.coverage[x][r];
-                    s[r] = total;
-                }
-                s
-            })
-            .collect();
+        // `Σ_r contested·coverage` from rumble r up, and the same with the full rank factor
+        // for an unfought pairing: like `close`, an unfought pairing counts as contested.
+        // Otherwise the ends of the ladder, where the nearest neighbour is far, waited for
+        // every unfought mid-table pairing (BeepBoop, #1 with 252 of 1,216 pairings for
+        // three weeks, 2026-11).
+        let suffixes = |contested: &dyn Fn(usize, usize) -> f64| -> Vec<[f64; CLASSES]> {
+            (0..count)
+                .map(|x| {
+                    let mut s = [0.0; CLASSES];
+                    let mut total = 0.0;
+                    for r in (priorities.classes[x]..CLASSES).rev() {
+                        total += contested(x, r) * priorities.coverage[x][r];
+                        s[r] = total;
+                    }
+                    s
+                })
+                .collect()
+        };
+        let suffix = suffixes(&|x, r| priorities.contested[x][r]);
+        let unfought = suffixes(&|_, _| 1.0 + rank_factor);
         let mut base = Vec::with_capacity(size);
         let mut at = 0;
         for i in 0..count {
@@ -273,7 +282,12 @@ impl Priorities {
                 // The mean over the pair's rumbles, not the sum: a sum made a nano pairing
                 // worth 4 mega ones, and unfought mega bots waited for every nano pairing.
                 let rumbles = (CLASSES - k) as f64;
-                let both = 0.5 * (suffix[i][k] + suffix[j][k]) / rumbles;
+                let s = if priorities.n[at] == 0 {
+                    &unfought
+                } else {
+                    &suffix
+                };
+                let both = 0.5 * (s[i][k] + s[j][k]) / rumbles;
                 base.push(close[at] * variance[at] * both);
                 at += 1;
             }
@@ -1165,6 +1179,32 @@ mod tests {
         }
         let pr = Priorities::new(&state, &Config::default(), &bots(30, mega));
         assert!(pr.contested(0, mega) < 1.01, "{}", pr.contested(0, mega));
+    }
+
+    #[test]
+    fn a_settled_leader_still_gets_its_unfought_pairings() {
+        // Bots 2-30 met each other, except 10-11, and are tied; bot 1 is far ahead of everyone (settled, not
+        // contested) and met only bots 2-15. Its unfought pairings must not wait behind the
+        // mid-table one: it has more missing, and unfought pairings all count as contested.
+        let mut state = state_1v1();
+        for a in 2..=30u32 {
+            for b in a + 1..=30 {
+                if (a, b) != (10, 11) {
+                    // Evenly matched: a dense mid-table where everyone has a close neighbour.
+                    fight(&mut state, a, b, 50.0, 10);
+                }
+            }
+        }
+        for b in 2..=15 {
+            fight(&mut state, 1, b, 97.0, 10);
+        }
+        let mega = WeightClass::Mega;
+        let pr = Priorities::new(&state, &Config::default(), &bots(30, mega));
+        assert!(pr.contested(0, mega) < 1.5, "{}", pr.contested(0, mega));
+        let mid = pr.current(9, 10);
+        for o in 15..30 {
+            assert!(pr.current(0, o) > mid, "1-{}", o + 1);
+        }
     }
 
     #[test]
