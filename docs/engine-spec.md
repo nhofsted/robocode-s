@@ -1,6 +1,6 @@
 # robocode-s — Engine Specification
 
-Status: **Draft** · Reference: classic Robocode **1.11.2** (written from tag `v1.11.1`, whose battle rules 1.11.2 keeps) · Last updated: 2026-11-05
+Status: **Draft** · Reference: classic Robocode **1.12.0** (written from tag `v1.11.1`, whose battle rules 1.11.2 and 1.12.0 keep, apart from 1.12.0's bullet events with hidden names, §12.2) · Last updated: 2026-11-21
 
 This document specifies the battle engine precisely enough to reimplement it bit-exactly (ADR 0003). It was written from the classic sources. Source references use the form `File.java:line` and point to 1.11.1:
 - `Battle`, `BaseBattle`: `robocode.battle/src/main/java/net/sf/robocode/battle/`
@@ -564,7 +564,7 @@ The engine drops new events when a queue holds more than 256, except `DeathEvent
 
 `Bullet(heading, x, y, power, ownerName, victimName, isActive, bulletId)`. Names use `nameForEvent`, so with `hideEnemyNames` other robots appear as `#<index>`:
 - the **owner's** view shows the victim through the owner's eyes;
-- the **victim's** view (`HitByBulletEvent`, the second bullet of `BulletHitBulletEvent`) shows the owner's name through the receiver's eyes.
+- the **victim's** view (`HitByBulletEvent`, the second bullet of `BulletHitBulletEvent`) shows the owner's name through the receiver's eyes (classic 1.12.0, `createBulletSeenBy`; up to 1.11.2 a team robot's name was shown unhidden here, to enemies too).
 
 ---
 

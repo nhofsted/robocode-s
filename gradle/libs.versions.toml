@@ -1,8 +1,8 @@
 [versions]
-robocode-classic = "1.11.2"
-# The Kotlin runtime classic 1.11.2 ships for robots written in Kotlin
+robocode-classic = "1.12.0"
+# The Kotlin runtime classic 1.12.0 ships for robots written in Kotlin
 kotlin-classic = "2.4.21"
-# The dependency-injection container classic 1.11.2 depends on (its POMs bring it)
+# The dependency-injection container classic 1.12.0 depends on (its POMs bring it)
 picocontainer-classic = "2.16"
 junit = "6.1.3"
 asm = "9.10.1"

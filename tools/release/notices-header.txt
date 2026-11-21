@@ -14,10 +14,10 @@ java-compat and java-determinism jars, EPL-2.0) together with these libraries,
 unmodified, as separate files:
 
   robocode.api, robocode.core, robocode.host, robocode.repository,
-  robocode.battle 1.11.2
+  robocode.battle 1.12.0
       Classic Robocode, Copyright (c) 2001-2026 Mathew A. Nelson and Robocode
       contributors. Eclipse Public License 1.0 (text below).
-      Source: https://github.com/robo-code/robocode (tag v1.11.2);
+      Source: https://github.com/robo-code/robocode (tag v1.12.0);
       https://robocode.sourceforge.io/
       Binaries: Maven Central, net.sf.robocode.
 
