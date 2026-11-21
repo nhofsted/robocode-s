@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EPL-2.0
 
 // The robocode-s robot host for classic Java robots (design §8). It runs classic
-// Robocode's own robot side (robocode.api/core/host/repository 1.11.2: proxies, event
+// Robocode's own robot side (robocode.api/core/host/repository 1.12.0: proxies, event
 // manager, blocking calls, custom events, data files) and replaces only the peer that
 // talks to the engine with one that speaks the robocode-s protocol.
 //

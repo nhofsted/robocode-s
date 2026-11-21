@@ -6,7 +6,7 @@ description: What robocode-s is, why it exists, and how it relates to classic Ro
 robocode-s rebuilds [Robocode](https://robocode.sourceforge.io/) around three ideas:
 
 - **The engine is separate from the robots.** The battle engine is written in Rust. Robots don't run inside it: every robot is its own process, which talks to the engine over a small, open protocol. A robot that crashes, hangs or eats memory only takes itself down.
-- **Classic robots keep working.** Existing Java robot jars run unmodified, and a battle with the same seed plays out turn for turn exactly as in classic Robocode 1.11.1. That is verified by replaying recorded classic battles, including RoboRumble's top bots, and comparing every turn.
+- **Classic robots keep working.** Existing Java robot jars run unmodified, and a battle with the same seed plays out turn for turn exactly as in classic Robocode 1.12.0. That is verified by replaying recorded classic battles, including RoboRumble's top bots, and comparing every turn.
 - **The protocol is language-neutral.** Robots can run locally, in a container or on another machine. Today every robot is a Java robot on the classic API; client libraries for other languages (Python, .NET, Rust, C/C++, Kotlin) come after 1.0.
 
 On top of that come a GPU-accelerated desktop viewer, a deterministic mode where the same seed always gives the same battle, and [our own rumble](/docs/rumble) with a modern website and battle replays in the browser.
