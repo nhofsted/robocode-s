@@ -13,7 +13,7 @@ robot.version=1.2
 robot.author.name=Jane Doe
 robot.description=Seesaws back and forth, spins its gun and fires at what it sees
 robot.webpage=https://example.com/myrobot
-robocode.version=1.11.1
+robocode.version=1.12.0
 ```
 
 Classic's packager names the jar `classname_version.jar` (`jd.MyRobot_1.2.jar`), and your build can do the same (Maven's `<finalName>`, Gradle's `archiveFileName`; see [Your first robot](/docs/robot-development/example)).

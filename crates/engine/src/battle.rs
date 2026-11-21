@@ -1151,7 +1151,7 @@ impl Battle {
             b.state = BulletState::HitWall;
             b.frame = 0;
             let owner = b.owner;
-            let info = self.bullet_info(key, false);
+            let info = self.bullet_info(key, None);
             self.robots[owner].add_event(Event::BulletMissed { bullet: info });
         }
     }
@@ -1219,14 +1219,14 @@ impl Battle {
             }
             let heading = self.bullet(key).heading;
             let bearing = normal_relative_angle(heading + PI - self.robots[v].body_heading);
-            let victim_view = self.bullet_info(key, true);
+            let victim_view = self.bullet_info(key, Some(v));
             self.robots[v].add_event(Event::HitByBullet {
                 bearing,
                 bullet: victim_view,
             });
             let name = self.name_for_event(owner, v);
             let energy = self.robots[v].energy;
-            let owner_view = self.bullet_info(key, false);
+            let owner_view = self.bullet_info(key, None);
             self.robots[owner].add_event(Event::BulletHit {
                 name,
                 energy,
@@ -1292,14 +1292,18 @@ impl Battle {
                 b.x = b.last_x;
                 b.y = b.last_y;
             }
-            let (mine, theirs_hidden) =
-                (self.bullet_info(key, false), self.bullet_info(other, true));
+            let (mine, theirs_hidden) = (
+                self.bullet_info(key, None),
+                self.bullet_info(other, Some(owner)),
+            );
             self.robots[owner].add_event(Event::BulletHitBullet {
                 bullet: mine,
                 hit_bullet: theirs_hidden,
             });
-            let (theirs, mine_hidden) =
-                (self.bullet_info(other, false), self.bullet_info(key, true));
+            let (theirs, mine_hidden) = (
+                self.bullet_info(other, None),
+                self.bullet_info(key, Some(other_owner)),
+            );
             self.robots[other_owner].add_event(Event::BulletHitBullet {
                 bullet: theirs,
                 hit_bullet: mine_hidden,
@@ -1308,21 +1312,19 @@ impl Battle {
         }
     }
 
-    /// `BulletPeer.createBullet(hideOwnerName)`.
-    fn bullet_info(&self, key: u64, hide_owner_name: bool) -> BulletInfo {
+    /// `BulletPeer.createBullet()` (`seen_by` is `None`: the bullet as its owner sees it) and
+    /// `createBulletSeenBy(robot)` (another robot's view, where the owner's name is as that
+    /// robot sees it; classic 1.12.0, before which an enemy saw a team robot's real name).
+    fn bullet_info(&self, key: u64, seen_by: Option<usize>) -> BulletInfo {
         let b = self.bullet(key);
         let owner = b.owner;
-        let owner_name = if hide_owner_name {
-            self.bullet_name_for_event(owner, owner)
-        } else {
-            self.robots[owner].setup.name.clone()
+        let owner_name = match seen_by {
+            Some(viewer) => self.name_for_event(viewer, owner),
+            None => self.robots[owner].setup.name.clone(),
         };
-        let victim = b.victim.map(|v| {
-            if hide_owner_name {
-                self.robots[v].setup.name.clone()
-            } else {
-                self.bullet_name_for_event(owner, v)
-            }
+        let victim = b.victim.map(|v| match seen_by {
+            Some(_) => self.robots[v].setup.name.clone(),
+            None => self.bullet_name_for_event(owner, v),
         });
         BulletInfo {
             id: b.id,

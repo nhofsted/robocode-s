@@ -20,9 +20,9 @@ import java.io.IOException;
 
 /**
  * Classic's thread manager with 1.11.1's {@link #createRobotFileStream}, which opens a
- * robot's {@code RobocodeFileOutputStream}: 1.11.2 added a check there, outside its
- * security switch, that the file is directly in the robot's data folder, and punishes the
- * robot otherwise (ADR 0027). That changes battles: cf.RiO.RiOx 4.2.1 and hadur2.Hadur 3.12
+ * robot's {@code RobocodeFileOutputStream}: 1.11.2 added a check there (1.12.0 keeps it),
+ * outside its security switch, that the file is directly in the robot's data folder, and
+ * punishes the robot otherwise (ADR 0027). That changes battles: cf.RiO.RiOx 4.2.1 and hadur2.Hadur 3.12
  * write {@code getDataDirectory() + "\\" + name}, which is in the data folder on Windows
  * and beside it elsewhere, so 1.11.2 would disable them on Linux and macOS only. Until ADR
  * 0027 decides robots' file rules for every platform alike, robots write as with 1.11.1,
