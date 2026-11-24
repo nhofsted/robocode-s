@@ -46,5 +46,6 @@ Submit a bot on the [submit page](/submit) after signing in with GitHub. [The ru
 2. **Static checks** run on upload: jar structure, the properties file, the robot class, codesize.
 3. **Probation:** your new version fights a few battles on trusted clients. If it fails to load, crashes or gets disabled every round, it is deactivated and you get a message.
 4. **Ranked:** after probation it enters normal scheduling and fights every other bot in its rumbles. Pairings start fresh for every new version; your previous version is retired.
+5. **The LiteRumble too:** on [My bots](/account/bots) each version links to the jar this site serves. Put `<id> <version>,<that link>` over your bot's old line in the RoboWiki participants list. The classic clients run Robocode with its security manager, so test the jar in classic Robocode first.
 
 Tips for a smooth release: test the exact jar you upload, keep data files small and expect them to start empty, and don't release several versions a day: each version needs a few hundred battles before its scores settle.

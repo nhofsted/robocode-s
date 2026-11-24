@@ -43,11 +43,15 @@ export interface BotVersionInfo {
 	version: string;
 	vid: number;
 	state: VersionState;
+	/** SHA-256 of the jar, hex: this site serves it at `/jars/<sha256>.jar`. */
+	sha256: string;
+	size?: number;
 	codesize?: number;
 	weightClass?: string;
 	created?: string;
 	/** Probation progress: battles run and failed. */
-	probation?: { battles: number; failed: number };
+	probationBattles?: number;
+	probationFailures?: number;
 	/** Why a version failed: the clients' failure details. */
 	failures?: string[];
 }

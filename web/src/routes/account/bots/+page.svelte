@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import SignInPrompt from '#lib/components/SignInPrompt.svelte';
 	import { ApiError, getMyBots, retireBot, type BotInfo, type VersionState } from '#lib/api.ts';
-	import { CLASS_NAMES, formatCount, formatDate } from '#lib/rumble/format.ts';
+	import { CLASS_NAMES, formatCount, formatDate, jarFileName, jarHref } from '#lib/rumble/format.ts';
 	import type { WeightClass } from '#lib/rumble/types.ts';
 	import { session } from '#lib/session.svelte.ts';
 
@@ -92,12 +92,14 @@
 						<tbody>
 							{#each bot.versions as v (v.vid)}
 								<tr>
-									<td class="mono">{v.version}</td>
+									<td class="mono">
+										<a href={jarHref(v.sha256)} download={jarFileName(bot.id, v.version)} title="The jar: copy its link for the RoboWiki participants list">{v.version}</a>
+									</td>
 									<td>
 										<span class="state {v.state}" title={STATES[v.state]}>{v.state}</span>
-										{#if v.probation}
+										{#if v.state === 'probation'}
 											<span class="muted small">
-												{v.probation.battles} battles, {v.probation.failed} failed
+												{v.probationBattles ?? 0} battles, {v.probationFailures ?? 0} failed
 											</span>
 										{/if}
 									</td>
