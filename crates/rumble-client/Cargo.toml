@@ -27,3 +27,4 @@ robocode-s-replay.workspace = true
 robocode-s-runner.workspace = true
 robocode-s-server.workspace = true
 prost = "0.14.4"
+log = "0.4.29"

@@ -182,6 +182,43 @@ pub fn line(text: &str) {
     let _ = file.write_all(out.as_bytes());
 }
 
+/// How many `log` records [`forward_log_records`] writes before it stops.
+const MAX_RECORDS: u32 = 500;
+
+/// Writes the warnings and errors of the `log` crate (wgpu, egui, winit report problems
+/// there: a lost GPU device says why) to the log file, at most [`MAX_RECORDS`] of them.
+pub fn forward_log_records() {
+    struct Forward(std::sync::atomic::AtomicU32);
+    impl ::log::Log for Forward {
+        fn enabled(&self, metadata: &::log::Metadata) -> bool {
+            metadata.level() <= ::log::Level::Warn
+        }
+        fn log(&self, record: &::log::Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let n = self.0.fetch_add(1, Ordering::Relaxed);
+            if n < MAX_RECORDS {
+                line(&format!(
+                    "{} {}: {}",
+                    record.level(),
+                    record.target(),
+                    record.args()
+                ));
+            } else if n == MAX_RECORDS {
+                line(&format!(
+                    "{MAX_RECORDS} log records written: the rest are dropped"
+                ));
+            }
+        }
+        fn flush(&self) {}
+    }
+    static FORWARD: Forward = Forward(std::sync::atomic::AtomicU32::new(0));
+    if ::log::set_logger(&FORWARD).is_ok() {
+        ::log::set_max_level(::log::LevelFilter::Warn);
+    }
+}
+
 /// Notes a normal exit with `code`.
 pub fn exit(code: &str) {
     line(&format!("exited: {code}"));

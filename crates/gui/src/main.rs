@@ -284,6 +284,7 @@ fn main() -> ExitCode {
     // terminal, the Windows build's stderr goes there too: an abort's last words.
     if shot.is_none() {
         rumble_client::log::init("robocode-s-gui");
+        rumble_client::log::forward_log_records();
         #[cfg(windows)]
         console::into_log();
     }

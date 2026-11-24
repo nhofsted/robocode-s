@@ -29,3 +29,9 @@ unsafe_code = "deny"
 
 [workspace.lints.clippy]
 float_cmp = "allow"  # bit-exact comparisons are intentional in this project
+
+# wgpu-hal 30.0.1 with one fix (vendor/README.md): on Windows the NVIDIA Vulkan driver
+# returns swapchain errors wgpu doesn't expect, and wgpu then loses the whole device, which
+# egui-wgpu can't survive. Drop this when an upstream release has the fix.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }
