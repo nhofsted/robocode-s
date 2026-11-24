@@ -2,8 +2,6 @@
 // cookie session, JSON, the body hash CloudFront's origin needs on every POST (§5.1) and the
 // error body mapped to ApiError. Base URL: VITE_RUMBLE_API, default /api/v1.
 
-import type { Division } from './rumble/types.ts';
-
 export const API_BASE: string = import.meta.env.VITE_RUMBLE_API ?? '/api/v1';
 
 type Fetch = typeof fetch;
@@ -50,7 +48,6 @@ export interface BotVersionInfo {
 	size?: number;
 	codesize?: number;
 	weightClass?: string;
-	divisions?: Division[];
 	created?: string;
 	/** Probation progress: battles run and failed. */
 	probationBattles?: number;
