@@ -2,7 +2,13 @@
 	import { resolve } from '$app/paths';
 	import SignInPrompt from '#lib/components/SignInPrompt.svelte';
 	import { ApiError, getMyBots, retireBot, type BotInfo, type VersionState } from '#lib/api.ts';
-	import { CLASS_NAMES, formatCount, formatDate } from '#lib/rumble/format.ts';
+	import {
+		CLASS_NAMES,
+		PARTICIPANTS_EDIT,
+		formatCount,
+		formatDate,
+		participantLine
+	} from '#lib/rumble/format.ts';
 	import type { WeightClass } from '#lib/rumble/types.ts';
 	import { session } from '#lib/session.svelte.ts';
 
@@ -45,6 +51,28 @@
 		}
 	}
 
+	/** The newest version's line for the RoboWiki lists, and the lists its divisions need. */
+	function wikiLine(bot: BotInfo) {
+		const v = bot.versions[0];
+		if (!v?.sha256 || bot.state === 'retired' || bot.state === 'removed') return undefined;
+		const lists = (v.divisions ?? ['1v1']).flatMap((d) => PARTICIPANTS_EDIT[d] ?? []);
+		return { line: participantLine(bot.id, v.version, v.sha256, location.origin), lists };
+	}
+
+	let copied = $state('');
+	let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+	async function copy(line: string) {
+		try {
+			await navigator.clipboard.writeText(line);
+			copied = line;
+			clearTimeout(copyTimer);
+			copyTimer = setTimeout(() => (copied = ''), 2000);
+		} catch {
+			problem = 'Could not copy: select the line and copy it by hand.';
+		}
+	}
+
 	const weight = (w: string | undefined) => (w && w in CLASS_NAMES ? CLASS_NAMES[w as WeightClass] : (w ?? ''));
 </script>
 
@@ -70,6 +98,7 @@
 		{/if}
 
 		{#each bots ?? [] as bot (bot.id)}
+			{@const wiki = wikiLine(bot)}
 			<section class="panel bot">
 				<header>
 					<h2>
@@ -95,9 +124,9 @@
 									<td class="mono">{v.version}</td>
 									<td>
 										<span class="state {v.state}" title={STATES[v.state]}>{v.state}</span>
-										{#if v.probation}
+										{#if v.state === 'probation'}
 											<span class="muted small">
-												{v.probation.battles} battles, {v.probation.failed} failed
+												{v.probationBattles ?? 0} battles, {v.probationFailures ?? 0} failed
 											</span>
 										{/if}
 									</td>
@@ -120,6 +149,25 @@
 						</tbody>
 					</table>
 				</div>
+				{#if wiki}
+					<div class="wiki">
+						<p class="muted small-text">
+							Line for the RoboWiki list{wiki.lists.length > 1 ? 's' : ''}
+							{#each wiki.lists as list, i (list.href)}{i > 0 ? ' and ' : ' '}<a
+									href={list.href}
+									target="_blank"
+									rel="noopener">{list.name}</a
+								>{/each}
+							(replace the bot's old line; version {bot.versions[0].version}):
+						</p>
+						<div class="line">
+							<input type="text" readonly value={wiki.line} aria-label="Participants line" onfocus={(e) => e.currentTarget.select()} />
+							<button class="button secondary" onclick={() => copy(wiki.line)}>
+								{copied === wiki.line ? 'Copied' : 'Copy'}
+							</button>
+						</div>
+					</div>
+				{/if}
 			</section>
 		{/each}
 	{/if}
@@ -178,5 +226,22 @@
 	}
 	.error {
 		color: var(--danger);
+	}
+	.wiki {
+		margin-top: 0.9rem;
+	}
+	.small-text {
+		font-size: 0.85rem;
+		margin: 0 0 0.4rem;
+	}
+	.line {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.line input {
+		flex: 1;
+		min-width: 0;
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
 	}
 </style>

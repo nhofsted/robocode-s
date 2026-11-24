@@ -5,6 +5,7 @@ import {
 	formatNumber,
 	nextPublish,
 	packageName,
+	participantLine,
 	rumbleName,
 	shortName,
 	updateTimes
@@ -67,5 +68,13 @@ describe('formatting', () => {
 		expect(shortName('jk.mega.DrussGT')).toBe('DrussGT');
 		expect(packageName('jk.mega.DrussGT')).toBe('jk.mega');
 		expect(packageName('Lonely')).toBe('');
+	});
+});
+
+describe('participant line', () => {
+	it('is the wiki list line for the jar this site serves', () => {
+		expect(participantLine('fnh.mega.DumDum', '1.2.1', 'ab12', 'https://rumble.planethofstede.be')).toBe(
+			'fnh.mega.DumDum 1.2.1,https://rumble.planethofstede.be/jars/ab12.jar'
+		);
 	});
 });

@@ -151,3 +151,22 @@ export function formatBytes(bytes: number): string {
 /** Where a version's jar is served (same origin), and the name a download is saved under. */
 export const jarHref = (sha256: string): string => `/jars/${sha256}.jar`;
 export const jarFileName = (id: BotId, version: string): string => `${id}_${version}.jar`;
+
+/**
+ * A version's line for the RoboWiki participants lists, which the LiteRumble and this rumble's
+ * sync read: `<id> <version>,<jar url>`. `origin` is this site's, e.g. `https://rumble.planethofstede.be`.
+ */
+export const participantLine = (id: BotId, version: string, sha256: string, origin: string): string =>
+	`${id} ${version},${origin}${jarHref(sha256)}`;
+
+/** The RoboWiki participants list of each division that has one, opened for editing. */
+export const PARTICIPANTS_EDIT: Partial<Record<Division, { name: string; href: string }>> = {
+	'1v1': {
+		name: 'RoboRumble/Participants',
+		href: 'https://robowiki.net/w/index.php?title=RoboRumble/Participants&action=edit'
+	},
+	melee: {
+		name: 'RoboRumble/Participants/Melee',
+		href: 'https://robowiki.net/w/index.php?title=RoboRumble/Participants/Melee&action=edit'
+	}
+};
