@@ -32,13 +32,28 @@
 	}
 
 	let search = $state('');
+	/** The bot the search names: its full id, or else the one bot whose id or short name matches (any case). */
+	function lookup(text: string): number | undefined {
+		const exact = indexOf.get(text);
+		if (exact !== undefined || text === '') return exact;
+		const lower = text.toLowerCase();
+		const hits = bots.flatMap((b, i) =>
+			b.id.toLowerCase() === lower || shortName(b.id).toLowerCase() === lower ? [i] : []
+		);
+		return hits.length === 1 ? hits[0] : undefined;
+	}
+	function show(i: number | undefined) {
+		if (i === undefined) return;
+		select(i);
+		search = '';
+	}
 	function find(event: SubmitEvent) {
 		event.preventDefault();
-		const i = indexOf.get(search.trim());
-		if (i !== undefined) {
-			select(i);
-			search = '';
-		}
+		show(lookup(search.trim()));
+	}
+	// Picking from the suggestions fills in a full id: show that bot straight away, no Enter needed.
+	function oninput(event: Event & { currentTarget: HTMLInputElement }) {
+		show(indexOf.get(event.currentTarget.value.trim()));
 	}
 
 	const chosen = $derived(selected === null ? null : bots[selected]);
@@ -83,7 +98,7 @@
 			<form class="search" onsubmit={find}>
 				<label>
 					<span class="visually-hidden">Find a bot</span>
-					<input type="search" list="map-bots" placeholder="Find a bot" bind:value={search} />
+					<input type="search" list="map-bots" placeholder="Find a bot" bind:value={search} {oninput} />
 				</label>
 				<datalist id="map-bots">
 					{#each bots as b (b.id)}<option value={b.id}></option>{/each}

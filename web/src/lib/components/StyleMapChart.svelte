@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The style map (types.ts `StyleMap`): one dot per bot, coloured by APS on a one-hue ramp
-	// (dim: weak, bright: strong). Hover finds the nearest dot within reach and shows a tooltip;
+	// The style map (types.ts `StyleMap`): one dot per bot, opaque, coloured by APS on a
+	// viridis-like ramp (dark indigo: weak, bright yellow: strong). Hover finds the nearest dot within reach and shows a tooltip;
 	// clicking selects it, and the selected bot is joined to its true nearest neighbours (by
 	// style distance, which the layout only approximates). Wheel or pinch zooms around the
 	// pointer, dragging pans, double-click resets. Dots keep their screen size when zooming.
@@ -41,10 +41,19 @@
 		const at = (q: number) => values[Math.min(values.length - 1, Math.floor(q * values.length))] ?? 0;
 		return [at(0.05), at(0.95)] as const;
 	});
-	/** Dim to bright in one hue; `t` 0..1. */
+	/**
+	 * Dim to bright; `t` 0..1. A viridis-like ramp built in OKLCH: lightness climbs evenly from
+	 * 0.36 (still clear of the panel) to 0.93 while the hue turns from indigo through teal and
+	 * green to yellow, so neighbouring strengths differ in hue as well as lightness. Lightness
+	 * alone still orders it, for colour-blind readers too. Dots are opaque: an overlap never
+	 * looks brighter than the dots it is made of.
+	 */
 	function ramp(t: number): string {
 		const c = Math.max(0, Math.min(1, t));
-		return `color-mix(in oklab, #24477a ${((1 - c) * 100).toFixed(1)}%, #b6dbff)`;
+		const l = 0.36 + 0.57 * c;
+		const chroma = 0.13 + 0.05 * c;
+		const hue = 280 - 175 * c;
+		return `oklch(${l.toFixed(3)} ${chroma.toFixed(3)} ${hue.toFixed(1)})`;
 	}
 	const color = (id: string) => {
 		const [lo, hi] = apsRange;
@@ -52,9 +61,18 @@
 		return ramp(hi > lo ? (aps - lo) / (hi - lo) : 0.5);
 	};
 
-	// Draw order: weaker first, so the strong bots' dots end up on top.
+	// Draw order: a stable shuffle (by a hash of the id), unrelated to strength. Drawing the
+	// strong bots last made every clump show its strongest member and look stronger than it is.
+	function hash(id: string): number {
+		let h = 2166136261;
+		for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+		return h >>> 0;
+	}
 	const order = $derived(
-		bots.map((_, i) => i).sort((a, b) => (info.get(bots[a].id)?.aps ?? 0) - (info.get(bots[b].id)?.aps ?? 0))
+		bots
+			.map((b, i) => ({ i, h: hash(b.id) }))
+			.sort((a, b) => a.h - b.h)
+			.map((e) => e.i)
 	);
 	const neighbours = $derived(selected === null ? [] : bots[selected].near.map(([j]) => j));
 
@@ -203,7 +221,9 @@
 			{@const x = sx(b.x)}
 			{@const y = sy(b.y)}
 			{#if visible(x, y)}
-				<circle cx={x} cy={y} r={3.5} fill={color(b.id)} class:dim={selected !== null && i !== selected && !neighbours.includes(i)} />
+				{@const dim = selected !== null && i !== selected && !neighbours.includes(i)}
+				<!-- Dimmed by mixing toward the panel, not by opacity: dots stay opaque, overlaps don't blend. -->
+				<circle cx={x} cy={y} r={3.5} style:fill={dim ? `color-mix(in oklab, ${color(b.id)} 45%, var(--panel))` : color(b.id)} />
 			{/if}
 		{/each}
 		{#if selected !== null}
@@ -256,9 +276,6 @@
 	circle {
 		stroke: var(--panel);
 		stroke-width: 1;
-	}
-	circle.dim {
-		opacity: 0.55;
 	}
 	.link {
 		stroke: var(--amber);
